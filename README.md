@@ -1,36 +1,385 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SimGritty
+
+Real-time voice-based de-escalation training simulator for clinical communication skills. Trainees practice managing difficult conversations with AI-driven simulated patients that respond dynamically to tone, technique, and emotional delivery.
+
+Built with Next.js 16, OpenAI Realtime API (WebRTC), and Supabase.
+
+## Features
+
+- **Live voice simulation** — speak to an AI patient via WebRTC; the patient responds in real time with emotionally adaptive voice
+- **Escalation engine** — 10-level state machine tracks trust, anger, frustration, and willingness to listen across every turn
+- **Dual classifier pipeline** — assesses trainee communication technique (effectiveness -1.0 to +1.0) and patient state shifts independently
+- **AI clinician bot** — press "De-escalate" to hand off to an expert bot that models best practice, then take back over
+- **Session forking** — restart from any turn in a completed session to try a different approach
+- **Performance scoring** — 0-100 score (A+ to F) based on de-escalation, speed, independence, and stability
+- **Scenario builder** — 16 personality trait dials, voice configuration, escalation rules, and archetype presets
+- **Review & reflection** — rich escalation timeline, annotated transcript, event log, and educator notes
+- **Organisation governance** — ceiling caps, consent gates, content warnings, session duration limits
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Next.js App Router                        │
+│                                                                   │
+│  /simulation/[id]          /review/[id]          /dashboard       │
+│  ┌──────────────┐    ┌──────────────────┐    ┌────────────────┐  │
+│  │ Live session  │    │ Transcript +     │    │ Scenarios +    │  │
+│  │ Waveform +    │    │ Timeline +       │    │ Sessions       │  │
+│  │ Controls      │    │ Score + Notes    │    │                │  │
+│  └──────┬───────┘    └────────┬─────────┘    └────────────────┘  │
+│         │                     │                                   │
+├─────────┼─────────────────────┼───────────────────────────────────┤
+│         │    API Routes       │                                   │
+│  /api/realtime/session   /api/classify   /api/deescalate         │
+│  /api/sessions/*         /api/scenarios/*  /api/voice-profile/*   │
+├─────────┼─────────────────────┼───────────────────────────────────┤
+│         │    Engine Layer      │                                   │
+│  ┌──────┴──────┐  ┌──────────┴───────┐  ┌────────────────────┐  │
+│  │ Escalation   │  │ Classifier       │  │ Prompt Builder     │  │
+│  │ Engine       │  │ Pipeline         │  │ (4-layer system)   │  │
+│  └──────────────┘  └──────────────────┘  └────────────────────┘  │
+│                                                                   │
+├───────────────────────────────────────────────────────────────────┤
+│  OpenAI Realtime API (WebRTC)    │    Supabase (Auth + Postgres)  │
+│  - gpt-realtime-1.5 (patient)    │    - 11 tables                 │
+│  - cedar voice (clinician)       │    - Row-level security        │
+│  - gpt-5.4-mini (classifier)    │    - Session management        │
+└──────────────────────────────────┴────────────────────────────────┘
+```
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js 20+
+- A [Supabase](https://supabase.com) project with the schema applied (see [Database Setup](#database-setup))
+- An [OpenAI](https://platform.openai.com) API key with access to Realtime API
+
+### Installation
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/martins-gs/simgritty.git
+cd simgritty
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Environment Variables
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Copy the example and fill in your keys:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cp .env.local.example .env.local
+```
 
-## Learn More
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Your Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anonymous/public key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase service role key (server-side only) |
+| `OPENAI_API_KEY` | Yes | OpenAI API key |
+| `OPENAI_CLASSIFIER_MODEL` | No | Classification model (default: `gpt-5.4-mini`) |
+| `OPENAI_VOICE_PROFILE_MODEL` | No | Voice profile generation model (default: `gpt-5.4-mini`) |
+| `OPENAI_REALTIME_MODEL` | No | Realtime voice model (default: `gpt-realtime-1.5`) |
+| `OPENAI_REALTIME_DEFAULT_VOICE` | No | Default patient voice (default: `marin`) |
 
-To learn more about Next.js, take a look at the following resources:
+### Running
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run dev       # development (Turbopack)
+npm run build     # production build
+npm run start     # production server
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Open [http://localhost:3000](http://localhost:3000).
 
-## Deploy on Vercel
+## Database Setup
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+SimGritty uses Supabase Postgres. Apply migrations from `supabase/migrations/` or create the following tables:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Tables
+
+| Table | Purpose |
+|-------|---------|
+| `organizations` | Multi-tenant org entity |
+| `org_settings` | Governance: ceiling caps, consent gates, session duration limits |
+| `user_profiles` | User accounts linked to org + role (admin/educator/trainee) |
+| `scenario_templates` | Scenario metadata: title, setting, roles, backstory, difficulty |
+| `scenario_traits` | 16 personality dials per scenario (0-10 each) |
+| `scenario_voice_config` | Voice parameters: voice name, speaking rate, expressiveness, pause/interruption styles |
+| `escalation_rules` | Initial level, ceiling, auto-end threshold, custom triggers |
+| `simulation_sessions` | Individual runs with scenario snapshot, escalation tracking, fork lineage |
+| `transcript_turns` | Each utterance with classifier result, state snapshot, voice profile |
+| `simulation_state_events` | All state changes: escalation, de-escalation, ceiling, session lifecycle |
+| `educator_notes` | Post-session feedback anchored to specific turns |
+
+### Key Schema Details
+
+**`scenario_traits`** — 16 numeric dials (0-10):
+emotional_intensity, hostility, frustration, impatience, trust, willingness_to_listen, sarcasm, bias_intensity, volatility, boundary_respect, coherence, repetition, entitlement, interruption_likelihood, escalation_tendency, plus bias_category (string).
+
+**`simulation_sessions`** supports forking:
+- `forked_from_session_id` / `forked_from_turn_index` — restart from a specific turn
+- `scenario_snapshot` (JSONB) — entire scenario frozen at session creation
+- `peak_escalation_level` / `final_escalation_level` — tracked for scoring
+
+**`transcript_turns`** stores per-turn snapshots:
+- `classifier_result` (JSONB) — `{technique, effectiveness, tags, confidence, reasoning}`
+- `state_after` (JSONB) — full `EscalationState` after this turn
+- `patient_voice_profile_after` (JSONB) — voice delivery profile for the next patient response
+- `patient_prompt_after` — the regenerated 4-layer system prompt
+
+## Project Structure
+
+```
+src/
+├── app/                          # Next.js App Router
+│   ├── page.tsx                  # Home → redirects to dashboard or login
+│   ├── auth/
+│   │   ├── login/page.tsx        # Email/password login
+│   │   ├── signup/page.tsx       # Registration
+│   │   └── callback/route.ts     # OAuth code exchange
+│   ├── dashboard/page.tsx        # Scenarios + recent sessions
+│   ├── scenarios/
+│   │   ├── page.tsx              # Scenario list with search/filter
+│   │   ├── new/page.tsx          # Create scenario
+│   │   └── [id]/
+│   │       ├── page.tsx          # Edit scenario (traits, voice, rules)
+│   │       └── briefing/page.tsx # Pre-simulation consent + briefing
+│   ├── simulation/
+│   │   └── [sessionId]/page.tsx  # Live simulation (WebRTC + controls)
+│   ├── review/
+│   │   └── [sessionId]/page.tsx  # Post-session review + scoring
+│   ├── settings/page.tsx         # Organisation governance
+│   └── api/                      # API routes (see below)
+│
+├── components/
+│   ├── layout/                   # AppShell, Sidebar, TopBar
+│   ├── simulation/               # Waveform, LiveTranscript, EscalationMeter, ConsentGate, ExitButton
+│   ├── scenarios/                # ScenarioForm, TraitDialPanel, VoiceConfigPanel, ArchetypeSelector
+│   ├── review/                   # TranscriptViewer, EscalationTimeline, EventLog, ScoreCard, EducatorNotes
+│   ├── governance/               # OrgSettingsForm
+│   └── ui/                       # shadcn/ui v4 primitives
+│
+├── hooks/
+│   ├── useRealtimeSession.ts     # WebRTC peer connection, VAD, mic gating, transcripts
+│   └── useRealtimeVoiceRenderer.ts # Independent WebRTC for clinician bot voice
+│
+├── lib/
+│   ├── engine/
+│   │   ├── escalationEngine.ts   # 10-level state machine with trust/anger/frustration dynamics
+│   │   ├── classifierPipeline.ts # Dual classifier: trainee technique + patient state assessment
+│   │   ├── promptBuilder.ts      # 4-layer system prompt (immutable, state, memory, voice)
+│   │   ├── clinicianVoiceBuilder.ts # Bot clinician voice instructions
+│   │   ├── scoring.ts            # Performance scoring algorithm (0-100)
+│   │   └── archetypePresets.ts   # Pre-built scenario templates
+│   ├── openai/
+│   │   ├── client.ts             # OpenAI SDK singleton
+│   │   └── structuredVoice.ts    # LLM-generated voice profiles + clinician turns
+│   ├── voice/
+│   │   └── renderVoiceProfile.ts # Voice profile → prompt text formatters
+│   ├── supabase/
+│   │   ├── server.ts             # Server-side Supabase client
+│   │   ├── client.ts             # Browser-side Supabase client
+│   │   └── middleware.ts         # Auth session refresh middleware
+│   └── utils.ts                  # cn() utility
+│
+├── store/
+│   ├── simulationStore.ts        # Live simulation state (Zustand)
+│   ├── scenarioStore.ts          # Scenario form state
+│   └── appStore.ts               # User profile, navigation
+│
+├── types/
+│   ├── scenario.ts               # ScenarioTraits, VoiceConfig, EscalationRules, Difficulty
+│   ├── escalation.ts             # EscalationState, EscalationDelta, ESCALATION_LABELS
+│   ├── simulation.ts             # Session, TranscriptTurn, ClassifierResult, StateEvent
+│   ├── voice.ts                  # StructuredVoiceProfile, StructuredClinicianTurn
+│   └── governance.ts             # OrgSettings, UserRole, UserProfile
+│
+└── middleware.ts                  # Route protection + session refresh
+```
+
+## API Routes
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| POST | `/api/realtime/session` | Create ephemeral OpenAI Realtime token (WebRTC) |
+| POST | `/api/classify` | Classify utterance → effectiveness score (-1.0 to +1.0) |
+| POST | `/api/deescalate` | Generate bot clinician turn + voice profile |
+| POST | `/api/voice-profile/patient` | Generate structured patient voice profile |
+| POST | `/api/tts` | Text-to-speech fallback (clinician audio) |
+| GET/POST | `/api/scenarios` | List / create scenarios |
+| GET/PUT/DELETE | `/api/scenarios/[id]` | Read / update / delete scenario (cascade) |
+| POST | `/api/scenarios/[id]/publish` | Publish scenario (draft → published) |
+| POST | `/api/sessions` | Create session from scenario |
+| GET | `/api/sessions/[id]` | Get session details |
+| POST | `/api/sessions/[id]/start` | Mark session active, record consent |
+| POST | `/api/sessions/[id]/end` | End session, record final/peak escalation |
+| DELETE | `/api/sessions/[id]/delete` | Permanently delete session + child records |
+| GET/POST | `/api/sessions/[id]/transcript` | Get / append transcript turns |
+| GET/POST | `/api/sessions/[id]/events` | Get / append state events |
+| POST | `/api/sessions/[id]/fork` | Fork session from a specific turn |
+| GET/POST | `/api/sessions/[id]/educator-notes` | Get / create educator notes |
+| GET | `/api/sessions/recent` | User's recent sessions |
+| PUT | `/api/org-settings` | Update organisation governance |
+
+## Escalation Engine
+
+The escalation engine is a 10-level state machine that tracks multiple dimensions simultaneously:
+
+### State
+
+| Metric | Range | Description |
+|--------|-------|-------------|
+| `level` | 1-10 | Current escalation (1 = calm, 10 = crisis) |
+| `trust` | 0-10 | Patient's trust in the clinician |
+| `willingness_to_listen` | 0-10 | Openness to hearing the clinician |
+| `anger` | 0-10 | Current anger intensity |
+| `frustration` | 0-10 | Accumulated frustration |
+| `boundary_respect` | 0-10 | Respect for stated limits |
+
+### Labels
+
+| Level | Label |
+|-------|-------|
+| 1 | Calm but concerned |
+| 2 | Guarded |
+| 3 | Irritated |
+| 4 | Frustrated |
+| 5 | Confrontational |
+| 6 | Accusatory |
+| 7 | Hostile |
+| 8 | Verbally abusive |
+| 9 | Threatening |
+| 10 | Severe loss of control |
+
+### Classification
+
+Each trainee utterance is classified for effectiveness:
+
+**Escalating behaviours** (negative effectiveness):
+- Dismissive language (-0.5 to -1.0)
+- Telling someone to "calm down" badly (-0.3 to -0.7)
+- Patronising tone (-0.4 to -0.8)
+- Perceived blame (-0.5 to -0.9)
+- Ignoring emotions (-0.3 to -0.7)
+
+**De-escalating behaviours** (positive effectiveness):
+- Reflective listening (+0.4 to +0.8)
+- Naming the emotion (+0.4 to +0.7)
+- Acknowledgement of distress (+0.3 to +0.7)
+- Concrete next step (+0.3 to +0.6)
+- Calm boundary setting (+0.3 to +0.6)
+
+### Level Change Rules
+
+- **Escalation**: effectiveness < -0.15 → +1 to +3 level jump, amplified by volatility, anger reactivity, and impatience
+- **De-escalation**: effectiveness > +0.15 → -1 to -2 level drop, dampened by low trust and high anger
+- **Clinician dampening**: bot clinician effectiveness is dampened (×0.5) so it can't instantly solve things
+- **Minimum recovery threshold**: any recovery ≥ 0.2 produces at least -1 level change (prevents round-to-zero deadlocks)
+- **Auto-end**: if level reaches the auto-end threshold, the simulation ends automatically
+
+## Scoring System
+
+Post-session performance is scored 0-100 across four dimensions:
+
+| Component | Points | Measures |
+|-----------|--------|----------|
+| De-escalation | 0-40 | How much the level dropped from peak to final |
+| Speed | 0-25 | Turns-per-level-drop efficiency |
+| Independence | 0-25 | Handling the situation without the AI clinician bot |
+| Stability | 0-10 | Avoiding wild swings and re-escalation after progress |
+
+**Grades**: A+ (90+), A (80+), B (70+), C (60+), D (50+), F (below 50)
+
+**Penalties**: instant exit (-10 de-escalation), hitting ceiling (-15 de-escalation), sessions over 30 turns (-5 speed), over 50 turns (-10 speed)
+
+## Prompt Architecture
+
+The patient's system prompt is built in four layers:
+
+1. **Immutable system rules** — stay in character, British English, 1-2 sentences max, respect escalation ceiling, never break character
+2. **State layer** — scenario metadata, current escalation state values, trait-driven behaviour lookup table (what the patient does at each escalation level)
+3. **Memory layer** — last 20 transcript turns (or "start conversation naturally" for the first turn)
+4. **Voice layer** — structured 7-field delivery profile (accent, tone, pacing, emotion, delivery, variety, voice affect) generated by LLM or derived from scenario config
+
+The prompt is regenerated after every trainee turn to reflect the new escalation state and voice profile.
+
+## AI Clinician Bot
+
+When the trainee presses "De-escalate", an expert AI clinician takes over:
+
+1. Trainee mic is muted, VAD turn detection disabled
+2. Bot generates a response via `/api/deescalate` (LLM-structured output: text + technique + voice profile)
+3. Clinician speaks via an independent WebRTC Realtime connection (cedar voice) or TTS fallback
+4. Patient responds naturally; bot classifies the patient's response and prepares the next turn
+5. Bot loops until the trainee clicks "Take over"
+
+The clinician prompt includes **conversation progression rules** to prevent repetitive responses:
+- Never repeat a commitment already given
+- If a check was promised, deliver concrete results on the next turn
+- Progress through stages: validate → deliver info → address follow-ups → agree plan
+- May synthesise plausible clinical details (ward names, timelines, blockers) for realism
+
+## Voice System
+
+### Patient Voice
+
+The patient's voice is configured per-scenario:
+- **Voice name**: OpenAI Realtime voices (marin, alloy, onyx, shimmer, nova, echo, fable, juniper, sage)
+- **Speaking rate**: 0.5-2.0
+- **Expressiveness, anger expression, sarcasm expression**: 0-10
+- **Pause style**: natural / short_clipped / long_dramatic / minimal
+- **Interruption style**: none / occasional / frequent / aggressive
+
+A **structured voice profile** is regenerated by LLM after each turn to reflect the patient's evolving emotional state. This 7-field profile (accent, voiceAffect, tone, pacing, emotion, delivery, variety) is injected into the Realtime session instructions.
+
+### Clinician Voice
+
+The bot clinician uses the `cedar` voice via an independent WebRTC connection. Each turn generates a voice profile describing how the clinician should sound (calm, firm, warm, etc.) based on the patient's current state.
+
+## WebRTC & Microphone Management
+
+The simulation uses two independent WebRTC connections:
+
+1. **Patient session** (`useRealtimeSession`) — bidirectional audio; trainee speaks, patient responds
+2. **Clinician renderer** (`useRealtimeVoiceRenderer`) — one-way; bot clinician text → speech
+
+### Echo Prevention
+
+- Mic track is **disabled** while the patient is speaking (prevents audio feedback loop)
+- Mic is **ungated** 200ms after playback completes (grace period for echo tail)
+- On bot takeover, the patient's in-flight response is cancelled and audio buffer cleared so the gate releases immediately
+
+### Turn Detection
+
+Server-side VAD (voice activity detection):
+- Threshold: 0.55
+- Prefix padding: 300ms
+- Silence duration: 320ms
+- Interrupt response: disabled (patient finishes speaking before trainee can interrupt)
+
+## Session Forking
+
+From the review page, select any turn and click "Restart From Selected Turn" to create a forked session:
+
+- The new session inherits the conversation history up to the selected turn
+- Engine state, voice profile, and patient prompt are restored from the turn's snapshot
+- Fork lineage is tracked via `forked_from_session_id` and `branch_depth`
+- Inherited turns appear in the transcript but are read-only
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16.2.1 (App Router, Turbopack) |
+| Language | TypeScript 5, React 19 |
+| Styling | Tailwind CSS 4, shadcn/ui v4 |
+| State | Zustand 5 |
+| Validation | Zod 4 |
+| Charts | Recharts 3 |
+| Auth & DB | Supabase (Auth + Postgres + SSR) |
+| AI | OpenAI Realtime API (WebRTC), gpt-5.4-mini, gpt-4o-mini-tts |
+| Voice | OpenAI Realtime voices + structured voice profiles |
+| Notifications | Sonner |
+| Icons | Lucide React |
