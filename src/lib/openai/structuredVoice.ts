@@ -51,6 +51,7 @@ interface PatientVoiceProfileInput {
   voiceConfig: ScenarioVoiceConfig;
   currentState: EscalationState;
   recentTurns: { speaker: string; content: string }[];
+  latestClinicianVoiceProfile?: StructuredVoiceProfile | null;
 }
 
 interface ClinicianTurnInput {
@@ -138,6 +139,11 @@ function formatPatientVoiceProfile(profile?: StructuredVoiceProfile | null): str
   return renderVoiceProfileForPrompt(profile);
 }
 
+function formatLatestClinicianVoiceProfile(profile?: StructuredVoiceProfile | null): string {
+  if (!profile) return "No structured clinician voice profile available for the most recent clinician turn.";
+  return renderVoiceProfileForPrompt(profile);
+}
+
 export async function generatePatientVoiceProfile(
   input: PatientVoiceProfileInput
 ): Promise<StructuredVoiceProfile | null> {
@@ -190,7 +196,15 @@ Base voice config:
 Recent turns:
 ${formatRecentTurns(input.recentTurns)}
 
-Create a voice profile for the patient's next spoken turn only.`;
+Latest clinician delivery profile, if the last turn came from the AI clinician:
+${formatLatestClinicianVoiceProfile(input.latestClinicianVoiceProfile)}
+
+Create a voice profile for the patient's next spoken turn only.
+
+Use all available inputs together:
+- the patient's current numeric state
+- the recent dialogue
+- the latest clinician delivery profile, if provided, because the patient may react differently to the same words when they are delivered more softly, more firmly, or more urgently.`;
 
   return requestStructuredOutput<StructuredVoiceProfile>({
     systemPrompt,

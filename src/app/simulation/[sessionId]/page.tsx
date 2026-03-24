@@ -40,6 +40,16 @@ interface PreparedBotTurn {
   voiceProfile: StructuredVoiceProfile | null;
 }
 
+interface BotTurnRequestOptions {
+  patientVoiceProfile?: StructuredVoiceProfile | null;
+  recentTurns?: { speaker: string; content: string }[];
+  signal?: AbortSignal;
+  snapshot?: Record<string, unknown> | null;
+  state?: ReturnType<EscalationEngine["getState"]> | null;
+  seed?: number | null;
+  reason?: string;
+}
+
 export default function SimulationPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const router = useRouter();
@@ -88,6 +98,8 @@ export default function SimulationPage() {
   const clinicianRendererErrorRef = useRef<string | null>(null);
   const pendingBotTurnRef = useRef<Promise<PreparedBotTurn | null> | null>(null);
   const pendingBotTurnRequestRef = useRef(0);
+  const pendingBotTurnSeedRef = useRef<number | null>(null);
+  const lastClinicianVoiceProfileRef = useRef<StructuredVoiceProfile | null>(null);
 
   useEffect(() => { transcriptRef.current = transcriptEntries; }, [transcriptEntries]);
 
@@ -125,7 +137,13 @@ export default function SimulationPage() {
         setEscalationLevel(engine.getLevel());
         peakLevelRef.current = engine.getLevel();
 
-        const instructions = await resolvePatientInstructions(snapshot, engine.getState(), [], abortController.signal)
+        const instructions = await resolvePatientInstructions(
+          snapshot,
+          engine.getState(),
+          [],
+          undefined,
+          abortController.signal
+        )
           ?? buildPatientInstructions(snapshot, engine.getState(), [], patientVoiceProfileRef.current);
 
         const startRes = await fetch(`/api/sessions/${sessionId}/start`, { method: "POST", signal: abortController.signal });
@@ -202,6 +220,7 @@ export default function SimulationPage() {
     snapshot: Record<string, unknown>,
     currentState: ReturnType<EscalationEngine["getState"]>,
     recentTurns: { speaker: string; content: string }[],
+    latestClinicianVoiceProfile?: StructuredVoiceProfile | null,
     signal?: AbortSignal
   ): Promise<StructuredVoiceProfile | null> {
     const { traits, voiceConfig } = getScenarioConfig(snapshot);
@@ -219,6 +238,7 @@ export default function SimulationPage() {
         voiceConfig,
         currentState,
         recentTurns,
+        latestClinicianVoiceProfile,
       }),
       signal,
     }).catch(() => null);
@@ -233,12 +253,19 @@ export default function SimulationPage() {
     snapshot: Record<string, unknown>,
     currentState: ReturnType<EscalationEngine["getState"]>,
     recentTurns: { speaker: string; content: string }[],
+    latestClinicianVoiceProfile?: StructuredVoiceProfile | null,
     signal?: AbortSignal
   ): Promise<string | null> {
     const requestId = patientVoiceRequestRef.current + 1;
     patientVoiceRequestRef.current = requestId;
 
-    const voiceProfile = await fetchPatientVoiceProfile(snapshot, currentState, recentTurns, signal);
+    const voiceProfile = await fetchPatientVoiceProfile(
+      snapshot,
+      currentState,
+      recentTurns,
+      latestClinicianVoiceProfile,
+      signal
+    );
     if (signal?.aborted || requestId !== patientVoiceRequestRef.current) return null;
 
     if (voiceProfile) {
@@ -255,16 +282,18 @@ export default function SimulationPage() {
 
   async function requestBotTurn(
     requestId: number,
-    signal?: AbortSignal
+    options: BotTurnRequestOptions = {}
   ): Promise<PreparedBotTurn | null> {
-    const snapshot = scenarioRef.current;
-    const state = engineRef.current?.getState();
+    const startedAt = performance.now();
+    const snapshot = options.snapshot ?? scenarioRef.current;
+    const state = options.state ?? engineRef.current?.getState();
     if (!snapshot || !state || !botActiveRef.current) return null;
 
-    const recentTurns = transcriptRef.current.slice(-8).map((entry) => ({
+    const recentTurns = options.recentTurns ?? transcriptRef.current.slice(-8).map((entry) => ({
       speaker: entry.speaker,
       content: entry.content,
     }));
+    const patientVoiceProfile = options.patientVoiceProfile ?? patientVoiceProfileRef.current;
 
     const res = await fetch("/api/deescalate", {
       method: "POST",
@@ -276,33 +305,62 @@ export default function SimulationPage() {
         patientRole: snapshot.ai_role,
         clinicianRole: "experienced British NHS clinician",
         escalationState: state,
-        patientVoiceProfile: patientVoiceProfileRef.current,
+        patientVoiceProfile,
       }),
-      signal,
+      signal: options.signal,
     }).catch(() => null);
 
     if (
       !res ||
-      signal?.aborted ||
+      options.signal?.aborted ||
       !botActiveRef.current ||
       requestId !== pendingBotTurnRequestRef.current
     ) {
       return null;
     }
 
-    return await res.json() as PreparedBotTurn;
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => "");
+      console.error(
+        `[Bot] Failed to generate clinician turn request_id=${requestId} status=${res.status}`,
+        errorText
+      );
+      return null;
+    }
+
+    const payload = await res.json().catch(() => null) as Partial<PreparedBotTurn> | null;
+    if (!payload || typeof payload.text !== "string" || payload.text.trim().length === 0) {
+      console.error(`[Bot] Invalid clinician turn payload request_id=${requestId}`, payload);
+      return null;
+    }
+
+    const preparedTurn: PreparedBotTurn = {
+      text: payload.text,
+      technique: typeof payload.technique === "string" && payload.technique.trim().length > 0
+        ? payload.technique
+        : "general de-escalation",
+      voiceProfile: payload.voiceProfile ?? null,
+    };
+    console.info(
+      `[Bot] Clinician turn ready request_id=${requestId} reason=${options.reason || "unspecified"} seed=${options.seed ?? "none"} elapsed_ms=${Math.round(performance.now() - startedAt)}`
+    );
+    return preparedTurn;
   }
 
-  function prefetchNextBotTurn(signal?: AbortSignal) {
+  function prefetchNextBotTurn(options: BotTurnRequestOptions = {}) {
     const requestId = pendingBotTurnRequestRef.current + 1;
     pendingBotTurnRequestRef.current = requestId;
-    console.info(`[Bot] Prefetching clinician turn request_id=${requestId}`);
-    pendingBotTurnRef.current = requestBotTurn(requestId, signal);
+    pendingBotTurnSeedRef.current = options.seed ?? null;
+    console.info(
+      `[Bot] Prefetching clinician turn request_id=${requestId} reason=${options.reason || "unspecified"} seed=${options.seed ?? "none"}`
+    );
+    pendingBotTurnRef.current = requestBotTurn(requestId, options);
   }
 
   async function consumeBotTurn(signal?: AbortSignal): Promise<PreparedBotTurn | null> {
     const prefetched = pendingBotTurnRef.current;
     pendingBotTurnRef.current = null;
+    pendingBotTurnSeedRef.current = null;
 
     if (prefetched) {
       const resolved = await prefetched;
@@ -314,11 +372,12 @@ export default function SimulationPage() {
     const requestId = pendingBotTurnRequestRef.current + 1;
     pendingBotTurnRequestRef.current = requestId;
     console.info(`[Bot] Generating clinician turn on demand request_id=${requestId}`);
-    return requestBotTurn(requestId, signal);
+    return requestBotTurn(requestId, { signal, reason: "on_demand" });
   }
 
   async function syncPatientStateFromBotReply(text: string, requestId: number): Promise<void> {
     if (!engineRef.current || !scenarioRef.current || !botActiveRef.current) return;
+    const startedAt = performance.now();
     const snapshot = scenarioRef.current;
     const isStale = () =>
       requestId !== patientReplyUpdateRequestRef.current || !botActiveRef.current || endingRef.current;
@@ -335,6 +394,7 @@ export default function SimulationPage() {
             recentTurns,
             scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`,
             currentEscalation: engineRef.current.getLevel(),
+            speakerVoiceProfile: lastClinicianVoiceProfileRef.current,
           },
         }),
       }).catch(() => null);
@@ -352,6 +412,7 @@ export default function SimulationPage() {
       if (isStale()) return;
 
       console.log("[Bot Patient State]", prevState.level, "→", newState.level, delta.trigger_type);
+      console.info(`[Bot Patient State] classified elapsed_ms=${Math.round(performance.now() - startedAt)}`);
 
       setEscalationLevel(newState.level);
       peakLevelRef.current = Math.max(peakLevelRef.current, newState.level);
@@ -359,10 +420,6 @@ export default function SimulationPage() {
       if (engineRef.current.shouldAutoEnd()) {
         handleEndSession("auto_ceiling");
         return;
-      }
-
-      if (!isStale()) {
-        prefetchNextBotTurn(botAbortRef.current?.signal);
       }
 
       const evtIdx = eventIndexRef.current++;
@@ -390,11 +447,54 @@ export default function SimulationPage() {
         }),
       });
 
+      const recentTurnsForPrompt = getRecentPromptTurns();
+      prefetchNextBotTurn({
+        signal: botAbortRef.current?.signal,
+        snapshot,
+        state: newState,
+        recentTurns: recentTurnsForPrompt,
+        patientVoiceProfile: patientVoiceProfileRef.current,
+        seed: requestId,
+        reason: "fast_after_patient",
+      });
+
       void (async () => {
-        const newInstructions = await resolvePatientInstructions(snapshot, newState, getRecentPromptTurns());
+        const nextVoiceProfile = await fetchPatientVoiceProfile(
+          snapshot,
+          newState,
+          recentTurnsForPrompt,
+          null,
+          botAbortRef.current?.signal
+        );
         if (isStale()) return;
-        if (newInstructions) {
-          updateSession(newInstructions);
+
+        const effectiveVoiceProfile = nextVoiceProfile ?? patientVoiceProfileRef.current;
+        if (nextVoiceProfile) {
+          patientVoiceProfileRef.current = nextVoiceProfile;
+        }
+
+        console.info(
+          `[Bot Patient State] voice_profile_ready elapsed_ms=${Math.round(performance.now() - startedAt)}`
+        );
+
+        const newInstructions = buildPatientInstructions(
+          snapshot,
+          newState,
+          recentTurnsForPrompt,
+          effectiveVoiceProfile
+        );
+        updateSession(newInstructions);
+
+        if (pendingBotTurnRef.current && pendingBotTurnSeedRef.current === requestId) {
+          prefetchNextBotTurn({
+            signal: botAbortRef.current?.signal,
+            snapshot,
+            state: newState,
+            recentTurns: recentTurnsForPrompt,
+            patientVoiceProfile: effectiveVoiceProfile,
+            seed: requestId,
+            reason: "refined_after_patient",
+          });
         }
       })();
     } catch (err) {
@@ -480,7 +580,11 @@ export default function SimulationPage() {
       fetch(`/api/sessions/${sessionId}/events`, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event_index: evtIdx, event_type: delta.trigger_type === "escalation" ? "escalation_change" : delta.trigger_type === "de_escalation" ? "de_escalation_change" : "classification_result", escalation_before: prevState.level, escalation_after: newState.level, trust_before: prevState.trust, trust_after: newState.trust, listening_before: prevState.willingness_to_listen, listening_after: newState.willingness_to_listen, payload: { classifier: classResult, delta } }) });
 
-      const newInstructions = await resolvePatientInstructions(snapshot, newState, getRecentPromptTurns());
+      const newInstructions = await resolvePatientInstructions(
+        snapshot,
+        newState,
+        getRecentPromptTurns()
+      );
       if (!newInstructions) return;
 
       if (aiSpeakingRef.current) { pendingUpdateRef.current = newInstructions; } else { updateSession(newInstructions); }
@@ -502,31 +606,43 @@ export default function SimulationPage() {
 
   // --- AI Clinician Bot ---
 
-  async function classifyBotUtterance(text: string) {
+  async function classifyBotUtterance(
+    text: string,
+    clinicianVoiceProfile: StructuredVoiceProfile | null,
+    signal: AbortSignal
+  ) {
     if (!engineRef.current || !scenarioRef.current) return;
     const snapshot = scenarioRef.current;
     const recentTurns = transcriptRef.current.slice(-4).map((e) => ({ speaker: e.speaker, content: e.content }));
+    const isStale = () => signal.aborted || !botActiveRef.current || endingRef.current;
 
     try {
+      if (isStale()) return;
+      console.info("[Bot Prep] Starting patient-state preparation from clinician text and voice profile");
       const res = await fetch("/api/classify", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           utterance: text,
+          mode: "clinician_utterance",
           context: {
             recentTurns,
             scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`,
             currentEscalation: engineRef.current.getLevel(),
+            speakerVoiceProfile: clinicianVoiceProfile,
           },
         }),
+        signal,
       });
-      if (!res.ok) return;
+      if (!res.ok || isStale() || !engineRef.current) return;
       const classResult = await res.json();
+      if (isStale() || !engineRef.current) return;
       setLastClassification({ technique: classResult.technique, effectiveness: classResult.effectiveness });
       console.log("[Bot Escalation] Classifier:", classResult);
 
       const prevState = engineRef.current.getState();
       const delta = engineRef.current.processClassification(classResult);
       const newState = engineRef.current.getState();
+      if (isStale()) return;
       console.log("[Bot Escalation]", prevState.level, "→", newState.level, delta.trigger_type);
 
       setEscalationLevel(newState.level);
@@ -536,11 +652,19 @@ export default function SimulationPage() {
       fetch(`/api/sessions/${sessionId}/events`, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event_index: evtIdx, event_type: delta.trigger_type === "escalation" ? "escalation_change" : delta.trigger_type === "de_escalation" ? "de_escalation_change" : "classification_result", escalation_before: prevState.level, escalation_after: newState.level, trust_before: prevState.trust, trust_after: newState.trust, listening_before: prevState.willingness_to_listen, listening_after: newState.willingness_to_listen, payload: { classifier: classResult, delta, source: "bot_clinician" } }) });
 
-      const newInstructions = await resolvePatientInstructions(snapshot, newState, getRecentPromptTurns());
-      if (newInstructions) {
+      const newInstructions = await resolvePatientInstructions(
+        snapshot,
+        newState,
+        getRecentPromptTurns(),
+        clinicianVoiceProfile,
+        signal
+      );
+      if (newInstructions && !isStale()) {
+        console.info("[Bot Prep] Patient response profile prepared from clinician text and voice profile");
         updateSession(newInstructions);
       }
     } catch (err) {
+      if (isStale()) return;
       console.error("[Bot] Classification error:", err);
     }
   }
@@ -695,6 +819,7 @@ export default function SimulationPage() {
 
     const { text, technique, voiceProfile } = preparedTurn;
     console.log("[Bot] Generated:", text, "| Technique:", technique);
+    lastClinicianVoiceProfileRef.current = voiceProfile;
 
     // Add to transcript
     const entry: TranscriptEntry = { speaker: "system", content: text, timestamp: new Date().toISOString() };
@@ -703,7 +828,7 @@ export default function SimulationPage() {
     const idx = turnIndexRef.current++;
     fetch(`/api/sessions/${sessionId}/transcript`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ turn_index: idx, speaker: "system", content: text }) });
 
-    const botClassificationPromise = classifyBotUtterance(text);
+    const botClassificationPromise = classifyBotUtterance(text, voiceProfile, abort.signal);
     const clinicianAudioPath = await speakWithClinicianAudio(text, technique, voiceProfile, abort);
     if (abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
 
@@ -784,7 +909,7 @@ export default function SimulationPage() {
       null
     );
     void ensureClinicianRendererConnected(warmupInstructions);
-    prefetchNextBotTurn(abort.signal);
+    prefetchNextBotTurn({ signal: abort.signal });
 
     // Wait a beat then start the first bot turn
     setTimeout(() => runBotTurn(abort), 500);

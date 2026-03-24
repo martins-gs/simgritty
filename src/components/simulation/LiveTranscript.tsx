@@ -24,6 +24,14 @@ export function LiveTranscript({ entries, currentAiText }: LiveTranscriptProps) 
 
   const formatTime = (ts: string) =>
     new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const lastEntry = entries[entries.length - 1];
+  const showLivePatientBubble = Boolean(
+    currentAiText &&
+    !(
+      lastEntry?.speaker === "ai" &&
+      lastEntry.content.trim() === currentAiText.trim()
+    )
+  );
 
   if (entries.length === 0 && !currentAiText) {
     return (
@@ -56,7 +64,7 @@ export function LiveTranscript({ entries, currentAiText }: LiveTranscriptProps) 
             </p>
           </div>
         ))}
-        {currentAiText && (
+        {showLivePatientBubble && (
           <div className="py-1.5">
             <div className="flex items-baseline gap-2">
               <span className="shrink-0 text-[11px] font-medium text-orange-600">Patient</span>

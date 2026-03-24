@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { generatePatientVoiceProfile } from "@/lib/openai/structuredVoice";
 import type { EscalationState } from "@/types/escalation";
 import type { ScenarioTraits, ScenarioVoiceConfig } from "@/types/scenario";
+import type { StructuredVoiceProfile } from "@/types/voice";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -20,6 +21,7 @@ export async function POST(request: Request) {
     voiceConfig?: ScenarioVoiceConfig;
     currentState?: EscalationState;
     recentTurns?: { speaker: string; content: string }[];
+    latestClinicianVoiceProfile?: StructuredVoiceProfile | null;
   };
 
   if (!body.currentState || !body.traits || !body.voiceConfig) {
@@ -37,6 +39,7 @@ export async function POST(request: Request) {
     voiceConfig: body.voiceConfig,
     currentState: body.currentState,
     recentTurns: body.recentTurns ?? [],
+    latestClinicianVoiceProfile: body.latestClinicianVoiceProfile,
   });
 
   return NextResponse.json({ voiceProfile });

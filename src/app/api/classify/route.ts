@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
+  classifyClinicianUtterance,
   classifyPatientResponse,
   classifyUtterance,
   type ClassifierContext,
@@ -29,7 +30,9 @@ export async function POST(request: Request) {
 
   const result = mode === "patient_response"
     ? await classifyPatientResponse(utterance, context, apiKey)
-    : await classifyUtterance(utterance, context, apiKey);
+    : mode === "clinician_utterance"
+      ? await classifyClinicianUtterance(utterance, context, apiKey)
+      : await classifyUtterance(utterance, context, apiKey);
 
   return NextResponse.json(result);
 }

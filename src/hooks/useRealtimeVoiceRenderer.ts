@@ -58,6 +58,7 @@ export function useRealtimeVoiceRenderer() {
     responseId: string | null;
     resolve: (value: boolean) => void;
     timeout: ReturnType<typeof setTimeout>;
+    startedAt: number;
   } | null>(null);
 
   const clearPendingSpeech = useCallback((value: boolean) => {
@@ -104,10 +105,18 @@ export function useRealtimeVoiceRenderer() {
         body: JSON.stringify({
           voice: config.voice,
           instructions: config.instructions,
+          outputOnly: true,
         }),
       });
 
-      if (!tokenRes.ok) throw new Error("Failed to get clinician realtime token");
+      if (!tokenRes.ok) {
+        const errorText = await tokenRes.text().catch(() => "");
+        throw new Error(
+          errorText
+            ? `Failed to get clinician realtime token: ${errorText}`
+            : "Failed to get clinician realtime token"
+        );
+      }
       const sessionData = await tokenRes.json();
       const ephemeralKey = sessionData.client_secret?.value;
       const realtimeModel = sessionData.model as string | undefined;
@@ -152,7 +161,12 @@ export function useRealtimeVoiceRenderer() {
             const response = msg.response as { id?: string } | undefined;
             if (response?.id) {
               activeResponseIdRef.current = response.id;
-              console.info(`[Clinician Audio] path=realtime event=response.created response_id=${response.id}`);
+              const elapsedMs = pendingSpeechRef.current
+                ? Math.round(performance.now() - pendingSpeechRef.current.startedAt)
+                : null;
+              console.info(
+                `[Clinician Audio] path=realtime event=response.created response_id=${response.id} elapsed_ms=${elapsedMs ?? "unknown"}`
+              );
               if (pendingSpeechRef.current && !pendingSpeechRef.current.responseId) {
                 pendingSpeechRef.current.responseId = response.id;
               }
@@ -160,10 +174,29 @@ export function useRealtimeVoiceRenderer() {
             return;
           }
 
+          if (type === "output_audio_buffer.started") {
+            const responseId = msg.response_id as string | undefined;
+            const pendingResponseId = pendingSpeechRef.current?.responseId;
+            const elapsedMs = pendingSpeechRef.current
+              ? Math.round(performance.now() - pendingSpeechRef.current.startedAt)
+              : null;
+            if (!pendingResponseId || !responseId || responseId === pendingResponseId) {
+              console.info(
+                `[Clinician Audio] path=realtime event=output_audio_buffer.started response_id=${responseId || "unknown"} elapsed_ms=${elapsedMs ?? "unknown"}`
+              );
+            }
+            return;
+          }
+
           if (type === "output_audio_buffer.stopped") {
             const responseId = msg.response_id as string | undefined;
             const pendingResponseId = pendingSpeechRef.current?.responseId;
-            console.info(`[Clinician Audio] path=realtime event=output_audio_buffer.stopped response_id=${responseId || "unknown"}`);
+            const elapsedMs = pendingSpeechRef.current
+              ? Math.round(performance.now() - pendingSpeechRef.current.startedAt)
+              : null;
+            console.info(
+              `[Clinician Audio] path=realtime event=output_audio_buffer.stopped response_id=${responseId || "unknown"} elapsed_ms=${elapsedMs ?? "unknown"}`
+            );
             if (!pendingResponseId || !responseId || responseId === pendingResponseId) {
               clearPendingSpeech(true);
             }
@@ -270,34 +303,34 @@ export function useRealtimeVoiceRenderer() {
     }
 
     return new Promise<boolean>((resolve) => {
+      const startedAt = performance.now();
       const timeout = setTimeout(() => {
         clearPendingSpeech(false);
       }, 15000);
 
-      pendingSpeechRef.current = { responseId: null, resolve, timeout };
+      pendingSpeechRef.current = { responseId: null, resolve, timeout, startedAt };
       activeResponseIdRef.current = null;
-
-      if (instructions) {
-        dc.send(JSON.stringify({
-          type: "session.update",
-          session: { instructions },
-        }));
-      }
+      console.info("[Clinician Audio] path=realtime request=response.create");
 
       dc.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [
+        type: "response.create",
+        response: {
+          conversation: "none",
+          instructions,
+          input: [
             {
-              type: "input_text",
-              text: `<line>${text}</line>`,
+              type: "message",
+              role: "user",
+              content: [
+                {
+                  type: "input_text",
+                  text: `<line>${text}</line>`,
+                },
+              ],
             },
           ],
         },
       }));
-      dc.send(JSON.stringify({ type: "response.create" }));
     });
   }, [clearPendingSpeech]);
 

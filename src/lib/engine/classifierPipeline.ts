@@ -1,12 +1,14 @@
 import type { ClassifierResult } from "@/types/simulation";
+import type { StructuredVoiceProfile } from "@/types/voice";
 
 export interface ClassifierContext {
   recentTurns: { speaker: string; content: string }[];
   scenarioContext: string;
   currentEscalation: number;
+  speakerVoiceProfile?: StructuredVoiceProfile | null;
 }
 
-export type ClassifierMode = "trainee_utterance" | "patient_response";
+export type ClassifierMode = "trainee_utterance" | "patient_response" | "clinician_utterance";
 
 const TRAINEE_CLASSIFIER_SYSTEM_PROMPT = `You are an expert communication skills assessor for clinical training scenarios.
 
@@ -72,6 +74,48 @@ Positive effectiveness indicators:
 
 Neutral effectiveness:
 - still distressed, but no clear movement toward either escalation or de-escalation`;
+
+const CLINICIAN_CLASSIFIER_SYSTEM_PROMPT = `You are monitoring an experienced NHS clinician taking over a live de-escalation conversation.
+
+Analyse the clinician's latest utterance and classify what effect it is likely to have on the patient or relative's state.
+
+IMPORTANT: You are assessing the likely impact of the CLINICIAN'S turn on the patient or relative, not grading a trainee.
+
+Respond in JSON format only:
+{
+  "technique": "string - short label for the clinician's communication move",
+  "effectiveness": "number from -1.0 to 1.0 where negative means likely to escalate or shut the patient down, and positive means likely to calm, build trust, or increase willingness to listen",
+  "tags": ["array of short descriptor tags"],
+  "confidence": "number from 0 to 1",
+  "reasoning": "brief one-sentence explanation"
+}
+
+Negative effectiveness indicators:
+- patronising or over-reassuring phrasing
+- vague or evasive answers
+- weak, confusing, or poorly timed boundaries
+- language likely to provoke defensiveness or distrust
+- delivery likely to sound hesitant, cold, scripted, or reactive
+
+Positive effectiveness indicators:
+- validation that lands credibly
+- calm, plain-spoken reassurance
+- clear practical next steps
+- respectful, steady boundary setting
+- delivery likely to sound grounded, believable, and containing`;
+
+function formatVoiceProfile(profile?: StructuredVoiceProfile | null): string {
+  if (!profile) return "No structured voice profile provided for the latest utterance.";
+  return [
+    `- Accent: ${profile.accent}`,
+    `- Voice affect: ${profile.voiceAffect}`,
+    `- Tone: ${profile.tone}`,
+    `- Pacing: ${profile.pacing}`,
+    `- Emotion: ${profile.emotion}`,
+    `- Delivery: ${profile.delivery}`,
+    `- Variety: ${profile.variety}`,
+  ].join("\n");
+}
 
 async function requestClassification(
   context: ClassifierContext,
@@ -146,8 +190,15 @@ Current escalation level: ${context.currentEscalation}/10
 Recent conversation:
 ${recentContext}
 
+Structured delivery profile for the latest TRAINEE utterance:
+${formatVoiceProfile(context.speakerVoiceProfile)}
+
 TRAINEE's latest utterance to classify:
-"${utterance}"`;
+"${utterance}"
+
+Assess the trainee's effect on the interaction using both:
+- the literal words
+- the structured delivery profile, if provided, which describes how the utterance sounded emotionally and vocally.`;
 
   return requestClassification(
     context,
@@ -173,15 +224,56 @@ Current escalation level: ${context.currentEscalation}/10
 Recent conversation:
 ${recentContext}
 
+Structured delivery profile for the latest clinician utterance:
+${formatVoiceProfile(context.speakerVoiceProfile)}
+
 PATIENT OR RELATIVE's latest utterance to classify for state movement:
 "${utterance}"
 
-Assess whether this shows the person becoming more escalated and closed-off, more settled and open, or roughly unchanged.`;
+Assess whether this shows the person becoming more escalated and closed-off, more settled and open, or roughly unchanged.
+
+Use both:
+- the literal words in the patient's latest utterance
+- the structured delivery profile for the preceding clinician utterance, if provided, because the patient's reaction depends partly on how that clinician line landed emotionally.`;
 
   return requestClassification(
     context,
     apiKey,
     PATIENT_RESPONSE_CLASSIFIER_SYSTEM_PROMPT,
+    userPrompt
+  );
+}
+
+export async function classifyClinicianUtterance(
+  utterance: string,
+  context: ClassifierContext,
+  apiKey: string
+): Promise<ClassifierResult> {
+  const recentContext = context.recentTurns
+    .slice(-4)
+    .map((turn) => `${turn.speaker}: ${turn.content}`)
+    .join("\n");
+
+  const userPrompt = `Scenario: ${context.scenarioContext}
+Current escalation level: ${context.currentEscalation}/10
+
+Recent conversation:
+${recentContext}
+
+Structured delivery profile for the latest clinician utterance:
+${formatVoiceProfile(context.speakerVoiceProfile)}
+
+CLINICIAN's latest utterance to classify:
+"${utterance}"
+
+Assess the likely effect of this clinician turn using both:
+- the literal words
+- the structured delivery profile, if provided, which describes how the utterance sounded emotionally and vocally.`;
+
+  return requestClassification(
+    context,
+    apiKey,
+    CLINICIAN_CLASSIFIER_SYSTEM_PROMPT,
     userPrompt
   );
 }

@@ -10,7 +10,11 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json();
-  const { voice, instructions } = body;
+  const { voice, instructions, outputOnly } = body as {
+    voice?: string;
+    instructions?: string;
+    outputOnly?: boolean;
+  };
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -24,7 +28,11 @@ export async function POST(request: Request) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
+    body: JSON.stringify(outputOnly ? {
+      model: REALTIME_MODEL,
+      voice: voice || DEFAULT_REALTIME_VOICE,
+      instructions: instructions || "",
+    } : {
       model: REALTIME_MODEL,
       voice: voice || DEFAULT_REALTIME_VOICE,
       instructions: instructions || "",
@@ -45,7 +53,7 @@ export async function POST(request: Request) {
     const errorData = await response.text();
     console.error("OpenAI Realtime session error:", errorData);
     return NextResponse.json(
-      { error: "Failed to create realtime session" },
+      { error: "Failed to create realtime session", detail: errorData },
       { status: 500 }
     );
   }
