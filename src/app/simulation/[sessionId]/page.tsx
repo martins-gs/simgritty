@@ -248,20 +248,45 @@ export default function SimulationPage() {
     }
   }
 
-  function speakWithSynthesis(text: string): Promise<void> {
-    return new Promise((resolve) => {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "en-GB";
-      utterance.rate = 0.95;
-      // Try to pick a non-default voice
-      const voices = speechSynthesis.getVoices();
-      const britishVoice = voices.find((v) => v.lang.startsWith("en-GB") && v.name.includes("Female"))
-        || voices.find((v) => v.lang.startsWith("en-GB"))
-        || voices.find((v) => v.lang.startsWith("en"));
-      if (britishVoice) utterance.voice = britishVoice;
-      utterance.onend = () => resolve();
-      utterance.onerror = () => resolve();
-      speechSynthesis.speak(utterance);
+  // Pick a clinician voice that contrasts with the patient voice
+  function getClinicianVoice(): string {
+    const patientVoice = (scenarioRef.current?.scenario_voice_config as unknown as { voice_name?: string })?.voice_name
+      || (extractChild(scenarioRef.current?.scenario_voice_config as unknown) as { voice_name?: string })?.voice_name
+      || "ash";
+    // Map patient voice to a contrasting clinician voice
+    const contrastMap: Record<string, string> = {
+      alloy: "nova", ash: "sage", ballad: "nova", coral: "sage",
+      echo: "nova", fable: "sage", nova: "ash", onyx: "sage",
+      sage: "nova", shimmer: "ash", verse: "nova",
+    };
+    return contrastMap[patientVoice] || "nova";
+  }
+
+  const botAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  async function speakWithTTS(text: string, abort: AbortController): Promise<void> {
+    const voice = getClinicianVoice();
+    const res = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, voice }),
+      signal: abort.signal,
+    }).catch(() => null);
+
+    if (!res || !res.ok || abort.signal.aborted) return;
+
+    const blob = await res.blob();
+    if (abort.signal.aborted) return;
+
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    botAudioRef.current = audio;
+
+    return new Promise<void>((resolve) => {
+      audio.onended = () => { URL.revokeObjectURL(url); botAudioRef.current = null; resolve(); };
+      audio.onerror = () => { URL.revokeObjectURL(url); botAudioRef.current = null; resolve(); };
+      if (abort.signal.aborted) { URL.revokeObjectURL(url); resolve(); return; }
+      audio.play().catch(() => { URL.revokeObjectURL(url); resolve(); });
     });
   }
 
@@ -295,8 +320,8 @@ export default function SimulationPage() {
     const idx = turnIndexRef.current++;
     fetch(`/api/sessions/${sessionId}/transcript`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ turn_index: idx, speaker: "system", content: text }) });
 
-    // Speak it aloud via browser TTS
-    await speakWithSynthesis(text);
+    // Speak it aloud via OpenAI TTS
+    await speakWithTTS(text, abort);
     if (abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
 
     // Classify the bot's utterance through the escalation engine
@@ -355,7 +380,12 @@ export default function SimulationPage() {
     botActiveRef.current = false;
     setBotActive(false);
     setBotSpeaking(false);
-    speechSynthesis.cancel();
+    // Stop any playing bot audio
+    if (botAudioRef.current) {
+      botAudioRef.current.pause();
+      botAudioRef.current.src = "";
+      botAudioRef.current = null;
+    }
     if (botAbortRef.current) {
       botAbortRef.current.abort();
       botAbortRef.current = null;
