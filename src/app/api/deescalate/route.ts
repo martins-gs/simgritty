@@ -16,6 +16,7 @@ export async function POST(request: Request) {
     patientRole,
     clinicianRole,
     escalationState,
+    patientVoiceProfile,
   } = await request.json() as {
     recentTurns?: { speaker: string; content: string }[];
     scenarioContext?: string;
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
     patientRole?: string;
     clinicianRole?: string;
     escalationState?: Partial<EscalationState>;
+    patientVoiceProfile?: StructuredVoiceProfile | null;
   };
 
   const turn = await generateClinicianTurn({
@@ -32,6 +34,7 @@ export async function POST(request: Request) {
     clinicianRole: clinicianRole || "experienced British NHS clinician",
     escalationState: escalationState ?? {},
     recentTurns: recentTurns ?? [],
+    patientVoiceProfile: patientVoiceProfile ?? null,
   });
 
   const fallbackVoiceProfile: StructuredVoiceProfile | null = null;

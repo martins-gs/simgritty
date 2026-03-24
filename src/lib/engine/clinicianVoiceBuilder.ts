@@ -1,6 +1,9 @@
 import type { EscalationState } from "@/types/escalation";
 import type { StructuredVoiceProfile } from "@/types/voice";
-import { renderVoiceProfileForTts } from "@/lib/voice/renderVoiceProfile";
+import {
+  renderVoiceProfileForPrompt,
+  renderVoiceProfileForTts,
+} from "@/lib/voice/renderVoiceProfile";
 
 type ClinicianTechniqueStyle = "validation" | "action" | "boundary" | "question" | "general";
 type PatientEmotionProfile = "grief" | "fear" | "entitlement" | "hostility" | "frustration" | "distrust" | "mixed";
@@ -18,6 +21,19 @@ export interface ClinicianVoiceContext {
   escalationState?: Partial<ClinicianStateSnapshot>;
 }
 
+function buildClinicianRealtimeIntro(context: ClinicianVoiceContext = {}): string {
+  const clinicianRole = context.clinicianRole || "experienced British NHS clinician";
+  const patientRole = context.patientRole || "patient";
+
+  return [
+    "You are rendering one spoken line of dialogue for a live de-escalation simulation.",
+    `Speak as an ${clinicianRole} in a live NHS conversation with a ${patientRole}.`,
+    "Speak only the exact words inside the provided <line> tag.",
+    "Do not add, remove, paraphrase, or explain anything.",
+    "Deliver the line as natural speech, not as a reading voice or assistant voice.",
+  ].join("\n");
+}
+
 export function buildClinicianVoiceInstructionsFromProfile(
   profile: StructuredVoiceProfile,
   context: ClinicianVoiceContext = {}
@@ -28,6 +44,19 @@ export function buildClinicianVoiceInstructionsFromProfile(
     profile,
     `Speak as an ${clinicianRole} in a live NHS conversation with a ${patientRole}.`
   );
+}
+
+export function buildClinicianRealtimeInstructionsFromProfile(
+  profile: StructuredVoiceProfile,
+  context: ClinicianVoiceContext = {}
+): string {
+  return [
+    buildClinicianRealtimeIntro(context),
+    "",
+    renderVoiceProfileForPrompt(profile),
+    "",
+    "Rules: Keep the delivery immediate, human, and grounded. Avoid flat cadence, scripted line breaks, or exaggerated performance.",
+  ].join("\n");
 }
 
 function derivePatientEmotionProfile(emotionalDriver?: string): PatientEmotionProfile {
@@ -244,5 +273,15 @@ export function buildClinicianVoiceInstructions(context: ClinicianVoiceContext):
     `Emotion: ${buildEmotion(profile, state)}`,
     `Delivery: ${buildDelivery(context, state, techniqueStyle)}`,
     "Rules: Keep pauses brief and natural. Vary intonation and emphasis. Stay natural, spoken, and immediate rather than polished, performative, or robotic.",
+  ].join("\n");
+}
+
+export function buildClinicianRealtimeInstructions(context: ClinicianVoiceContext): string {
+  return [
+    buildClinicianRealtimeIntro(context),
+    "",
+    buildClinicianVoiceInstructions(context),
+    "",
+    "Rules: Speak the line with natural continuity and spoken phrasing. Avoid stop-start delivery and avoid sounding like a TTS narrator.",
   ].join("\n");
 }

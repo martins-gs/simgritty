@@ -53,7 +53,9 @@ export function useRealtimeVoiceRenderer() {
   const connectAttemptRef = useRef(0);
   const disconnectedRef = useRef(false);
   const readyRef = useRef(false);
+  const activeResponseIdRef = useRef<string | null>(null);
   const pendingSpeechRef = useRef<{
+    responseId: string | null;
     resolve: (value: boolean) => void;
     timeout: ReturnType<typeof setTimeout>;
   } | null>(null);
@@ -77,6 +79,7 @@ export function useRealtimeVoiceRenderer() {
     connectAttemptRef.current = attemptId;
     disconnectedRef.current = false;
     readyRef.current = false;
+    activeResponseIdRef.current = null;
 
     let pc: RTCPeerConnection | null = null;
     let dc: RTCDataChannel | null = null;
@@ -91,6 +94,7 @@ export function useRealtimeVoiceRenderer() {
       if (dcRef.current === dc) dcRef.current = null;
       if (audioElRef.current === audioEl) audioElRef.current = null;
       readyRef.current = false;
+      activeResponseIdRef.current = null;
     };
 
     try {
@@ -144,8 +148,25 @@ export function useRealtimeVoiceRenderer() {
           const msg = JSON.parse(event.data) as Record<string, unknown>;
           const type = msg.type as string | undefined;
 
-          if (type === "response.done") {
-            clearPendingSpeech(true);
+          if (type === "response.created") {
+            const response = msg.response as { id?: string } | undefined;
+            if (response?.id) {
+              activeResponseIdRef.current = response.id;
+              console.info(`[Clinician Audio] path=realtime event=response.created response_id=${response.id}`);
+              if (pendingSpeechRef.current && !pendingSpeechRef.current.responseId) {
+                pendingSpeechRef.current.responseId = response.id;
+              }
+            }
+            return;
+          }
+
+          if (type === "output_audio_buffer.stopped") {
+            const responseId = msg.response_id as string | undefined;
+            const pendingResponseId = pendingSpeechRef.current?.responseId;
+            console.info(`[Clinician Audio] path=realtime event=output_audio_buffer.stopped response_id=${responseId || "unknown"}`);
+            if (!pendingResponseId || !responseId || responseId === pendingResponseId) {
+              clearPendingSpeech(true);
+            }
             return;
           }
 
@@ -153,6 +174,29 @@ export function useRealtimeVoiceRenderer() {
             const error = msg.error as { message?: string } | undefined;
             clearPendingSpeech(false);
             config.onError(error?.message || "Clinician realtime audio error");
+            return;
+          }
+
+          if (type === "output_audio_buffer.cleared") {
+            clearPendingSpeech(false);
+            return;
+          }
+
+          if (type === "response.done") {
+            const response = msg.response as { id?: string; status?: string } | undefined;
+            if (response?.id || response?.status) {
+              console.info(`[Clinician Audio] path=realtime event=response.done response_id=${response?.id || "unknown"} status=${response?.status || "unknown"}`);
+            }
+            if (response?.id && response.id === activeResponseIdRef.current) {
+              activeResponseIdRef.current = null;
+            }
+            if (
+              response?.status &&
+              response.status !== "completed" &&
+              (!pendingSpeechRef.current?.responseId || pendingSpeechRef.current.responseId === response.id)
+            ) {
+              clearPendingSpeech(false);
+            }
           }
         } catch {
           // ignore malformed messages
@@ -230,7 +274,8 @@ export function useRealtimeVoiceRenderer() {
         clearPendingSpeech(false);
       }, 15000);
 
-      pendingSpeechRef.current = { resolve, timeout };
+      pendingSpeechRef.current = { responseId: null, resolve, timeout };
+      activeResponseIdRef.current = null;
 
       if (instructions) {
         dc.send(JSON.stringify({
@@ -260,6 +305,7 @@ export function useRealtimeVoiceRenderer() {
     connectAttemptRef.current += 1;
     disconnectedRef.current = true;
     readyRef.current = false;
+    activeResponseIdRef.current = null;
     clearPendingSpeech(false);
     teardownRendererResources(pcRef.current, dcRef.current, audioElRef.current);
     pcRef.current = null;

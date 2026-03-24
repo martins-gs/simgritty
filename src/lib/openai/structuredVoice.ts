@@ -1,6 +1,7 @@
 import type { EscalationState } from "@/types/escalation";
 import type { ScenarioTraits, ScenarioVoiceConfig } from "@/types/scenario";
 import type { StructuredClinicianTurn, StructuredVoiceProfile } from "@/types/voice";
+import { renderVoiceProfileForPrompt } from "@/lib/voice/renderVoiceProfile";
 
 const VOICE_PROFILE_MODEL = process.env.OPENAI_VOICE_PROFILE_MODEL || "gpt-4o-mini";
 
@@ -59,6 +60,7 @@ interface ClinicianTurnInput {
   emotionalDriver: string;
   escalationState: Partial<EscalationState>;
   recentTurns: { speaker: string; content: string }[];
+  patientVoiceProfile?: StructuredVoiceProfile | null;
 }
 
 async function requestStructuredOutput<T>({
@@ -129,6 +131,11 @@ function formatRecentTurns(turns: { speaker: string; content: string }[]): strin
     .slice(-10)
     .map((turn) => `${speakerLabels[turn.speaker] || turn.speaker}: ${turn.content}`)
     .join("\n");
+}
+
+function formatPatientVoiceProfile(profile?: StructuredVoiceProfile | null): string {
+  if (!profile) return "No structured patient voice profile available.";
+  return renderVoiceProfileForPrompt(profile);
 }
 
 export async function generatePatientVoiceProfile(
@@ -209,6 +216,7 @@ Rules for the spoken reply:
 - natural spoken British English
 - 1-3 sentences maximum
 - respond to what the patient just said
+- use the patient's current emotional and vocal presentation, not just the literal words
 - validate and steady the interaction
 - offer a concrete next step or boundary when appropriate
 - do not sound patronising, generic, or scripted
@@ -216,6 +224,7 @@ Rules for the spoken reply:
 Rules for the voice profile:
 - describe how the clinician should sound in this exact moment
 - reflect the patient's current emotional state and escalation
+- reflect the patient's current voice state and conversational stance
 - sound like an experienced UK NHS clinician
 - keep the clinician human, responsive, and believable`;
 
@@ -232,10 +241,18 @@ Current patient state:
 - Anger: ${state.anger ?? 5}/10
 - Frustration: ${state.frustration ?? 5}/10
 
+Current structured patient voice profile:
+${formatPatientVoiceProfile(input.patientVoiceProfile)}
+
 Conversation so far:
 ${formatRecentTurns(input.recentTurns)}
 
-Generate the clinician's next spoken turn and the voice profile for how that turn should be delivered.`;
+Generate the clinician's next spoken turn and the voice profile for how that turn should be delivered.
+
+Use all three inputs together:
+- what the patient literally said
+- the current patient state values
+- the current patient voice profile, which captures how they are emotionally and vocally presenting right now`;
 
   return requestStructuredOutput<StructuredClinicianTurn>({
     systemPrompt,

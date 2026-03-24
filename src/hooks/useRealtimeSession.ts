@@ -9,6 +9,7 @@ interface RealtimeSessionConfig {
   onTraineeTranscript: (text: string) => void;
   onAiTranscript: (text: string) => void;
   onAiTranscriptDelta: (delta: string) => void;
+  onAiPlaybackComplete: () => void;
   onError: (error: string) => void;
 }
 
@@ -164,13 +165,38 @@ export function useRealtimeSession() {
         break;
       }
 
-      case "response.done": {
-        const response = msg.response as { id?: string } | undefined;
-        if (response?.id === activeResponseIdRef.current) {
+      case "output_audio_buffer.stopped": {
+        const responseId = msg.response_id as string | undefined;
+        if (responseId && responseId !== activeResponseIdRef.current) break;
+        config.onAiPlaybackComplete();
+        if (responseId === activeResponseIdRef.current) {
           activeResponseIdRef.current = null;
         }
         // AI finished speaking — re-enable mic after grace period
         ungateMic();
+        break;
+      }
+
+      case "output_audio_buffer.cleared": {
+        config.onAiPlaybackComplete();
+        activeResponseIdRef.current = null;
+        ungateMic();
+        break;
+      }
+
+      case "response.done": {
+        const response = msg.response as { id?: string; status?: string } | undefined;
+        if (
+          response?.status &&
+          response.status !== "completed" &&
+          (!response.id || response.id === activeResponseIdRef.current)
+        ) {
+          config.onAiPlaybackComplete();
+          if (response.id === activeResponseIdRef.current) {
+            activeResponseIdRef.current = null;
+          }
+          ungateMic();
+        }
         break;
       }
 

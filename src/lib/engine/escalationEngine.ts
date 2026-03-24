@@ -56,13 +56,13 @@ export class EscalationEngine {
     const volatilityFactor = this.traits.volatility / 10;
     const escalationTendency = this.traits.escalation_tendency / 10;
 
-    // Base delta from classifier effectiveness
-    // Negative effectiveness = trainee did something escalating
-    // Positive effectiveness = trainee did something de-escalating
+    // Base delta from a state-impact score.
+    // Negative effectiveness = the interaction moved the patient toward escalation.
+    // Positive effectiveness = the interaction moved the patient toward de-escalation.
     let levelDelta = 0;
     let trustDelta = 0;
     let listeningDelta = 0;
-    let reason = result.reasoning;
+    const reason = result.reasoning;
     let triggerType: EscalationDelta["trigger_type"] = "neutral";
 
     if (effectiveness < -0.3) {

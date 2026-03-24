@@ -65,6 +65,11 @@ export async function POST(request: Request) {
   const resolvedModel = style === "clinician" ? CLINICIAN_TTS_MODEL : TTS_MODEL;
   const resolvedVoice = style === "clinician" ? (voice || CLINICIAN_TTS_VOICE) : (voice || DEFAULT_TTS_VOICE);
   const responseFormat = "mp3";
+  let modelUsed = resolvedModel;
+
+  if (style === "clinician") {
+    console.info(`[Clinician Audio] path=tts status=requested model=${resolvedModel} voice=${resolvedVoice}`);
+  }
 
   let response = await requestSpeech({
     apiKey,
@@ -77,9 +82,15 @@ export async function POST(request: Request) {
 
   if (!response.ok) {
     const err = await response.text();
-    console.error("TTS error:", err);
+    if (style === "clinician") {
+      console.error(`[Clinician Audio] path=tts status=error model=${resolvedModel} voice=${resolvedVoice}`, err);
+    } else {
+      console.error("TTS error:", err);
+    }
 
     if (style === "clinician" && resolvedModel !== CLINICIAN_TTS_FALLBACK_MODEL) {
+      modelUsed = CLINICIAN_TTS_FALLBACK_MODEL;
+      console.warn(`[Clinician Audio] path=tts status=fallback_request primary_model=${resolvedModel} fallback_model=${CLINICIAN_TTS_FALLBACK_MODEL} voice=${resolvedVoice}`);
       response = await requestSpeech({
         apiKey,
         model: CLINICIAN_TTS_FALLBACK_MODEL,
@@ -91,12 +102,16 @@ export async function POST(request: Request) {
 
       if (!response.ok) {
         const fallbackErr = await response.text();
-        console.error("Clinician TTS fallback error:", fallbackErr);
+        console.error(`[Clinician Audio] path=tts status=fallback_error model=${CLINICIAN_TTS_FALLBACK_MODEL} voice=${resolvedVoice}`, fallbackErr);
         return NextResponse.json({ error: "TTS failed" }, { status: 500 });
       }
     } else {
       return NextResponse.json({ error: "TTS failed" }, { status: 500 });
     }
+  }
+
+  if (style === "clinician") {
+    console.info(`[Clinician Audio] path=tts status=ok model=${modelUsed} voice=${resolvedVoice}`);
   }
 
   // Stream the audio back
