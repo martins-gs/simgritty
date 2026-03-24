@@ -43,9 +43,11 @@ export function LiveTranscript({ entries, currentAiText }: LiveTranscriptProps) 
             <div className="flex items-baseline gap-2">
               <span className={cn(
                 "shrink-0 text-[11px] font-medium",
-                entry.speaker === "trainee" ? "text-primary" : "text-orange-600"
+                entry.speaker === "trainee" ? "text-primary"
+                  : entry.speaker === "system" ? "text-indigo-600"
+                  : "text-orange-600"
               )}>
-                {entry.speaker === "trainee" ? "You" : "Patient"}
+                {entry.speaker === "trainee" ? "You" : entry.speaker === "system" ? "AI Clinician" : "Patient"}
               </span>
               <span className="text-[10px] text-slate-300 tabular-nums">{formatTime(entry.timestamp)}</span>
             </div>

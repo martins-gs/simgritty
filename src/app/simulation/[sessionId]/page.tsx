@@ -9,7 +9,7 @@ import { buildPrompt } from "@/lib/engine/promptBuilder";
 import { Waveform } from "@/components/simulation/Waveform";
 import { LiveTranscript, type TranscriptEntry } from "@/components/simulation/LiveTranscript";
 import { ExitButton } from "@/components/simulation/ExitButton";
-import { Mic, MicOff, Square, MapPin, UserRound, Stethoscope } from "lucide-react";
+import { Mic, MicOff, Square, MapPin, Bot, Hand } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ESCALATION_LABELS } from "@/types/escalation";
 import type { ScenarioTraits, ScenarioVoiceConfig, EscalationRules } from "@/types/scenario";
@@ -25,7 +25,7 @@ function escColor(level: number) {
 export default function SimulationPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const router = useRouter();
-  const { connect, disconnect, updateSession, cancelCurrentResponse, setMicEnabled, audioElRef } = useRealtimeSession();
+  const { connect, disconnect, updateSession, cancelCurrentResponse, setMicEnabled, sendEvent, audioElRef } = useRealtimeSession();
 
   const connectionStatus = useSimulationStore((s) => s.connectionStatus);
   const micMuted = useSimulationStore((s) => s.micMuted);
@@ -40,6 +40,8 @@ export default function SimulationPage() {
   const [scenarioLoaded, setScenarioLoaded] = useState(false);
   const [lastClassification, setLastClassification] = useState<{ technique: string; effectiveness: number } | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  const [botActive, setBotActive] = useState(false);
+  const [botSpeaking, setBotSpeaking] = useState(false);
 
   const engineRef = useRef<EscalationEngine | null>(null);
   const turnIndexRef = useRef(0);
@@ -52,6 +54,8 @@ export default function SimulationPage() {
   const pendingUpdateRef = useRef<string | null>(null);
   const classifyingRef = useRef(false);
   const endingRef = useRef(false);
+  const botActiveRef = useRef(false);
+  const botAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => { transcriptRef.current = transcriptEntries; }, [transcriptEntries]);
 
@@ -189,11 +193,176 @@ export default function SimulationPage() {
   async function handleEndSession(exitType: string = "normal") {
     if (endingRef.current) return; endingRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
+    stopBot();
     cancelCurrentResponse();
     await new Promise((r) => setTimeout(r, 50));
     disconnect();
     fetch(`/api/sessions/${sessionId}/end`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ exit_type: exitType, final_escalation_level: engineRef.current?.getLevel(), peak_escalation_level: peakLevelRef.current }) });
     router.push(`/review/${sessionId}`);
+  }
+
+  // --- AI Clinician Bot ---
+
+  async function classifyBotUtterance(text: string) {
+    if (!engineRef.current || !scenarioRef.current) return;
+    const snapshot = scenarioRef.current;
+    const recentTurns = transcriptRef.current.slice(-4).map((e) => ({ speaker: e.speaker, content: e.content }));
+
+    try {
+      const res = await fetch("/api/classify", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          utterance: text,
+          context: {
+            recentTurns,
+            scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`,
+            currentEscalation: engineRef.current.getLevel(),
+          },
+        }),
+      });
+      if (!res.ok) return;
+      const classResult = await res.json();
+      setLastClassification({ technique: classResult.technique, effectiveness: classResult.effectiveness });
+      console.log("[Bot Escalation] Classifier:", classResult);
+
+      const prevState = engineRef.current.getState();
+      const delta = engineRef.current.processClassification(classResult);
+      const newState = engineRef.current.getState();
+      console.log("[Bot Escalation]", prevState.level, "→", newState.level, delta.trigger_type);
+
+      setEscalationLevel(newState.level);
+      peakLevelRef.current = Math.max(peakLevelRef.current, newState.level);
+
+      const evtIdx = eventIndexRef.current++;
+      fetch(`/api/sessions/${sessionId}/events`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event_index: evtIdx, event_type: delta.trigger_type === "escalation" ? "escalation_change" : delta.trigger_type === "de_escalation" ? "de_escalation_change" : "classification_result", escalation_before: prevState.level, escalation_after: newState.level, trust_before: prevState.trust, trust_after: newState.trust, listening_before: prevState.willingness_to_listen, listening_after: newState.willingness_to_listen, payload: { classifier: classResult, delta, source: "bot_clinician" } }) });
+
+      // Update prompt for next patient response
+      const traits = extractChild(snapshot.scenario_traits) as unknown as ScenarioTraits;
+      const voiceConfig = extractChild(snapshot.scenario_voice_config) as unknown as ScenarioVoiceConfig;
+      const escalationRules = extractChild(snapshot.escalation_rules) as unknown as EscalationRules;
+      const newInstructions = buildPrompt({ title: snapshot.title as string, aiRole: snapshot.ai_role as string, traineeRole: snapshot.trainee_role as string, backstory: snapshot.backstory as string, emotionalDriver: snapshot.emotional_driver as string, setting: snapshot.setting as string, traits, voiceConfig, escalationRules, currentState: newState, recentTurns: transcriptRef.current.slice(-20).map((e) => ({ speaker: e.speaker, content: e.content })) });
+      updateSession(newInstructions);
+    } catch (err) {
+      console.error("[Bot] Classification error:", err);
+    }
+  }
+
+  function speakWithSynthesis(text: string): Promise<void> {
+    return new Promise((resolve) => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "en-GB";
+      utterance.rate = 0.95;
+      // Try to pick a non-default voice
+      const voices = speechSynthesis.getVoices();
+      const britishVoice = voices.find((v) => v.lang.startsWith("en-GB") && v.name.includes("Female"))
+        || voices.find((v) => v.lang.startsWith("en-GB"))
+        || voices.find((v) => v.lang.startsWith("en"));
+      if (britishVoice) utterance.voice = britishVoice;
+      utterance.onend = () => resolve();
+      utterance.onerror = () => resolve();
+      speechSynthesis.speak(utterance);
+    });
+  }
+
+  async function runBotTurn(abort: AbortController) {
+    if (abort.signal.aborted || !botActiveRef.current) return;
+
+    setBotSpeaking(true);
+    const snapshot = scenarioRef.current;
+    if (!snapshot) return;
+
+    // Generate de-escalation response
+    const recentTurns = transcriptRef.current.slice(-8).map((e) => ({ speaker: e.speaker, content: e.content }));
+    const res = await fetch("/api/deescalate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recentTurns,
+        escalationLevel: engineRef.current?.getLevel() ?? 5,
+        scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}. Emotional driver: ${snapshot.emotional_driver}`,
+      }),
+      signal: abort.signal,
+    }).catch(() => null);
+
+    if (!res || abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
+
+    const { text, technique } = await res.json();
+    console.log("[Bot] Generated:", text, "| Technique:", technique);
+
+    // Add to transcript
+    const entry: TranscriptEntry = { speaker: "system", content: text, timestamp: new Date().toISOString() };
+    setTranscriptEntries((prev) => [...prev, entry]);
+    const idx = turnIndexRef.current++;
+    fetch(`/api/sessions/${sessionId}/transcript`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ turn_index: idx, speaker: "system", content: text }) });
+
+    // Speak it aloud via browser TTS
+    await speakWithSynthesis(text);
+    if (abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
+
+    // Classify the bot's utterance through the escalation engine
+    await classifyBotUtterance(text);
+    if (abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
+
+    setBotSpeaking(false);
+
+    // Inject the bot's text into the Realtime session so the patient hears and responds
+    sendEvent({
+      type: "conversation.item.create",
+      item: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+    });
+    sendEvent({ type: "response.create" });
+
+    // Wait for the patient to finish responding, then loop
+    await waitForPatientResponse(abort);
+    if (abort.signal.aborted || !botActiveRef.current) return;
+
+    // Next bot turn
+    runBotTurn(abort);
+  }
+
+  function waitForPatientResponse(abort: AbortController): Promise<void> {
+    return new Promise((resolve) => {
+      const check = setInterval(() => {
+        if (abort.signal.aborted || !botActiveRef.current || !aiSpeakingRef.current === false) {
+          // Wait until AI finishes speaking
+          if (!aiSpeakingRef.current) {
+            clearInterval(check);
+            // Small pause after patient finishes before bot responds
+            setTimeout(resolve, 800);
+          }
+        }
+        if (abort.signal.aborted) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 200);
+    });
+  }
+
+  function startBot() {
+    botActiveRef.current = true;
+    setBotActive(true);
+    setMicEnabled(false);
+
+    const abort = new AbortController();
+    botAbortRef.current = abort;
+
+    // Wait a beat then start the first bot turn
+    setTimeout(() => runBotTurn(abort), 500);
+  }
+
+  function stopBot() {
+    botActiveRef.current = false;
+    setBotActive(false);
+    setBotSpeaking(false);
+    speechSynthesis.cancel();
+    if (botAbortRef.current) {
+      botAbortRef.current.abort();
+      botAbortRef.current = null;
+    }
+    // Re-enable mic
+    const userMuted = useSimulationStore.getState().micMuted;
+    if (!userMuted) setMicEnabled(true);
   }
 
   function handleToggleMic() { toggleMic(); setMicEnabled(micMuted); }
@@ -315,9 +484,16 @@ export default function SimulationPage() {
         <main className="flex flex-1 flex-col items-center justify-center px-6 py-8">
           {/* Status text */}
           <p className={cn("text-[11px] font-medium uppercase tracking-widest mb-6",
-            isSpeaking ? "text-orange-500" : connectionStatus === "connected" ? "text-emerald-500" : "text-slate-400"
+            botActive ? "text-indigo-500"
+              : isSpeaking ? "text-orange-500"
+              : connectionStatus === "connected" ? "text-emerald-500"
+              : "text-slate-400"
           )}>
-            {isSpeaking ? `${aiRole} is speaking` : connectionStatus === "connected" ? "Listening — speak when ready" : "Connecting..."}
+            {botActive
+              ? (botSpeaking ? "AI Clinician is speaking" : isSpeaking ? `${aiRole} is responding` : "AI Clinician — preparing next response")
+              : isSpeaking ? `${aiRole} is speaking`
+              : connectionStatus === "connected" ? "Listening — speak when ready"
+              : "Connecting..."}
           </p>
 
           {/* Waveform */}
@@ -330,19 +506,39 @@ export default function SimulationPage() {
           </div>
 
           {/* Controls */}
-          <div className="mt-10 flex items-center gap-4">
-            <button
-              onClick={handleToggleMic}
-              className={cn(
-                "flex h-12 w-12 items-center justify-center rounded-full transition-all shadow-sm",
-                micMuted
-                  ? "bg-red-50 text-red-600 ring-1 ring-red-200 hover:bg-red-100"
-                  : "bg-slate-900 text-white hover:bg-slate-800"
-              )}
-              aria-label={micMuted ? "Unmute" : "Mute"}
-            >
-              {micMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-            </button>
+          <div className="mt-10 flex items-center gap-3">
+            {botActive ? (
+              <button
+                onClick={stopBot}
+                className="flex items-center gap-2 rounded-full bg-indigo-600 px-5 py-2.5 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-indigo-700"
+              >
+                <Hand className="h-4 w-4" />
+                Take over
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={handleToggleMic}
+                  className={cn(
+                    "flex h-12 w-12 items-center justify-center rounded-full transition-all shadow-sm",
+                    micMuted
+                      ? "bg-red-50 text-red-600 ring-1 ring-red-200 hover:bg-red-100"
+                      : "bg-slate-900 text-white hover:bg-slate-800"
+                  )}
+                  aria-label={micMuted ? "Unmute" : "Mute"}
+                >
+                  {micMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                </button>
+                <button
+                  onClick={startBot}
+                  disabled={connectionStatus !== "connected"}
+                  className="flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-[13px] font-medium text-indigo-700 shadow-sm transition-colors hover:bg-indigo-100 disabled:opacity-40"
+                >
+                  <Bot className="h-3.5 w-3.5" />
+                  De-escalate
+                </button>
+              </>
+            )}
             <button
               onClick={() => handleEndSession("normal")}
               className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-2.5 text-[13px] font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
