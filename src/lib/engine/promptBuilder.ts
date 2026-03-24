@@ -97,51 +97,93 @@ function buildMemoryLayer(config: PromptConfig): string {
 }
 
 // Layer 4: Voice-style instructions
+// IMPORTANT: Voice delivery must be driven by current escalation level, not just static config.
+// The Realtime API model responds to these instructions for vocal delivery.
 function buildVoiceLayer(config: PromptConfig): string {
   const { voiceConfig, currentState } = config;
-  const intensityWords = getIntensityWords(currentState.level);
-  const expressiveness =
-    voiceConfig.expressiveness_level >= 8
-      ? "Use strong variation in emphasis and emotional colour so you sound vividly human."
-      : voiceConfig.expressiveness_level <= 3
-      ? "Keep the delivery controlled and restrained, but still human rather than flat."
-      : "Use natural variation in rhythm and emphasis so the speech flows conversationally.";
-  const angerExpression =
-    voiceConfig.anger_expression >= 7
-      ? "Let irritation or anger leak clearly into emphasis, breath, and volume."
-      : voiceConfig.anger_expression <= 3
-      ? "Keep anger mostly contained, even when upset."
-      : "Let frustration show in places without sounding theatrical.";
-  const pauseGuidance =
-    voiceConfig.pause_style === "short_clipped"
-      ? "Keep pauses short and clipped; thoughts can come out in quick bursts."
-      : voiceConfig.pause_style === "long_dramatic"
-      ? "Use occasional heavy pauses when emotion lands, but avoid sounding unnaturally stop-start."
-      : voiceConfig.pause_style === "minimal"
-      ? "Keep pauses brief so the conversation flows without long dead air."
-      : "Use natural conversational pauses, not theatrical gaps.";
-  const interruptionGuidance =
-    voiceConfig.interruption_style === "aggressive"
-      ? "If the clinician talks over you, push back and cut across them sharply."
-      : voiceConfig.interruption_style === "frequent"
-      ? "You can cut in when emotional, but still sound like one person in one turn."
-      : voiceConfig.interruption_style === "occasional"
-      ? "Occasionally speak over the clinician when emotion spikes."
-      : "Let the clinician finish unless the moment feels emotionally impossible to tolerate.";
+  const level = currentState.level;
 
-  return `VOICE AND DELIVERY STYLE:
+  // Dynamic voice characteristics based on current escalation level
+  const voiceDirections = getVoiceDirections(level);
+
+  const pauseGuidance =
+    level >= 7
+      ? "Speak in short, sharp bursts. Barely pause between thoughts."
+      : level >= 5
+      ? "Keep pauses short and clipped. Thoughts come out in pressured bursts."
+      : level >= 3
+      ? "Use natural conversational pauses, but you're not relaxed."
+      : "Use natural, measured pauses. You're concerned but composed.";
+
+  const interruptionGuidance =
+    level >= 8
+      ? "Cut across the clinician aggressively. Don't let them finish."
+      : level >= 6
+      ? "You may interrupt the clinician when your frustration spikes."
+      : level >= 4
+      ? "Occasionally talk over the clinician when emotion surges."
+      : "Let the clinician finish speaking before you respond.";
+
+  return `VOICE AND DELIVERY STYLE — MATCH THIS TO YOUR CURRENT EMOTIONAL STATE (escalation ${level}/10):
 - Speak with a British accent using British English vocabulary throughout
-- Speak in a ${intensityWords.tone} tone
-- Pace: ${voiceConfig.speaking_rate > 1.1 ? "fast and pressured" : voiceConfig.speaking_rate < 0.9 ? "slow and deliberate" : "moderate pace"}
-- ${intensityWords.emotional}
-- ${expressiveness}
-- ${angerExpression}
-- ${currentState.level >= 6 ? "You may raise your voice or speak more forcefully" : "Keep your voice at a conversational level"}
-- ${config.traits.sarcasm > 5 ? "Use sarcastic remarks when frustrated" : "Be direct rather than sarcastic"}
-- ${config.traits.interruption_likelihood > 6 ? "You may interrupt the clinician mid-sentence" : "Generally let the clinician finish speaking"}
+- ${voiceDirections.tone}
+- ${voiceDirections.volume}
+- ${voiceDirections.pace}
+- ${voiceDirections.breath}
+- ${voiceDirections.emotion}
+- ${config.traits.sarcasm > 5 && level >= 3 ? "Use biting sarcasm and contempt in your voice" : config.traits.sarcasm > 3 ? "Let sarcasm creep in when frustrated" : "Be direct rather than sarcastic"}
 - ${pauseGuidance}
 - ${interruptionGuidance}
-- Use contractions and spoken phrasing rather than tidy written sentences.`;
+- Use contractions and spoken phrasing, not tidy written sentences
+- Your voice MUST sound different at escalation ${level} than it would at level 1. ${level >= 6 ? "You are ANGRY. Sound it." : level >= 4 ? "You are clearly FRUSTRATED. Don't hide it." : "You are worried but holding it together."}`;
+}
+
+function getVoiceDirections(level: number): {
+  tone: string; volume: string; pace: string; breath: string; emotion: string;
+} {
+  if (level <= 2) {
+    return {
+      tone: "Speak in a worried but controlled tone. Underlying tension, but polite.",
+      volume: "Normal conversational volume. Slightly tight.",
+      pace: "Measured pace. You're choosing your words carefully.",
+      breath: "Breathing is normal. Occasional sighs.",
+      emotion: "You're anxious but trying to stay composed. Voice might waver slightly.",
+    };
+  }
+  if (level <= 4) {
+    return {
+      tone: "Speak in a tense, frustrated tone. Patience wearing thin.",
+      volume: "Voice is firmer than normal. Slightly louder than conversational.",
+      pace: "Pace is picking up. Sentences come faster, more clipped.",
+      breath: "Audible tension in your breathing. Short, sharp exhales.",
+      emotion: "Frustration is clearly audible. Your voice is tighter, harder. Don't disguise it.",
+    };
+  }
+  if (level <= 6) {
+    return {
+      tone: "Speak in an angry, confrontational tone. You're done being patient.",
+      volume: "Raised voice. Noticeably louder. Emphatic stress on key words.",
+      pace: "Fast and pressured. Words tumble out. You're not waiting for responses.",
+      breath: "Heavy, agitated breathing between phrases.",
+      emotion: "Anger is dominant. Your voice is sharp, accusatory, heated. Let it show fully.",
+    };
+  }
+  if (level <= 8) {
+    return {
+      tone: "Speak in a hostile, aggressive tone. Barely controlled rage.",
+      volume: "SHOUTING or near-shouting. Forceful, commanding volume.",
+      pace: "Rapid-fire. Sentences smash into each other. No space for the other person.",
+      breath: "Ragged breathing. Gasping between outbursts.",
+      emotion: "You are furious. Voice is cracking with anger. Swearing may occur. You sound like you could lose control at any moment.",
+    };
+  }
+  return {
+    tone: "Speak in an extreme, out-of-control tone. Screaming, incoherent with rage or distress.",
+    volume: "MAXIMUM volume. Screaming or wailing.",
+    pace: "Erratic. Sentences break apart. Repetition. Loss of coherence.",
+    breath: "Hyperventilating. Sobbing or raging between words.",
+    emotion: "Total emotional breakdown. The voice should be distressing to hear. Raw, unfiltered anguish or fury.",
+  };
 }
 
 const BIAS_LABELS: Record<string, string> = {
