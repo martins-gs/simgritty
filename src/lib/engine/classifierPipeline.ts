@@ -1,5 +1,8 @@
 import type { ClassifierResult } from "@/types/simulation";
 import type { StructuredVoiceProfile } from "@/types/voice";
+import { zodTextFormat } from "openai/helpers/zod";
+import { z } from "zod";
+import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
 
 export interface ClassifierContext {
   recentTurns: { speaker: string; content: string }[];
@@ -9,6 +12,16 @@ export interface ClassifierContext {
 }
 
 export type ClassifierMode = "trainee_utterance" | "patient_response" | "clinician_utterance";
+
+const CLASSIFIER_MODEL = process.env.OPENAI_CLASSIFIER_MODEL || "gpt-5.4-mini";
+
+const CLASSIFIER_OUTPUT_SCHEMA = z.object({
+  technique: z.string(),
+  effectiveness: z.number(),
+  tags: z.array(z.string()),
+  confidence: z.number(),
+  reasoning: z.string(),
+});
 
 const TRAINEE_CLASSIFIER_SYSTEM_PROMPT = `You are an expert communication skills assessor for clinical training scenarios.
 
@@ -118,30 +131,16 @@ function formatVoiceProfile(profile?: StructuredVoiceProfile | null): string {
 }
 
 async function requestClassification(
-  context: ClassifierContext,
   apiKey: string,
   systemPrompt: string,
   userPrompt: string
 ): Promise<ClassifierResult> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.1,
-      max_tokens: 200,
-      response_format: { type: "json_object" },
-    }),
-  });
+  const client = getOpenAIClient();
+  if (!client || !apiKey) {
+    if (shouldFailLoudOnOpenAIError()) {
+      throw new Error("OPENAI_API_KEY not configured");
+    }
 
-  if (!response.ok) {
     return {
       technique: "unknown",
       effectiveness: 0,
@@ -151,11 +150,25 @@ async function requestClassification(
     };
   }
 
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-
   try {
-    const parsed = JSON.parse(content);
+    const response = await client.responses.parse({
+      model: CLASSIFIER_MODEL,
+      instructions: systemPrompt,
+      input: userPrompt,
+      store: false,
+      reasoning: { effort: "none" },
+      max_output_tokens: 220,
+      text: {
+        format: zodTextFormat(CLASSIFIER_OUTPUT_SCHEMA, "utterance_classifier"),
+        verbosity: "low",
+      },
+    });
+
+    const parsed = response.output_parsed;
+    if (!parsed) {
+      throw new Error("No parsed classifier output returned");
+    }
+
     return {
       technique: parsed.technique || "unknown",
       effectiveness: Math.max(-1, Math.min(1, parsed.effectiveness || 0)),
@@ -163,7 +176,11 @@ async function requestClassification(
       confidence: Math.max(0, Math.min(1, parsed.confidence || 0)),
       reasoning: parsed.reasoning || "",
     };
-  } catch {
+  } catch (error) {
+    if (shouldFailLoudOnOpenAIError()) {
+      throw error;
+    }
+
     return {
       technique: "unknown",
       effectiveness: 0,
@@ -201,7 +218,6 @@ Assess the trainee's effect on the interaction using both:
 - the structured delivery profile, if provided, which describes how the utterance sounded emotionally and vocally.`;
 
   return requestClassification(
-    context,
     apiKey,
     TRAINEE_CLASSIFIER_SYSTEM_PROMPT,
     userPrompt
@@ -237,7 +253,6 @@ Use both:
 - the structured delivery profile for the preceding clinician utterance, if provided, because the patient's reaction depends partly on how that clinician line landed emotionally.`;
 
   return requestClassification(
-    context,
     apiKey,
     PATIENT_RESPONSE_CLASSIFIER_SYSTEM_PROMPT,
     userPrompt
@@ -271,7 +286,6 @@ Assess the likely effect of this clinician turn using both:
 - the structured delivery profile, if provided, which describes how the utterance sounded emotionally and vocally.`;
 
   return requestClassification(
-    context,
     apiKey,
     CLINICIAN_CLASSIFIER_SYSTEM_PROMPT,
     userPrompt

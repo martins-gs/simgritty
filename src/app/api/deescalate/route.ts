@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getOpenAIErrorMessage, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
 import { generateClinicianTurn } from "@/lib/openai/structuredVoice";
 import type { EscalationState } from "@/types/escalation";
 import type { StructuredVoiceProfile } from "@/types/voice";
@@ -27,15 +28,30 @@ export async function POST(request: Request) {
     patientVoiceProfile?: StructuredVoiceProfile | null;
   };
 
-  const turn = await generateClinicianTurn({
-    scenarioContext: scenarioContext || "NHS de-escalation scenario",
-    emotionalDriver: emotionalDriver || "",
-    patientRole: patientRole || "patient",
-    clinicianRole: clinicianRole || "experienced British NHS clinician",
-    escalationState: escalationState ?? {},
-    recentTurns: recentTurns ?? [],
-    patientVoiceProfile: patientVoiceProfile ?? null,
-  });
+  let turn;
+  try {
+    turn = await generateClinicianTurn({
+      scenarioContext: scenarioContext || "NHS de-escalation scenario",
+      emotionalDriver: emotionalDriver || "",
+      patientRole: patientRole || "patient",
+      clinicianRole: clinicianRole || "experienced British NHS clinician",
+      escalationState: escalationState ?? {},
+      recentTurns: recentTurns ?? [],
+      patientVoiceProfile: patientVoiceProfile ?? null,
+    });
+  } catch (error) {
+    console.error("Clinician turn generation error:", error);
+    if (shouldFailLoudOnOpenAIError()) {
+      return NextResponse.json(
+        {
+          error: "Clinician generation failed",
+          detail: getOpenAIErrorMessage(error),
+        },
+        { status: 502 }
+      );
+    }
+    throw error;
+  }
 
   const fallbackVoiceProfile: StructuredVoiceProfile | null = null;
 

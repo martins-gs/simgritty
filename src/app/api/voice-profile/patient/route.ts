@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getOpenAIErrorMessage, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
 import { generatePatientVoiceProfile } from "@/lib/openai/structuredVoice";
 import type { EscalationState } from "@/types/escalation";
 import type { ScenarioTraits, ScenarioVoiceConfig } from "@/types/scenario";
@@ -28,19 +29,34 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing patient voice profile context" }, { status: 400 });
   }
 
-  const voiceProfile = await generatePatientVoiceProfile({
-    title: body.title || "Simulation scenario",
-    aiRole: body.aiRole || "Patient",
-    traineeRole: body.traineeRole || "Clinician",
-    backstory: body.backstory || "",
-    emotionalDriver: body.emotionalDriver || "",
-    setting: body.setting || "",
-    traits: body.traits,
-    voiceConfig: body.voiceConfig,
-    currentState: body.currentState,
-    recentTurns: body.recentTurns ?? [],
-    latestClinicianVoiceProfile: body.latestClinicianVoiceProfile,
-  });
+  let voiceProfile;
+  try {
+    voiceProfile = await generatePatientVoiceProfile({
+      title: body.title || "Simulation scenario",
+      aiRole: body.aiRole || "Patient",
+      traineeRole: body.traineeRole || "Clinician",
+      backstory: body.backstory || "",
+      emotionalDriver: body.emotionalDriver || "",
+      setting: body.setting || "",
+      traits: body.traits,
+      voiceConfig: body.voiceConfig,
+      currentState: body.currentState,
+      recentTurns: body.recentTurns ?? [],
+      latestClinicianVoiceProfile: body.latestClinicianVoiceProfile,
+    });
+  } catch (error) {
+    console.error("Patient voice profile generation error:", error);
+    if (shouldFailLoudOnOpenAIError()) {
+      return NextResponse.json(
+        {
+          error: "Patient voice profile generation failed",
+          detail: getOpenAIErrorMessage(error),
+        },
+        { status: 502 }
+      );
+    }
+    throw error;
+  }
 
   return NextResponse.json({ voiceProfile });
 }

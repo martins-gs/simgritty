@@ -1,43 +1,38 @@
 import type { EscalationState } from "@/types/escalation";
 import type { ScenarioTraits, ScenarioVoiceConfig } from "@/types/scenario";
 import type { StructuredClinicianTurn, StructuredVoiceProfile } from "@/types/voice";
+import { zodTextFormat } from "openai/helpers/zod";
+import { z } from "zod";
+import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
 import { renderVoiceProfileForPrompt } from "@/lib/voice/renderVoiceProfile";
 
-const VOICE_PROFILE_MODEL = process.env.OPENAI_VOICE_PROFILE_MODEL || "gpt-4o-mini";
+const VOICE_PROFILE_MODEL = process.env.OPENAI_VOICE_PROFILE_MODEL || "gpt-5.4-mini";
 
-const VOICE_PROFILE_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    accent: { type: "string" },
-    voiceAffect: { type: "string" },
-    tone: { type: "string" },
-    pacing: { type: "string" },
-    emotion: { type: "string" },
-    delivery: { type: "string" },
-    variety: { type: "string" },
-  },
-  required: ["accent", "voiceAffect", "tone", "pacing", "emotion", "delivery", "variety"],
-} as const;
+const VOICE_PROFILE_SCHEMA = z.object({
+  accent: z.string(),
+  voiceAffect: z.string(),
+  tone: z.string(),
+  pacing: z.string(),
+  emotion: z.string(),
+  delivery: z.string(),
+  variety: z.string(),
+});
 
-const CLINICIAN_TURN_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    text: { type: "string" },
-    technique: { type: "string" },
-    voiceProfile: VOICE_PROFILE_SCHEMA,
-  },
-  required: ["text", "technique", "voiceProfile"],
-} as const;
+const CLINICIAN_TURN_SCHEMA = z.object({
+  text: z.string(),
+  technique: z.string(),
+  voiceProfile: VOICE_PROFILE_SCHEMA,
+});
+
+type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 interface StructuredOutputRequest {
   systemPrompt: string;
   userPrompt: string;
   schemaName: string;
-  schema: Record<string, unknown>;
-  temperature?: number;
+  schema: z.ZodTypeAny;
   maxTokens?: number;
+  reasoningEffort?: ReasoningEffort;
 }
 
 interface PatientVoiceProfileInput {
@@ -69,54 +64,39 @@ async function requestStructuredOutput<T>({
   userPrompt,
   schemaName,
   schema,
-  temperature = 0.4,
   maxTokens = 600,
+  reasoningEffort = "low",
 }: StructuredOutputRequest): Promise<T | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    console.error("Structured voice output error: OPENAI_API_KEY not configured");
+  const client = getOpenAIClient();
+  if (!client) {
+    const error = new Error("OPENAI_API_KEY not configured");
+    console.error("Structured voice output error:", error);
+    if (shouldFailLoudOnOpenAIError()) {
+      throw error;
+    }
     return null;
   }
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: VOICE_PROFILE_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature,
-      max_tokens: maxTokens,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: schemaName,
-          strict: true,
-          schema,
-        },
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Structured voice output error:", errorText);
-    return null;
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) return null;
 
   try {
-    return JSON.parse(content) as T;
+    const response = await client.responses.parse({
+      model: VOICE_PROFILE_MODEL,
+      instructions: systemPrompt,
+      input: userPrompt,
+      store: false,
+      reasoning: { effort: reasoningEffort },
+      max_output_tokens: maxTokens,
+      text: {
+        format: zodTextFormat(schema, schemaName),
+        verbosity: "low",
+      },
+    });
+
+    return (response.output_parsed as T | null) ?? null;
   } catch (error) {
-    console.error("Structured voice output parse error:", error);
+    console.error("Structured voice output error:", error);
+    if (shouldFailLoudOnOpenAIError()) {
+      throw error;
+    }
     return null;
   }
 }
@@ -211,8 +191,8 @@ Use all available inputs together:
     userPrompt,
     schemaName: "patient_voice_profile",
     schema: VOICE_PROFILE_SCHEMA,
-    temperature: 0.3,
     maxTokens: 500,
+    reasoningEffort: "low",
   });
 }
 
@@ -273,7 +253,7 @@ Use all three inputs together:
     userPrompt,
     schemaName: "clinician_turn_with_voice_profile",
     schema: CLINICIAN_TURN_SCHEMA,
-    temperature: 0.4,
     maxTokens: 650,
+    reasoningEffort: "low",
   });
 }

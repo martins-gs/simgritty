@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getOpenAIErrorMessage, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
 import {
   classifyClinicianUtterance,
   classifyPatientResponse,
@@ -28,11 +29,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "utterance and context required" }, { status: 400 });
   }
 
-  const result = mode === "patient_response"
-    ? await classifyPatientResponse(utterance, context, apiKey)
-    : mode === "clinician_utterance"
-      ? await classifyClinicianUtterance(utterance, context, apiKey)
-      : await classifyUtterance(utterance, context, apiKey);
+  let result;
+  try {
+    result = mode === "patient_response"
+      ? await classifyPatientResponse(utterance, context, apiKey)
+      : mode === "clinician_utterance"
+        ? await classifyClinicianUtterance(utterance, context, apiKey)
+        : await classifyUtterance(utterance, context, apiKey);
+  } catch (error) {
+    console.error("Classification route error:", error);
+    if (shouldFailLoudOnOpenAIError()) {
+      return NextResponse.json(
+        {
+          error: "Classification failed",
+          detail: getOpenAIErrorMessage(error),
+        },
+        { status: 502 }
+      );
+    }
+    throw error;
+  }
 
   return NextResponse.json(result);
 }

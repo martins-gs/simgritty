@@ -11,6 +11,8 @@ export interface EscalationState {
   unanswered_questions: number;
 }
 
+export type TurnSource = "trainee" | "clinician" | "patient_response";
+
 export interface EscalationDelta {
   level_delta: number;
   trust_delta: number;

@@ -38,9 +38,9 @@ function escColor(level: number) {
 }
 
 const CLINICIAN_REALTIME_VOICE = "cedar";
-const CLINICIAN_REALTIME_HANDOFF_DELAY_MS = 150;
-const BOT_TURN_POST_PATIENT_DELAY_MS = 650;
-const BOT_RESPONSE_CANCEL_SETTLE_MS = 75;
+const CLINICIAN_REALTIME_HANDOFF_DELAY_MS = 25;
+const BOT_TURN_POST_PATIENT_DELAY_MS = 50;
+const BOT_RESPONSE_CANCEL_SETTLE_MS = 40;
 const BOT_PATIENT_AUDIO_CLEAR_WAIT_MS = 250;
 const PATIENT_TURN_COMPLETION_TIMEOUT_MS = 4000;
 
@@ -728,7 +728,7 @@ export default function SimulationPage() {
       console.log("[Bot Patient State] Classifier:", classResult);
 
       const prevState = engineRef.current.getState();
-      const delta = engineRef.current.processClassification(classResult);
+      const delta = engineRef.current.processClassification(classResult, "patient_response");
       const newState = engineRef.current.getState();
       if (isStale()) return null;
 
@@ -922,7 +922,7 @@ export default function SimulationPage() {
       console.log("[Escalation] Classifier:", classResult);
 
       const prevState = engineRef.current.getState();
-      const delta = engineRef.current.processClassification(classResult);
+      const delta = engineRef.current.processClassification(classResult, "trainee");
       const newState = engineRef.current.getState();
       console.log("[Escalation]", prevState.level, "→", newState.level, delta.trigger_type);
 
@@ -995,7 +995,14 @@ export default function SimulationPage() {
     try {
       if (isStale()) return null;
       console.info("[Bot Prep] Starting patient-state preparation from clinician text and voice profile");
-      const res = await fetch("/api/classify", {
+
+      // Pipeline: classify and fetch voice profile in parallel.
+      // Voice profile uses pre-classification state as a close approximation
+      // (clinician impact is dampened, so the state delta is small).
+      const currentState = engineRef.current.getState();
+      const recentPromptTurns = getRecentPromptTurns();
+
+      const classifyPromise = fetch("/api/classify", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           utterance: text,
@@ -1009,6 +1016,16 @@ export default function SimulationPage() {
         }),
         signal,
       });
+
+      const voiceProfilePromise = fetchPatientVoiceProfile(
+        snapshot,
+        currentState,
+        recentPromptTurns,
+        clinicianVoiceProfile,
+        signal
+      );
+
+      const res = await classifyPromise;
       if (!res.ok || isStale() || !engineRef.current) return null;
       const classResult = await res.json();
       if (isStale() || !engineRef.current) return null;
@@ -1016,7 +1033,7 @@ export default function SimulationPage() {
       console.log("[Bot Escalation] Classifier:", classResult);
 
       const prevState = engineRef.current.getState();
-      const delta = engineRef.current.processClassification(classResult);
+      const delta = engineRef.current.processClassification(classResult, "clinician");
       const newState = engineRef.current.getState();
       if (isStale()) return null;
       console.log("[Bot Escalation]", prevState.level, "→", newState.level, delta.trigger_type);
@@ -1028,12 +1045,19 @@ export default function SimulationPage() {
       fetch(`/api/sessions/${sessionId}/events`, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event_index: evtIdx, event_type: delta.trigger_type === "escalation" ? "escalation_change" : delta.trigger_type === "de_escalation" ? "de_escalation_change" : "classification_result", escalation_before: prevState.level, escalation_after: newState.level, trust_before: prevState.trust, trust_after: newState.trust, listening_before: prevState.willingness_to_listen, listening_after: newState.willingness_to_listen, payload: { classifier: classResult, delta, source: "bot_clinician" } }) });
 
-      const newInstructions = await resolvePatientInstructions(
+      // Voice profile fetch was running in parallel — await it now
+      const voiceProfile = await voiceProfilePromise;
+      if (isStale()) return null;
+
+      if (voiceProfile) {
+        patientVoiceProfileRef.current = voiceProfile;
+      }
+
+      const newInstructions = buildPatientInstructions(
         snapshot,
         newState,
-        getRecentPromptTurns(),
-        clinicianVoiceProfile,
-        signal
+        recentPromptTurns,
+        voiceProfile ?? patientVoiceProfileRef.current
       );
       if (newInstructions && !isStale()) {
         console.info("[Bot Prep] Patient response profile prepared from clinician text and voice profile");
@@ -1222,6 +1246,14 @@ export default function SimulationPage() {
     appendTranscriptEntry(entry);
     const idx = turnIndexRef.current++;
 
+    // Run speech and classification in parallel — classification completes during speech
+    const classifyPromise = classifyBotUtterance(
+      text,
+      voiceProfile,
+      abort.signal,
+      recentTurnsBeforeBotTurn
+    );
+
     const clinicianAudioPath = await speakWithClinicianAudio(text, technique, voiceProfile, abort);
     if (abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
 
@@ -1231,12 +1263,9 @@ export default function SimulationPage() {
       if (abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
     }
 
-    const botTurnSnapshot = await classifyBotUtterance(
-      text,
-      voiceProfile,
-      abort.signal,
-      recentTurnsBeforeBotTurn
-    );
+    // Classification should already be done by now (ran during speech).
+    // If not, wait for it — but this is much shorter than the full sequential delay.
+    const botTurnSnapshot = await classifyPromise;
     if (abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
 
     const persistedSnapshot = botTurnSnapshot ?? buildSnapshot();
@@ -1289,10 +1318,10 @@ export default function SimulationPage() {
             if (pendingTurnCompletion) {
               await pendingTurnCompletion;
             }
-            const pendingStateUpdate = pendingPatientReplyUpdateRef.current;
-            if (pendingStateUpdate) {
-              await pendingStateUpdate;
-            }
+            // Don't await pendingPatientReplyUpdate — the voice profile update
+            // can finish in the background while the next bot turn starts.
+            // The escalation state is already updated synchronously from the
+            // classifier result, which is all the next bot turn needs.
             if (abort.signal.aborted || !botActiveRef.current) {
               resolve();
               return;
@@ -1301,7 +1330,7 @@ export default function SimulationPage() {
           })();
           return;
         }
-      }, 50);
+      }, 25);
     });
   }
 

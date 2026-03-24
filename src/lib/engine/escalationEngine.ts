@@ -1,4 +1,4 @@
-import type { EscalationState, EscalationDelta } from "@/types/escalation";
+import type { EscalationState, EscalationDelta, TurnSource } from "@/types/escalation";
 import type { ClassifierResult } from "@/types/simulation";
 import type { ScenarioTraits, EscalationRules } from "@/types/scenario";
 
@@ -55,46 +55,82 @@ export class EscalationEngine {
     return this.state.level >= this.rules.auto_end_threshold;
   }
 
-  processClassification(result: ClassifierResult): EscalationDelta {
+  processClassification(result: ClassifierResult, source: TurnSource = "trainee"): EscalationDelta {
     const effectiveness = result.effectiveness; // -1 to +1
     const volatilityFactor = this.traits.volatility / 10;
     const escalationTendency = this.traits.escalation_tendency / 10;
+    const impatienceFactor = this.traits.impatience / 10;
 
-    // Base delta from a state-impact score.
-    // Negative effectiveness = the interaction moved the patient toward escalation.
-    // Positive effectiveness = the interaction moved the patient toward de-escalation.
+    // Patient responses only track state — they don't move the level themselves.
+    // The level already moved from the utterance that caused the response.
+    if (source === "patient_response") {
+      const reason = result.reasoning;
+      // Track behaviour counts only
+      if (result.tags.includes("validation") || result.tags.includes("empathy")) {
+        this.state.validations_count++;
+      }
+      return {
+        level_delta: 0,
+        trust_delta: 0,
+        listening_delta: 0,
+        reason,
+        trigger_type: "neutral",
+      };
+    }
+
     let levelDelta = 0;
     let trustDelta = 0;
     let listeningDelta = 0;
     const reason = result.reasoning;
     let triggerType: EscalationDelta["trigger_type"] = "neutral";
 
-    if (effectiveness < -0.3) {
-      // Escalation trigger
+    // Narrower deadzone: ±0.15 instead of ±0.3
+    // Already-escalated patients are more reactive (lower threshold)
+    const escalationDeadzone = this.state.level >= 5 ? -0.1 : -0.15;
+    const deescalationDeadzone = source === "clinician" ? 0.2 : 0.15;
+
+    if (effectiveness < escalationDeadzone) {
+      // --- Escalation trigger ---
       const rawDelta = Math.abs(effectiveness) * 2; // 0-2 range
       const amplified = rawDelta * (1 + volatilityFactor * 0.5);
-      levelDelta = Math.round(amplified * (0.5 + escalationTendency * 0.5));
+
+      // Already-angry patients are MORE reactive to rudeness, not less
+      const angerReactivity = 1 + (this.state.anger / 10) * 0.5; // 1.0-1.5x
+      // Impatience makes the patient quicker to escalate
+      const impatienceBoost = 1 + impatienceFactor * 0.3; // 1.0-1.3x
+
+      levelDelta = Math.round(amplified * (0.5 + escalationTendency * 0.5) * angerReactivity * impatienceBoost);
       levelDelta = Math.max(1, Math.min(levelDelta, 3)); // Cap single-turn jump at 3
 
       trustDelta = -Math.round(Math.abs(effectiveness) * 2);
       listeningDelta = -Math.round(Math.abs(effectiveness) * 1.5);
       triggerType = "escalation";
-    } else if (effectiveness > 0.3) {
-      // De-escalation trigger
-      const rawRecovery = effectiveness * 1.5;
+    } else if (effectiveness > deescalationDeadzone) {
+      // --- De-escalation trigger ---
+      let rawRecovery = effectiveness * 1.5;
+
+      // Clinician bot is an expert — dampen its impact so recovery is gradual, not instant
+      if (source === "clinician") {
+        rawRecovery *= 0.35;
+      }
+
       // Low trust slows recovery
       const trustPenalty = (10 - this.state.trust) / 20;
-      const recovery = rawRecovery * (1 - trustPenalty);
+      // High anger resists de-escalation
+      const angerResistance = this.state.anger >= 6 ? 0.6 : this.state.anger >= 4 ? 0.8 : 1.0;
+      const recovery = rawRecovery * (1 - trustPenalty) * angerResistance;
       levelDelta = -Math.round(recovery);
       levelDelta = Math.max(levelDelta, -2); // Cap single-turn drop at 2
 
-      // Large drops are rare unless trainee performs strongly and persona is recoverable
-      if (levelDelta < -1 && this.state.trust < 3) {
+      // Large drops are rare unless trust is already established
+      if (levelDelta < -1 && this.state.trust < 4) {
         levelDelta = -1;
       }
 
-      trustDelta = Math.round(effectiveness);
-      listeningDelta = Math.round(effectiveness * 1.5);
+      // Clinician trust gains are slower — real trust takes time
+      const trustGainFactor = source === "clinician" ? 0.4 : 1.0;
+      trustDelta = Math.round(effectiveness * trustGainFactor);
+      listeningDelta = Math.round(effectiveness * 1.5 * (source === "clinician" ? 0.5 : 1.0));
       triggerType = "de_escalation";
     } else {
       // Neutral — slight drift toward escalation tendency
