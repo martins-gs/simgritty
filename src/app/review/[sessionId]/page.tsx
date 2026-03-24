@@ -7,6 +7,8 @@ import { TranscriptViewer } from "@/components/review/TranscriptViewer";
 import { EscalationTimeline } from "@/components/review/EscalationTimeline";
 import { EventLog } from "@/components/review/EventLog";
 import { EducatorNotes } from "@/components/review/EducatorNotes";
+import { ScoreCard } from "@/components/review/ScoreCard";
+import { computeScore } from "@/lib/engine/scoring";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,6 +70,28 @@ export default function ReviewPage() {
     return `${m}m ${s}s`;
   };
 
+  const initialLevel =
+    (session.scenario_snapshot as { escalation_rules?: { initial_level?: number }[] })
+      ?.escalation_rules?.[0]?.initial_level ?? 3;
+  const traineeTurnCount = turns.filter((t) => t.speaker === "trainee").length;
+  const botTurnCount = turns.filter(
+    (t) => t.speaker === "ai" && t.classifier_result && (t as unknown as { source?: string }).source === "clinician"
+  ).length;
+  // Count bot turns by looking at events triggered by clinician source
+  const clinicianEventCount = events.filter(
+    (e) =>
+      (e.payload as { delta?: { source?: string } } | null)?.delta?.source === "clinician" ||
+      (e.payload as { classifier?: { source?: string } } | null)?.classifier?.source === "clinician"
+  ).length;
+
+  const score = computeScore({
+    session,
+    events,
+    initialLevel,
+    botTurnCount: clinicianEventCount || botTurnCount,
+    traineeTurnCount,
+  });
+
   const selectedTurn = turns.find((turn) => turn.id === selectedTurnId) ?? null;
   const canRestartFromSelectedTurn = Boolean(selectedTurn?.state_after && selectedTurn?.patient_prompt_after);
 
@@ -123,6 +147,9 @@ export default function ReviewPage() {
             )}
           </div>
         </div>
+
+        {/* Score */}
+        <ScoreCard score={score} />
 
         {/* Summary Cards */}
         <div className="grid gap-4 sm:grid-cols-4">

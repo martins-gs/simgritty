@@ -36,6 +36,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<SessionItem | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteScenarioTarget, setDeleteScenarioTarget] = useState<ScenarioItem | null>(null);
+  const [deletingScenario, setDeletingScenario] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -62,6 +64,22 @@ export default function DashboardPage() {
     }
     setDeleting(false);
     setDeleteTarget(null);
+  }
+
+  async function handleDeleteScenario() {
+    if (!deleteScenarioTarget) return;
+    setDeletingScenario(true);
+    const res = await fetch(`/api/scenarios/${deleteScenarioTarget.id}`, { method: "DELETE" });
+    if (res.ok) {
+      setScenarios((prev) => prev.filter((s) => s.id !== deleteScenarioTarget.id));
+      // Also remove sessions that belonged to this scenario
+      setSessions((prev) => prev.filter((s) => s.scenario_id !== deleteScenarioTarget.id));
+      toast.success("Scenario deleted");
+    } else {
+      toast.error("Failed to delete scenario");
+    }
+    setDeletingScenario(false);
+    setDeleteScenarioTarget(null);
   }
 
   const publishedScenarios = scenarios.filter((s) => s.status === "published");
@@ -119,13 +137,22 @@ export default function DashboardPage() {
           ) : (
             <div className="divide-y divide-border/60 rounded-lg border border-border/60 bg-card">
               {scenarios.map((s) => (
-                <Link key={s.id} href={`/scenarios/${s.id}`} className="flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-accent/40">
-                  <div className="flex items-center gap-3 min-w-0">
+                <div key={s.id} className="flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-accent/40">
+                  <Link href={`/scenarios/${s.id}`} className="flex-1 flex items-center gap-3 min-w-0">
                     <span className="truncate text-[13px] font-medium">{s.title}</span>
                     <Badge variant={s.status === "published" ? "default" : "secondary"} className="text-[10px] shrink-0">{s.status}</Badge>
+                  </Link>
+                  <div className="flex items-center gap-2 shrink-0 ml-3">
+                    <span className="text-[11px] text-muted-foreground capitalize">{s.difficulty}</span>
+                    <button
+                      onClick={(e) => { e.preventDefault(); setDeleteScenarioTarget(s); }}
+                      className="ml-1 flex h-6 w-6 items-center justify-center rounded text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                      aria-label="Delete scenario"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                  <span className="text-[11px] text-muted-foreground capitalize shrink-0 ml-3">{s.difficulty}</span>
-                </Link>
+                </div>
               ))}
             </div>
           )}
@@ -170,7 +197,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Delete confirmation dialog */}
+      {/* Delete session confirmation dialog */}
       <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
         <DialogContent>
           <DialogHeader>
@@ -183,6 +210,24 @@ export default function DashboardPage() {
             <Button variant="outline" className="text-[13px]" onClick={() => setDeleteTarget(null)}>Cancel</Button>
             <Button variant="destructive" onClick={handleDeleteSession} disabled={deleting} className="text-[13px]">
               {deleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete scenario confirmation dialog */}
+      <Dialog open={!!deleteScenarioTarget} onOpenChange={(open) => { if (!open) setDeleteScenarioTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete scenario</DialogTitle>
+            <DialogDescription>
+              This will permanently delete &ldquo;{deleteScenarioTarget?.title}&rdquo; and all associated sessions, transcripts, events, and notes. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" className="text-[13px]" onClick={() => setDeleteScenarioTarget(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteScenario} disabled={deletingScenario} className="text-[13px]">
+              {deletingScenario ? "Deleting..." : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>

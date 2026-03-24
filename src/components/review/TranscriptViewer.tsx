@@ -3,7 +3,10 @@
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { ArrowUp, ArrowDown, Minus } from "lucide-react";
 import type { TranscriptTurn, ClassifierResult } from "@/types/simulation";
+import type { EscalationState } from "@/types/escalation";
+import { ESCALATION_LABELS } from "@/types/escalation";
 
 interface TranscriptViewerProps {
   turns: TranscriptTurn[];
@@ -11,12 +14,74 @@ interface TranscriptViewerProps {
   selectedTurnId?: string | null;
 }
 
+function getSpeakerLabel(speaker: string): string {
+  if (speaker === "trainee") return "Trainee";
+  if (speaker === "system") return "AI Clinician";
+  return "Patient";
+}
+
+function getSpeakerVariant(speaker: string): "default" | "secondary" | "outline" {
+  if (speaker === "trainee") return "default";
+  if (speaker === "system") return "outline";
+  return "secondary";
+}
+
+function EscalationImpact({
+  levelBefore,
+  levelAfter,
+}: {
+  levelBefore: number;
+  levelAfter: number;
+}) {
+  const delta = levelAfter - levelBefore;
+
+  const isUp = delta > 0;
+  const isDown = delta < 0;
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums shrink-0",
+        isUp && "bg-red-50 text-red-600",
+        isDown && "bg-emerald-50 text-emerald-600",
+        !isUp && !isDown && "bg-slate-50 text-slate-400"
+      )}
+      title={`${ESCALATION_LABELS[levelAfter] ?? `Level ${levelAfter}`} (${delta > 0 ? "+" : ""}${delta})`}
+    >
+      {isUp && <ArrowUp className="h-3 w-3" />}
+      {isDown && <ArrowDown className="h-3 w-3" />}
+      {!isUp && !isDown && <Minus className="h-3 w-3" />}
+      <span>{levelAfter}</span>
+    </div>
+  );
+}
+
 export function TranscriptViewer({ turns, onTurnSelect, selectedTurnId }: TranscriptViewerProps) {
+  // Build a map of each turn's "before" level by tracking state across turns
+  const levelBeforeMap = new Map<string, number>();
+  let lastKnownLevel = 3; // default initial level
+
+  for (const turn of turns) {
+    const stateAfter = turn.state_after as EscalationState | null;
+    // The "before" for this turn is the last known level
+    levelBeforeMap.set(turn.id, lastKnownLevel);
+    // Update last known level if this turn has state
+    if (stateAfter) {
+      lastKnownLevel = stateAfter.level;
+    }
+  }
+
   return (
     <ScrollArea className="h-full">
       <div className="space-y-3 p-4">
         {turns.map((turn) => {
           const classifier = turn.classifier_result as ClassifierResult | null;
+          const stateAfter = turn.state_after as EscalationState | null;
+          const showImpact =
+            (turn.speaker === "trainee" || turn.speaker === "system") &&
+            stateAfter !== null;
+          const levelBefore = levelBeforeMap.get(turn.id) ?? 3;
+
           return (
             <div
               key={turn.id}
@@ -27,18 +92,29 @@ export function TranscriptViewer({ turns, onTurnSelect, selectedTurnId }: Transc
               onClick={() => onTurnSelect?.(turn.id)}
             >
               <div className="flex items-center justify-between mb-1">
-                <Badge
-                  variant={turn.speaker === "trainee" ? "default" : "secondary"}
-                  className="text-[10px]"
-                >
-                  {turn.speaker === "trainee" ? "Trainee" : turn.speaker === "ai" ? "Patient" : "System"}
-                </Badge>
-                <span className="text-[10px] text-muted-foreground tabular-nums">
-                  {new Date(turn.started_at).toLocaleTimeString()}
-                </span>
+                <div className="flex items-center gap-2">
+                  <Badge
+                    variant={getSpeakerVariant(turn.speaker)}
+                    className={cn(
+                      "text-[10px]",
+                      turn.speaker === "system" && "border-indigo-300 text-indigo-700 bg-indigo-50"
+                    )}
+                  >
+                    {getSpeakerLabel(turn.speaker)}
+                  </Badge>
+                  <span className="text-[10px] text-muted-foreground tabular-nums">
+                    {new Date(turn.started_at).toLocaleTimeString()}
+                  </span>
+                </div>
+                {showImpact && (
+                  <EscalationImpact
+                    levelBefore={levelBefore}
+                    levelAfter={stateAfter!.level}
+                  />
+                )}
               </div>
               <p className="text-sm">{turn.content}</p>
-              {classifier && turn.speaker === "trainee" && (
+              {classifier && (turn.speaker === "trainee" || turn.speaker === "system") && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   <Badge
                     variant="outline"

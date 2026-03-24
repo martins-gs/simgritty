@@ -111,7 +111,7 @@ export class EscalationEngine {
 
       // Clinician bot is an expert — dampen its impact so recovery is gradual, not instant
       if (source === "clinician") {
-        rawRecovery *= 0.35;
+        rawRecovery *= 0.5;
       }
 
       // Low trust slows recovery
@@ -120,6 +120,12 @@ export class EscalationEngine {
       const angerResistance = this.state.anger >= 6 ? 0.6 : this.state.anger >= 4 ? 0.8 : 1.0;
       const recovery = rawRecovery * (1 - trustPenalty) * angerResistance;
       levelDelta = -Math.round(recovery);
+
+      // Prevent perpetual round-to-zero: any meaningful recovery produces at least -1
+      if (levelDelta === 0 && recovery >= 0.2) {
+        levelDelta = -1;
+      }
+
       levelDelta = Math.max(levelDelta, -2); // Cap single-turn drop at 2
 
       // Large drops are rare unless trust is already established
@@ -128,9 +134,17 @@ export class EscalationEngine {
       }
 
       // Clinician trust gains are slower — real trust takes time
-      const trustGainFactor = source === "clinician" ? 0.4 : 1.0;
+      const trustGainFactor = source === "clinician" ? 0.6 : 1.0;
       trustDelta = Math.round(effectiveness * trustGainFactor);
-      listeningDelta = Math.round(effectiveness * 1.5 * (source === "clinician" ? 0.5 : 1.0));
+      // Prevent trust deadlock: any positive gain signal builds at least +1 trust
+      if (trustDelta === 0 && effectiveness * trustGainFactor >= 0.2) {
+        trustDelta = 1;
+      }
+      const listeningGainFactor = source === "clinician" ? 0.65 : 1.0;
+      listeningDelta = Math.round(effectiveness * 1.5 * listeningGainFactor);
+      if (listeningDelta === 0 && effectiveness * 1.5 * listeningGainFactor >= 0.2) {
+        listeningDelta = 1;
+      }
       triggerType = "de_escalation";
     } else {
       // Neutral — slight drift toward escalation tendency

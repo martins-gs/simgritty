@@ -69,3 +69,40 @@ export async function PUT(
 
   return NextResponse.json({ id });
 }
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Delete related sessions and their child records first
+  const { data: sessions } = await supabase
+    .from("simulation_sessions")
+    .select("id")
+    .eq("scenario_id", id);
+
+  if (sessions && sessions.length > 0) {
+    const sessionIds = sessions.map((s) => s.id);
+    await supabase.from("educator_notes").delete().in("session_id", sessionIds);
+    await supabase.from("simulation_state_events").delete().in("session_id", sessionIds);
+    await supabase.from("transcript_turns").delete().in("session_id", sessionIds);
+    await supabase.from("simulation_sessions").delete().in("id", sessionIds);
+  }
+
+  // Delete scenario child records
+  await supabase.from("escalation_rules").delete().eq("scenario_id", id);
+  await supabase.from("scenario_voice_config").delete().eq("scenario_id", id);
+  await supabase.from("scenario_traits").delete().eq("scenario_id", id);
+
+  const { error } = await supabase.from("scenario_templates").delete().eq("id", id);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
+}

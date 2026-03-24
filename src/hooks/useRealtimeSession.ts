@@ -138,8 +138,10 @@ export function useRealtimeSession() {
         const transcript = (msg.transcript as string)?.trim();
         if (!transcript) break;
 
-        // Drop if mic was gated (this transcript came from echo)
-        if (micGatedRef.current) break;
+        // The mic track is disabled while the echo gate is active, so no new audio
+        // reaches the API during gating. Any transcript arriving while gated is from
+        // speech captured BEFORE the gate activated — it is real trainee speech, not echo.
+        // We no longer drop these transcripts.
 
         // Drop non-English hallucinations
         if (!isLikelyEnglish(transcript)) break;

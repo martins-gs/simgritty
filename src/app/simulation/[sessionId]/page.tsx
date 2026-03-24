@@ -911,19 +911,31 @@ export default function SimulationPage() {
     classifyingRef.current = true;
     const snapshot = scenarioRef.current;
 
+    let classResult: ClassifierResult | null = null;
+    let delta: { trigger_type: string; level_delta: number; trust_delta: number; listening_delta: number; reason: string } | null = null;
+    let newState: EscalationState | null = null;
+    let prevState: EscalationState | null = null;
+
     try {
       const classifyRes = await fetch("/api/classify", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ utterance: text, context: { recentTurns, scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`, currentEscalation: engineRef.current.getLevel() } }),
       });
-      if (!classifyRes.ok) return;
-      const classResult = await classifyRes.json();
-      setLastClassification({ technique: classResult.technique, effectiveness: classResult.effectiveness });
+      if (!classifyRes.ok) {
+        console.error("[Escalation] Classify API failed:", classifyRes.status);
+        const fallbackSnapshot = buildSnapshot();
+        if (fallbackSnapshot) {
+          persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp);
+        }
+        return;
+      }
+      classResult = await classifyRes.json();
+      setLastClassification({ technique: classResult!.technique, effectiveness: classResult!.effectiveness });
       console.log("[Escalation] Classifier:", classResult);
 
-      const prevState = engineRef.current.getState();
-      const delta = engineRef.current.processClassification(classResult, "trainee");
-      const newState = engineRef.current.getState();
+      prevState = engineRef.current.getState();
+      delta = engineRef.current.processClassification(classResult!, "trainee");
+      newState = engineRef.current.getState();
       console.log("[Escalation]", prevState.level, "→", newState.level, delta.trigger_type);
 
       setEscalationLevel(newState.level);
@@ -933,18 +945,31 @@ export default function SimulationPage() {
       fetch(`/api/sessions/${sessionId}/events`, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event_index: evtIdx, event_type: delta.trigger_type === "escalation" ? "escalation_change" : delta.trigger_type === "de_escalation" ? "de_escalation_change" : "classification_result", escalation_before: prevState.level, escalation_after: newState.level, trust_before: prevState.trust, trust_after: newState.trust, listening_before: prevState.willingness_to_listen, listening_after: newState.willingness_to_listen, payload: { classifier: classResult, delta } }) });
 
+      if (engineRef.current.shouldAutoEnd()) handleEndSession("auto_ceiling");
+    } catch (err) {
+      console.error("Classification error:", err);
+      const fallbackSnapshot = buildSnapshot();
+      if (fallbackSnapshot) {
+        persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp);
+      }
+      return;
+    } finally { classifyingRef.current = false; }
+
+    // Resolve patient instructions outside the classifying lock so subsequent
+    // trainee utterances can be classified without waiting for voice profile fetch
+    try {
       const newInstructions = await resolvePatientInstructions(
         snapshot,
-        newState,
+        newState!,
         getRecentPromptTurns()
       );
       if (!newInstructions) return;
       patientPromptRef.current = newInstructions;
 
       const turnSnapshot = buildSnapshot({
-        classifierResult: classResult,
-        triggerType: delta.trigger_type,
-        stateAfter: newState,
+        classifierResult: classResult!,
+        triggerType: delta!.trigger_type as "escalation" | "de_escalation" | "neutral",
+        stateAfter: newState!,
         patientPromptAfter: newInstructions,
       });
       if (turnSnapshot) {
@@ -956,14 +981,18 @@ export default function SimulationPage() {
       } else {
         updateSession(newInstructions);
       }
-      if (engineRef.current.shouldAutoEnd()) handleEndSession("auto_ceiling");
     } catch (err) {
-      console.error("Classification error:", err);
-      const fallbackSnapshot = buildSnapshot();
+      console.error("Patient instruction resolution error:", err);
+      // Still persist the turn with what we have
+      const fallbackSnapshot = buildSnapshot({
+        classifierResult: classResult!,
+        triggerType: delta!.trigger_type as "escalation" | "de_escalation" | "neutral",
+        stateAfter: newState!,
+      });
       if (fallbackSnapshot) {
         persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp);
       }
-    } finally { classifyingRef.current = false; }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, updateSession]);
 
@@ -1366,6 +1395,12 @@ export default function SimulationPage() {
     botActiveRef.current = false;
     setBotActive(false);
     setBotSpeaking(false);
+
+    // Cancel the patient's in-flight response and clear audio so the echo gate
+    // releases immediately instead of staying locked for the patient's full reply.
+    cancelCurrentResponse();
+    sendEvent({ type: "output_audio_buffer.clear" });
+
     setTurnDetection(true);
     setMicForcedOff(false);
     disconnectClinicianRenderer();
