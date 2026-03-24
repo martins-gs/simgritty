@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { TranscriptViewer } from "@/components/review/TranscriptViewer";
 import { EscalationTimeline } from "@/components/review/EscalationTimeline";
@@ -10,16 +10,19 @@ import { EducatorNotes } from "@/components/review/EducatorNotes";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import type { TranscriptTurn, SimulationStateEvent, EducatorNote, SimulationSession } from "@/types/simulation";
 
 export default function ReviewPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
+  const router = useRouter();
   const [session, setSession] = useState<SimulationSession | null>(null);
   const [turns, setTurns] = useState<TranscriptTurn[]>([]);
   const [events, setEvents] = useState<SimulationStateEvent[]>([]);
   const [notes, setNotes] = useState<EducatorNote[]>([]);
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [restarting, setRestarting] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -64,6 +67,31 @@ export default function ReviewPage() {
     const s = secs % 60;
     return `${m}m ${s}s`;
   };
+
+  const selectedTurn = turns.find((turn) => turn.id === selectedTurnId) ?? null;
+  const canRestartFromSelectedTurn = Boolean(selectedTurn?.state_after && selectedTurn?.patient_prompt_after);
+
+  async function handleRestartFromSelectedTurn() {
+    if (!selectedTurn) return;
+    setRestarting(true);
+
+    const res = await fetch(`/api/sessions/${sessionId}/fork`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        turn_index: selectedTurn.turn_index,
+        fork_label: `Retry from turn ${selectedTurn.turn_index}`,
+      }),
+    });
+
+    if (!res.ok) {
+      setRestarting(false);
+      return;
+    }
+
+    const forked = await res.json() as { id: string };
+    router.push(`/simulation/${forked.id}`);
+  }
 
   return (
     <AppShell>
@@ -145,6 +173,20 @@ export default function ReviewPage() {
 
           <TabsContent value="transcript" className="mt-4">
             <Card>
+              <CardHeader className="flex flex-row items-center justify-between gap-4">
+                <div>
+                  <CardTitle>Transcript</CardTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Select a turn to anchor notes or restart from that exact snapshot.
+                  </p>
+                </div>
+                <Button
+                  onClick={handleRestartFromSelectedTurn}
+                  disabled={!canRestartFromSelectedTurn || restarting}
+                >
+                  {restarting ? "Restarting..." : "Restart From Selected Turn"}
+                </Button>
+              </CardHeader>
               <CardContent className="p-0 h-[500px]">
                 <TranscriptViewer
                   turns={turns}

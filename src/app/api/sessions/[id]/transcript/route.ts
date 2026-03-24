@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+function isSnapshotColumnError(message: string) {
+  return [
+    "trigger_type",
+    "state_after",
+    "patient_voice_profile_after",
+    "patient_prompt_after",
+  ].some((column) => message.includes(column));
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -34,15 +43,31 @@ export async function POST(
 
   const body = await request.json();
 
-  const { error } = await supabase.from("transcript_turns").insert({
+  const baseInsert = {
     session_id: id,
     turn_index: body.turn_index,
     speaker: body.speaker,
     content: body.content,
     audio_url: body.audio_url || null,
     classifier_result: body.classifier_result || null,
+    started_at: body.started_at || undefined,
     duration_ms: body.duration_ms || null,
-  });
+  };
+
+  const snapshotInsert = {
+    ...baseInsert,
+    trigger_type: body.trigger_type || null,
+    state_after: body.state_after || null,
+    patient_voice_profile_after: body.patient_voice_profile_after || null,
+    patient_prompt_after: body.patient_prompt_after || null,
+  };
+
+  let { error } = await supabase.from("transcript_turns").insert(snapshotInsert);
+
+  if (error && isSnapshotColumnError(error.message)) {
+    const retry = await supabase.from("transcript_turns").insert(baseInsert);
+    error = retry.error;
+  }
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -1,6 +1,10 @@
+import type { EscalationState } from "@/types/escalation";
+import type { StructuredVoiceProfile } from "@/types/voice";
+
 export type SessionStatus = "created" | "active" | "completed" | "aborted" | "error";
 export type ExitType = "normal" | "instant_exit" | "educator_ended" | "timeout" | "auto_ceiling";
 export type Speaker = "trainee" | "ai" | "system";
+export type TurnTriggerType = "escalation" | "de_escalation" | "neutral";
 
 export type StateEventType =
   | "session_started"
@@ -18,6 +22,11 @@ export interface SimulationSession {
   scenario_id: string;
   trainee_id: string;
   org_id: string;
+  parent_session_id: string | null;
+  forked_from_session_id: string | null;
+  forked_from_turn_index: number | null;
+  fork_label: string | null;
+  branch_depth: number | null;
   status: SessionStatus;
   scenario_snapshot: Record<string, unknown>;
   started_at: string | null;
@@ -37,6 +46,10 @@ export interface TranscriptTurn {
   content: string;
   audio_url: string | null;
   classifier_result: ClassifierResult | null;
+  trigger_type: TurnTriggerType | null;
+  state_after: EscalationState | null;
+  patient_voice_profile_after: StructuredVoiceProfile | null;
+  patient_prompt_after: string | null;
   started_at: string;
   duration_ms: number | null;
 }

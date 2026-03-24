@@ -34,6 +34,10 @@ export class EscalationEngine {
     return { ...this.state };
   }
 
+  hydrateState(state: EscalationState) {
+    this.state = { ...state };
+  }
+
   getLevel(): number {
     return this.state.level;
   }

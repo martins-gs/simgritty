@@ -47,6 +47,8 @@ function teardownRendererResources(
 }
 
 export function useRealtimeVoiceRenderer() {
+  const RESPONSE_DONE_NO_AUDIO_GRACE_MS = 500;
+  const RESPONSE_DONE_PLAYBACK_FALLBACK_MS = 1200;
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -58,12 +60,17 @@ export function useRealtimeVoiceRenderer() {
     responseId: string | null;
     resolve: (value: boolean) => void;
     timeout: ReturnType<typeof setTimeout>;
+    completionTimer: ReturnType<typeof setTimeout> | null;
     startedAt: number;
+    sawAudioLifecycle: boolean;
   } | null>(null);
 
   const clearPendingSpeech = useCallback((value: boolean) => {
     if (!pendingSpeechRef.current) return;
     clearTimeout(pendingSpeechRef.current.timeout);
+    if (pendingSpeechRef.current.completionTimer) {
+      clearTimeout(pendingSpeechRef.current.completionTimer);
+    }
     pendingSpeechRef.current.resolve(value);
     pendingSpeechRef.current = null;
   }, []);
@@ -180,6 +187,9 @@ export function useRealtimeVoiceRenderer() {
             const elapsedMs = pendingSpeechRef.current
               ? Math.round(performance.now() - pendingSpeechRef.current.startedAt)
               : null;
+            if (pendingSpeechRef.current) {
+              pendingSpeechRef.current.sawAudioLifecycle = true;
+            }
             if (!pendingResponseId || !responseId || responseId === pendingResponseId) {
               console.info(
                 `[Clinician Audio] path=realtime event=output_audio_buffer.started response_id=${responseId || "unknown"} elapsed_ms=${elapsedMs ?? "unknown"}`
@@ -203,6 +213,27 @@ export function useRealtimeVoiceRenderer() {
             return;
           }
 
+          if (type === "response.output_audio.done") {
+            const responseId = msg.response_id as string | undefined;
+            const pendingResponseId = pendingSpeechRef.current?.responseId;
+            const elapsedMs = pendingSpeechRef.current
+              ? Math.round(performance.now() - pendingSpeechRef.current.startedAt)
+              : null;
+            if (pendingSpeechRef.current) {
+              pendingSpeechRef.current.sawAudioLifecycle = true;
+            }
+            console.info(
+              `[Clinician Audio] path=realtime event=response.output_audio.done response_id=${responseId || "unknown"} elapsed_ms=${elapsedMs ?? "unknown"}`
+            );
+            if (pendingSpeechRef.current && !pendingSpeechRef.current.responseId && responseId) {
+              pendingSpeechRef.current.responseId = responseId;
+            }
+            if (pendingResponseId && responseId && responseId !== pendingResponseId) {
+              return;
+            }
+            return;
+          }
+
           if (type === "error") {
             const error = msg.error as { message?: string } | undefined;
             clearPendingSpeech(false);
@@ -220,14 +251,42 @@ export function useRealtimeVoiceRenderer() {
             if (response?.id || response?.status) {
               console.info(`[Clinician Audio] path=realtime event=response.done response_id=${response?.id || "unknown"} status=${response?.status || "unknown"}`);
             }
+            const pendingResponseId = pendingSpeechRef.current?.responseId;
+            if (pendingSpeechRef.current && !pendingSpeechRef.current.responseId && response?.id) {
+              pendingSpeechRef.current.responseId = response.id;
+            }
             if (response?.id && response.id === activeResponseIdRef.current) {
               activeResponseIdRef.current = null;
             }
-            if (
-              response?.status &&
-              response.status !== "completed" &&
-              (!pendingSpeechRef.current?.responseId || pendingSpeechRef.current.responseId === response.id)
-            ) {
+
+            if (pendingResponseId && response?.id && response.id !== pendingResponseId) {
+              return;
+            }
+
+            if (response?.status === "completed") {
+              const pendingSpeech = pendingSpeechRef.current;
+              if (!pendingSpeech) return;
+              const fallbackMs = pendingSpeech.sawAudioLifecycle
+                ? RESPONSE_DONE_PLAYBACK_FALLBACK_MS
+                : RESPONSE_DONE_NO_AUDIO_GRACE_MS;
+              if (pendingSpeech.completionTimer) {
+                clearTimeout(pendingSpeech.completionTimer);
+              }
+              pendingSpeech.completionTimer = setTimeout(() => {
+                if (
+                  pendingSpeechRef.current &&
+                  (!pendingSpeechRef.current.responseId || pendingSpeechRef.current.responseId === response?.id)
+                ) {
+                  console.info(
+                    `[Clinician Audio] path=realtime event=response.done fallback_complete response_id=${response?.id || "unknown"} delay_ms=${fallbackMs}`
+                  );
+                  clearPendingSpeech(true);
+                }
+              }, fallbackMs);
+              return;
+            }
+
+            if (response?.status && response.status !== "completed") {
               clearPendingSpeech(false);
             }
           }
@@ -308,7 +367,14 @@ export function useRealtimeVoiceRenderer() {
         clearPendingSpeech(false);
       }, 15000);
 
-      pendingSpeechRef.current = { responseId: null, resolve, timeout, startedAt };
+      pendingSpeechRef.current = {
+        responseId: null,
+        resolve,
+        timeout,
+        completionTimer: null,
+        startedAt,
+        sawAudioLifecycle: false,
+      };
       activeResponseIdRef.current = null;
       console.info("[Clinician Audio] path=realtime request=response.create");
 

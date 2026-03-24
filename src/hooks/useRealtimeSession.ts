@@ -27,6 +27,7 @@ export function useRealtimeSession() {
   const activeResponseIdRef = useRef<string | null>(null);
   // Mic gating: mute mic while AI speaks to prevent echo feedback loop
   const micGatedRef = useRef(false);
+  const micForcedOffRef = useRef(false);
   const unmutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Deduplication
   const lastTraineeTextRef = useRef("");
@@ -59,7 +60,7 @@ export function useRealtimeSession() {
       micGatedRef.current = false;
       // Only re-enable if user hasn't manually muted
       const userMuted = useSimulationStore.getState().micMuted;
-      if (!userMuted) {
+      if (!userMuted && !micForcedOffRef.current) {
         setMicTrackEnabled(true);
       }
       unmutTimerRef.current = null;
@@ -397,7 +398,27 @@ export function useRealtimeSession() {
   // User-facing mute toggle (separate from echo gating)
   const setMicEnabled = useCallback((enabled: boolean) => {
     if (micGatedRef.current) return; // Don't override echo gate
+    if (enabled && micForcedOffRef.current) return;
     setMicTrackEnabled(enabled);
+  }, [setMicTrackEnabled]);
+
+  const setMicForcedOff = useCallback((forcedOff: boolean) => {
+    micForcedOffRef.current = forcedOff;
+
+    if (unmutTimerRef.current) {
+      clearTimeout(unmutTimerRef.current);
+      unmutTimerRef.current = null;
+    }
+
+    if (forcedOff) {
+      setMicTrackEnabled(false);
+      return;
+    }
+
+    if (micGatedRef.current) return;
+
+    const userMuted = useSimulationStore.getState().micMuted;
+    setMicTrackEnabled(!userMuted);
   }, [setMicTrackEnabled]);
 
   const disconnect = useCallback(() => {
@@ -422,6 +443,7 @@ export function useRealtimeSession() {
 
     activeResponseIdRef.current = null;
     micGatedRef.current = false;
+    micForcedOffRef.current = false;
     lastTraineeTextRef.current = "";
     lastTraineeTimeRef.current = 0;
     setConnectionStatus("disconnected");
@@ -440,6 +462,7 @@ export function useRealtimeSession() {
     updateSession,
     cancelCurrentResponse,
     setMicEnabled,
+    setMicForcedOff,
     audioElRef,
   };
 }
