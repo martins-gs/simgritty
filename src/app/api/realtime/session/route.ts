@@ -44,6 +44,7 @@ export async function POST(request: Request) {
         threshold: 0.55,
         prefix_padding_ms: 300,
         silence_duration_ms: 320,
+        interrupt_response: false,
         create_response: true,
       },
     }),

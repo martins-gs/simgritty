@@ -13,6 +13,15 @@ interface RealtimeSessionConfig {
   onError: (error: string) => void;
 }
 
+const DEFAULT_TURN_DETECTION = {
+  type: "server_vad" as const,
+  threshold: 0.55,
+  prefix_padding_ms: 300,
+  silence_duration_ms: 320,
+  interrupt_response: false,
+  create_response: true,
+};
+
 function isLikelyEnglish(text: string) {
   return /^[a-zA-Z0-9\s.,!?'";\-:()\/&@#$%+=\[\]{}*_~`<>]+$/.test(text);
 }
@@ -391,6 +400,15 @@ export function useRealtimeSession() {
     });
   }, [sendEvent]);
 
+  const setTurnDetection = useCallback((enabled: boolean) => {
+    sendEvent({
+      type: "session.update",
+      session: {
+        turn_detection: enabled ? { ...DEFAULT_TURN_DETECTION } : null,
+      },
+    });
+  }, [sendEvent]);
+
   const cancelCurrentResponse = useCallback(() => {
     sendEvent({ type: "response.cancel" });
   }, [sendEvent]);
@@ -460,6 +478,7 @@ export function useRealtimeSession() {
     disconnect,
     sendEvent,
     updateSession,
+    setTurnDetection,
     cancelCurrentResponse,
     setMicEnabled,
     setMicForcedOff,

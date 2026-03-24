@@ -48,7 +48,6 @@ function teardownRendererResources(
 
 export function useRealtimeVoiceRenderer() {
   const RESPONSE_DONE_NO_AUDIO_GRACE_MS = 500;
-  const RESPONSE_DONE_PLAYBACK_FALLBACK_MS = 1200;
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -266,9 +265,13 @@ export function useRealtimeVoiceRenderer() {
             if (response?.status === "completed") {
               const pendingSpeech = pendingSpeechRef.current;
               if (!pendingSpeech) return;
-              const fallbackMs = pendingSpeech.sawAudioLifecycle
-                ? RESPONSE_DONE_PLAYBACK_FALLBACK_MS
-                : RESPONSE_DONE_NO_AUDIO_GRACE_MS;
+              if (pendingSpeech.sawAudioLifecycle) {
+                console.info(
+                  `[Clinician Audio] path=realtime event=response.done waiting_for=output_audio_buffer.stopped response_id=${response?.id || "unknown"}`
+                );
+                return;
+              }
+              const fallbackMs = RESPONSE_DONE_NO_AUDIO_GRACE_MS;
               if (pendingSpeech.completionTimer) {
                 clearTimeout(pendingSpeech.completionTimer);
               }

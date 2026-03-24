@@ -40,6 +40,8 @@ function escColor(level: number) {
 const CLINICIAN_REALTIME_VOICE = "cedar";
 const CLINICIAN_REALTIME_HANDOFF_DELAY_MS = 150;
 const BOT_TURN_POST_PATIENT_DELAY_MS = 650;
+const BOT_RESPONSE_CANCEL_SETTLE_MS = 75;
+const BOT_PATIENT_AUDIO_CLEAR_WAIT_MS = 250;
 const PATIENT_TURN_COMPLETION_TIMEOUT_MS = 4000;
 
 interface PreparedBotTurn {
@@ -79,6 +81,7 @@ export default function SimulationPage() {
     connect,
     disconnect,
     updateSession,
+    setTurnDetection,
     cancelCurrentResponse,
     setMicEnabled,
     setMicForcedOff,
@@ -428,6 +431,30 @@ export default function SimulationPage() {
       resolve: resolvePromise,
       timeout,
     };
+  }
+
+  function interruptPatientResponsePlayback() {
+    cancelCurrentResponse();
+    sendEvent({ type: "output_audio_buffer.clear" });
+  }
+
+  async function waitForPatientPlaybackToStop(
+    abort: AbortController,
+    timeoutMs: number = BOT_PATIENT_AUDIO_CLEAR_WAIT_MS
+  ) {
+    const deadline = Date.now() + timeoutMs;
+
+    while (aiSpeakingRef.current && Date.now() < deadline) {
+      if (abort.signal.aborted || !botActiveRef.current) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  async function quietPatientSessionForBotTurn(abort: AbortController) {
+    interruptPatientResponsePlayback();
+    await new Promise((resolve) => setTimeout(resolve, BOT_RESPONSE_CANCEL_SETTLE_MS));
+    if (abort.signal.aborted || !botActiveRef.current) return;
+    await waitForPatientPlaybackToStop(abort);
   }
 
   async function loadForkHistory(
@@ -1175,6 +1202,9 @@ export default function SimulationPage() {
   async function runBotTurn(abort: AbortController) {
     if (abort.signal.aborted || !botActiveRef.current) return;
 
+    await quietPatientSessionForBotTurn(abort);
+    if (abort.signal.aborted || !botActiveRef.current) return;
+
     setBotSpeaking(true);
     const preparedTurn = await consumeBotTurn(abort.signal);
     if (!preparedTurn || abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
@@ -1217,7 +1247,9 @@ export default function SimulationPage() {
     setBotSpeaking(false);
 
     // Cancel any in-flight patient response before injecting the bot's reply
-    cancelCurrentResponse();
+    interruptPatientResponsePlayback();
+    await new Promise((resolve) => setTimeout(resolve, BOT_RESPONSE_CANCEL_SETTLE_MS));
+    if (abort.signal.aborted || !botActiveRef.current) return;
 
     // Inject the bot's text into the Realtime session so the patient hears and responds
     beginPendingPatientTurnCompletion();
@@ -1277,6 +1309,8 @@ export default function SimulationPage() {
     botActiveRef.current = true;
     setBotActive(true);
     setMicForcedOff(true);
+    setTurnDetection(false);
+    interruptPatientResponsePlayback();
 
     const abort = new AbortController();
     botAbortRef.current = abort;
@@ -1303,6 +1337,7 @@ export default function SimulationPage() {
     botActiveRef.current = false;
     setBotActive(false);
     setBotSpeaking(false);
+    setTurnDetection(true);
     setMicForcedOff(false);
     disconnectClinicianRenderer();
     // Stop any playing bot audio
