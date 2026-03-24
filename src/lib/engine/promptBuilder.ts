@@ -96,94 +96,253 @@ function buildMemoryLayer(config: PromptConfig): string {
   return `CONVERSATION SO FAR:\n${turns}`;
 }
 
-// Layer 4: Voice-style instructions
-// IMPORTANT: Voice delivery must be driven by current escalation level, not just static config.
-// The Realtime API model responds to these instructions for vocal delivery.
+// Layer 4: Voice & Delivery — multi-dimensional, driven by traits + escalation + emotional driver
+//
+// This follows the OpenAI voice steering format: separate labelled dimensions
+// (Voice Affect, Tone, Pacing, Emotion, Delivery) that the Realtime model
+// responds to when set via session.update instructions.
+//
+// The voice profile is NOT just anger on a scale — it's shaped by:
+// 1. The scenario's emotional driver (grief vs entitlement vs fear vs hostility)
+// 2. The trait profile (sarcasm, coherence, volatility, etc.)
+// 3. The current escalation level
+// 4. The current trust/listening/anger state
 function buildVoiceLayer(config: PromptConfig): string {
-  const { voiceConfig, currentState } = config;
+  const { traits, currentState } = config;
   const level = currentState.level;
 
-  // Dynamic voice characteristics based on current escalation level
-  const voiceDirections = getVoiceDirections(level);
+  // Derive the dominant emotional flavour from the scenario traits
+  const emotionalProfile = deriveEmotionalProfile(traits, config.emotionalDriver);
 
-  const pauseGuidance =
-    level >= 7
-      ? "Speak in short, sharp bursts. Barely pause between thoughts."
-      : level >= 5
-      ? "Keep pauses short and clipped. Thoughts come out in pressured bursts."
-      : level >= 3
-      ? "Use natural conversational pauses, but you're not relaxed."
-      : "Use natural, measured pauses. You're concerned but composed.";
+  // Build each voice dimension separately
+  const affect = buildAffect(emotionalProfile, level, currentState);
+  const tone = buildTone(emotionalProfile, traits, level, currentState);
+  const pacing = buildPacing(traits, level, currentState);
+  const emotion = buildEmotion(emotionalProfile, level, currentState);
+  const delivery = buildDelivery(traits, level, currentState);
 
-  const interruptionGuidance =
-    level >= 8
-      ? "Cut across the clinician aggressively. Don't let them finish."
-      : level >= 6
-      ? "You may interrupt the clinician when your frustration spikes."
-      : level >= 4
-      ? "Occasionally talk over the clinician when emotion surges."
-      : "Let the clinician finish speaking before you respond.";
+  return `# Personality & Tone
 
-  return `VOICE AND DELIVERY STYLE — MATCH THIS TO YOUR CURRENT EMOTIONAL STATE (escalation ${level}/10):
-- Speak with a British accent using British English vocabulary throughout
-- ${voiceDirections.tone}
-- ${voiceDirections.volume}
-- ${voiceDirections.pace}
-- ${voiceDirections.breath}
-- ${voiceDirections.emotion}
-- ${config.traits.sarcasm > 5 && level >= 3 ? "Use biting sarcasm and contempt in your voice" : config.traits.sarcasm > 3 ? "Let sarcasm creep in when frustrated" : "Be direct rather than sarcastic"}
-- ${pauseGuidance}
-- ${interruptionGuidance}
-- Use contractions and spoken phrasing, not tidy written sentences
-- Your voice MUST sound different at escalation ${level} than it would at level 1. ${level >= 6 ? "You are ANGRY. Sound it." : level >= 4 ? "You are clearly FRUSTRATED. Don't hide it." : "You are worried but holding it together."}`;
+## Voice Affect
+${affect}
+
+## Tone
+${tone}
+
+## Pacing
+${pacing}
+
+## Emotion
+${emotion}
+
+## Delivery
+${delivery}
+
+## Variety
+- Do not repeat the same phrasing twice. Vary your sentence structure.
+- Use contractions and spoken phrasing, not tidy written sentences.`;
 }
 
-function getVoiceDirections(level: number): {
-  tone: string; volume: string; pace: string; breath: string; emotion: string;
-} {
-  if (level <= 2) {
-    return {
-      tone: "Speak in a worried but controlled tone. Underlying tension, but polite.",
-      volume: "Normal conversational volume. Slightly tight.",
-      pace: "Measured pace. You're choosing your words carefully.",
-      breath: "Breathing is normal. Occasional sighs.",
-      emotion: "You're anxious but trying to stay composed. Voice might waver slightly.",
-    };
-  }
-  if (level <= 4) {
-    return {
-      tone: "Speak in a tense, frustrated tone. Patience wearing thin.",
-      volume: "Voice is firmer than normal. Slightly louder than conversational.",
-      pace: "Pace is picking up. Sentences come faster, more clipped.",
-      breath: "Audible tension in your breathing. Short, sharp exhales.",
-      emotion: "Frustration is clearly audible. Your voice is tighter, harder. Don't disguise it.",
-    };
-  }
-  if (level <= 6) {
-    return {
-      tone: "Speak in an angry, confrontational tone. You're done being patient.",
-      volume: "Raised voice. Noticeably louder. Emphatic stress on key words.",
-      pace: "Fast and pressured. Words tumble out. You're not waiting for responses.",
-      breath: "Heavy, agitated breathing between phrases.",
-      emotion: "Anger is dominant. Your voice is sharp, accusatory, heated. Let it show fully.",
-    };
-  }
-  if (level <= 8) {
-    return {
-      tone: "Speak in a hostile, aggressive tone. Barely controlled rage.",
-      volume: "SHOUTING or near-shouting. Forceful, commanding volume.",
-      pace: "Rapid-fire. Sentences smash into each other. No space for the other person.",
-      breath: "Ragged breathing. Gasping between outbursts.",
-      emotion: "You are furious. Voice is cracking with anger. Swearing may occur. You sound like you could lose control at any moment.",
-    };
-  }
-  return {
-    tone: "Speak in an extreme, out-of-control tone. Screaming, incoherent with rage or distress.",
-    volume: "MAXIMUM volume. Screaming or wailing.",
-    pace: "Erratic. Sentences break apart. Repetition. Loss of coherence.",
-    breath: "Hyperventilating. Sobbing or raging between words.",
-    emotion: "Total emotional breakdown. The voice should be distressing to hear. Raw, unfiltered anguish or fury.",
+// Determine the dominant emotional flavour of this scenario
+type EmotionalProfile = "grief" | "fear" | "entitlement" | "hostility" | "frustration" | "distrust" | "mixed";
+
+function deriveEmotionalProfile(traits: ScenarioTraits, emotionalDriver: string): EmotionalProfile {
+  const driverLower = emotionalDriver.toLowerCase();
+
+  // Check emotional driver text for strong signals
+  if (driverLower.includes("grief") || driverLower.includes("loss") || driverLower.includes("dying") || driverLower.includes("death") || driverLower.includes("bereav")) return "grief";
+  if (driverLower.includes("fear") || driverLower.includes("terrif") || driverLower.includes("scared") || driverLower.includes("frightened")) return "fear";
+  if (driverLower.includes("entitl") || driverLower.includes("demand") || driverLower.includes("deserv")) return "entitlement";
+
+  // Fall back to trait profile
+  if (traits.hostility >= 7) return "hostility";
+  if (traits.entitlement >= 7) return "entitlement";
+  if (traits.trust <= 2) return "distrust";
+  if (traits.frustration >= 7 && traits.hostility < 5) return "frustration";
+
+  return "mixed";
+}
+
+function buildAffect(profile: EmotionalProfile, level: number, state: EscalationState): string {
+  const affectMap: Record<EmotionalProfile, Record<string, string>> = {
+    grief: {
+      low: "Voice affect: Fragile, strained, holding back tears. Underlying sadness in every word.",
+      mid: "Voice affect: Increasingly desperate and emotional. Grief breaking through composure. Wavering, unsteady.",
+      high: "Voice affect: Overwhelmed with grief. Voice cracking, audibly distressed. May sob between words or go silent.",
+    },
+    fear: {
+      low: "Voice affect: Nervous, tight, guarded. Speaking carefully as if afraid of the answer.",
+      mid: "Voice affect: Audibly frightened. Voice higher-pitched and strained. Urgency creeping in.",
+      high: "Voice affect: Panicking. Voice shaking, breathless. Desperate, pleading, unable to control the fear.",
+    },
+    entitlement: {
+      low: "Voice affect: Imperious, clipped, controlled impatience. Speaking as if their time is being wasted.",
+      mid: "Voice affect: Demanding and incredulous. Cannot believe they're being made to wait or explain. Condescending.",
+      high: "Voice affect: Outraged superiority. Contemptuous, sneering. Threatening consequences with icy conviction.",
+    },
+    hostility: {
+      low: "Voice affect: Cold, suspicious, guarded. Every word has an edge.",
+      mid: "Voice affect: Aggressive, confrontational. Daring the clinician to give the wrong answer.",
+      high: "Voice affect: Enraged and threatening. Voice thick with fury. Barely maintaining human interaction.",
+    },
+    frustration: {
+      low: "Voice affect: Tired, exasperated. The sighs of someone who has explained this before.",
+      mid: "Voice affect: Visibly fed up. Disbelief that this is still happening. Biting.",
+      high: "Voice affect: At breaking point from sheer frustration. Voice shaking — not from fear, from exhaustion and rage.",
+    },
+    distrust: {
+      low: "Voice affect: Wary, measured, testing. Giving nothing away. Watching for lies.",
+      mid: "Voice affect: Openly sceptical. Challenging every statement. Cold and withholding.",
+      high: "Voice affect: Paranoid, accusatory. Convinced of conspiracy or negligence. Venomous.",
+    },
+    mixed: {
+      low: "Voice affect: Tense but controlled. Emotional undertone without a clear single dominant feeling.",
+      mid: "Voice affect: Emotions colliding — frustration, worry, and anger mixing. Unstable, shifting.",
+      high: "Voice affect: Emotional chaos. Multiple feelings fighting for dominance. Voice lurching between states.",
+    },
   };
+
+  const band = level <= 3 ? "low" : level <= 6 ? "mid" : "high";
+  return affectMap[profile][band];
+}
+
+function buildTone(profile: EmotionalProfile, traits: ScenarioTraits, level: number, state: EscalationState): string {
+  const parts: string[] = [];
+
+  // Base interpersonal tone from trust level
+  if (state.trust <= 2) {
+    parts.push("Deeply distrustful. Treat everything the clinician says as suspect.");
+  } else if (state.trust <= 4) {
+    parts.push("Sceptical. Not buying what's being said without proof.");
+  } else if (state.trust <= 6) {
+    parts.push("Cautiously open. Willing to listen but ready to pull back.");
+  } else {
+    parts.push("Somewhat trusting. Prepared to hear the clinician out.");
+  }
+
+  // Sarcasm overlay
+  if (traits.sarcasm >= 7 && level >= 3) {
+    parts.push("Heavy sarcasm — cutting, mocking, contemptuous undertone.");
+  } else if (traits.sarcasm >= 4 && level >= 4) {
+    parts.push("Occasional sarcastic edge when frustrated.");
+  }
+
+  // Entitlement overlay
+  if (traits.entitlement >= 7) {
+    parts.push("Speaks as if they deserve special treatment. Affronted by anything less.");
+  } else if (traits.entitlement >= 5) {
+    parts.push("Slight sense of entitlement. Expects prompt attention.");
+  }
+
+  // Coherence affects tone
+  if (traits.coherence <= 3 && level >= 5) {
+    parts.push("Losing the thread. Jumping between grievances. Hard to follow.");
+  }
+
+  return `Tone: ${parts.join(" ")}`;
+}
+
+function buildPacing(traits: ScenarioTraits, level: number, state: EscalationState): string {
+  let pace: string;
+  if (level <= 2) {
+    pace = "Even and steady. Considered. Might trail off when emotion surfaces.";
+  } else if (level <= 4) {
+    pace = "Picking up. Sentences shorter and more clipped. Less patience for pauses.";
+  } else if (level <= 6) {
+    pace = "Fast and pressured. Words tumbling out. Barely waiting for the clinician to finish.";
+  } else if (level <= 8) {
+    pace = "Rapid-fire. Sentences smashing into each other. No breathing room.";
+  } else {
+    pace = "Erratic. Bursts of rapid speech then sudden stops. Repetition. Incoherent rushes.";
+  }
+
+  // Volatility affects pace stability
+  if (traits.volatility >= 7) {
+    pace += " Pace shifts unpredictably — calm one moment, erupting the next.";
+  }
+
+  // Repetition trait
+  if (traits.repetition >= 6 && level >= 3) {
+    pace += " Returns to the same grievance repeatedly. Circles back.";
+  }
+
+  return `Pacing: ${pace}`;
+}
+
+function buildEmotion(profile: EmotionalProfile, level: number, state: EscalationState): string {
+  const parts: string[] = [];
+
+  // Primary emotion from profile
+  const emotionIntensity = level <= 3 ? "simmering beneath the surface" : level <= 6 ? "clearly present and audible" : "overwhelming and barely contained";
+
+  const profileEmotions: Record<EmotionalProfile, string> = {
+    grief: `Grief and desperation ${emotionIntensity}. The fear of losing someone dominates.`,
+    fear: `Fear and anxiety ${emotionIntensity}. Uncertainty about what's happening is driving everything.`,
+    entitlement: `Indignation and affront ${emotionIntensity}. How dare they be treated this way.`,
+    hostility: `Anger and aggression ${emotionIntensity}. Directed at the clinician personally.`,
+    frustration: `Frustration and exasperation ${emotionIntensity}. The system has failed them.`,
+    distrust: `Suspicion and wariness ${emotionIntensity}. Watching for incompetence or deception.`,
+    mixed: `Multiple emotions ${emotionIntensity}. Shifting between anger, worry, and hurt.`,
+  };
+
+  parts.push(profileEmotions[profile]);
+
+  // Secondary emotional textures from state
+  if (state.anger >= 7) {
+    parts.push("Anger is a dominant secondary layer — hot, personal, directed.");
+  }
+  if (state.willingness_to_listen <= 2) {
+    parts.push("Has completely stopped listening. Talking AT the clinician, not with them.");
+  } else if (state.willingness_to_listen <= 4) {
+    parts.push("Barely listening. Hearing words but not processing them.");
+  }
+
+  return `Emotion: ${parts.join(" ")}`;
+}
+
+function buildDelivery(traits: ScenarioTraits, level: number, state: EscalationState): string {
+  const parts: string[] = [];
+
+  // Volume
+  if (level <= 2) {
+    parts.push("Volume: Normal conversational level, slightly tight.");
+  } else if (level <= 4) {
+    parts.push("Volume: Firmer than normal. Voice projecting more.");
+  } else if (level <= 6) {
+    parts.push("Volume: Raised. Noticeably louder. Emphatic stress on key words.");
+  } else if (level <= 8) {
+    parts.push("Volume: SHOUTING or near-shouting. Forceful.");
+  } else {
+    parts.push("Volume: MAXIMUM. Screaming or wailing.");
+  }
+
+  // Breath
+  if (level <= 3) {
+    parts.push("Breathing: Controlled but tense. Occasional heavy sigh.");
+  } else if (level <= 6) {
+    parts.push("Breathing: Agitated. Short sharp exhales. Audible tension.");
+  } else {
+    parts.push("Breathing: Ragged, laboured. Gasping between outbursts.");
+  }
+
+  // Interruptions from trait
+  if (traits.interruption_likelihood >= 7 && level >= 4) {
+    parts.push("WILL interrupt the clinician mid-sentence. Does not wait for them to finish.");
+  } else if (traits.interruption_likelihood >= 4 && level >= 5) {
+    parts.push("May cut across the clinician when emotion spikes.");
+  } else {
+    parts.push("Generally lets the clinician finish before responding.");
+  }
+
+  // Physical vocal characteristics at high levels
+  if (level >= 7) {
+    parts.push("Voice may crack, tremble, or break with the intensity of emotion.");
+  }
+  if (level >= 8 && traits.coherence <= 5) {
+    parts.push("Words may slur together or become garbled in the heat of the moment.");
+  }
+
+  return parts.join("\n");
 }
 
 const BIAS_LABELS: Record<string, string> = {
@@ -215,14 +374,6 @@ function getEscalationBehaviour(level: number): string {
     10: "Complete loss of control. Incoherent with rage or distress.",
   };
   return behaviours[level] || behaviours[5];
-}
-
-function getIntensityWords(level: number): { tone: string; emotional: string } {
-  if (level <= 2) return { tone: "worried but controlled", emotional: "You are concerned but trying to stay composed" };
-  if (level <= 4) return { tone: "tense and frustrated", emotional: "Frustration is clearly audible in your voice" };
-  if (level <= 6) return { tone: "angry and confrontational", emotional: "Your voice is raised, you are visibly upset" };
-  if (level <= 8) return { tone: "hostile and aggressive", emotional: "You are shouting, barely containing yourself" };
-  return { tone: "extremely agitated and threatening", emotional: "You are at breaking point, barely coherent with emotion" };
 }
 
 export function buildPrompt(config: PromptConfig): string {
