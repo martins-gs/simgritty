@@ -6,6 +6,7 @@ import { useSimulationStore } from "@/store/simulationStore";
 import { useRealtimeSession } from "@/hooks/useRealtimeSession";
 import { EscalationEngine } from "@/lib/engine/escalationEngine";
 import { buildPrompt } from "@/lib/engine/promptBuilder";
+import type { ClinicianVoiceContext } from "@/lib/engine/clinicianVoiceBuilder";
 import { Waveform } from "@/components/simulation/Waveform";
 import { LiveTranscript, type TranscriptEntry } from "@/components/simulation/LiveTranscript";
 import { ExitButton } from "@/components/simulation/ExitButton";
@@ -13,6 +14,7 @@ import { Mic, MicOff, Square, MapPin, Bot, Hand } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ESCALATION_LABELS } from "@/types/escalation";
 import type { ScenarioTraits, ScenarioVoiceConfig, EscalationRules } from "@/types/scenario";
+import type { StructuredVoiceProfile } from "@/types/voice";
 
 function escColor(level: number) {
   if (level <= 2) return { bar: "bg-emerald-500", text: "text-emerald-600", ring: "ring-emerald-500/20" };
@@ -56,6 +58,8 @@ export default function SimulationPage() {
   const endingRef = useRef(false);
   const botActiveRef = useRef(false);
   const botAbortRef = useRef<AbortController | null>(null);
+  const patientVoiceProfileRef = useRef<StructuredVoiceProfile | null>(null);
+  const patientVoiceRequestRef = useRef(0);
 
   useEffect(() => { transcriptRef.current = transcriptEntries; }, [transcriptEntries]);
 
@@ -84,9 +88,7 @@ export default function SimulationPage() {
         const snapshot = session.scenario_snapshot;
         scenarioRef.current = snapshot;
 
-        const traits = extractChild(snapshot.scenario_traits) as unknown as ScenarioTraits;
-        const voiceConfig = extractChild(snapshot.scenario_voice_config) as unknown as ScenarioVoiceConfig;
-        const escalationRules = extractChild(snapshot.escalation_rules) as unknown as EscalationRules;
+        const { traits, voiceConfig, escalationRules } = getScenarioConfig(snapshot);
         const ceiling = Math.min(escalationRules.max_ceiling, 8);
         setMaxCeiling(ceiling);
 
@@ -95,18 +97,15 @@ export default function SimulationPage() {
         setEscalationLevel(engine.getLevel());
         peakLevelRef.current = engine.getLevel();
 
-        const instructions = buildPrompt({
-          title: snapshot.title, aiRole: snapshot.ai_role, traineeRole: snapshot.trainee_role,
-          backstory: snapshot.backstory, emotionalDriver: snapshot.emotional_driver, setting: snapshot.setting,
-          traits, voiceConfig, escalationRules, currentState: engine.getState(), recentTurns: [],
-        });
+        const instructions = await resolvePatientInstructions(snapshot, engine.getState(), [], abortController.signal)
+          ?? buildPatientInstructions(snapshot, engine.getState(), [], patientVoiceProfileRef.current);
 
         const startRes = await fetch(`/api/sessions/${sessionId}/start`, { method: "POST", signal: abortController.signal });
         if (cancelled) return;
         if (!startRes.ok) throw new Error("Failed to start session");
 
         await connect({
-          voice: voiceConfig.voice_name || "ash", instructions,
+          voice: voiceConfig.voice_name || "marin", instructions,
           onTraineeTranscript: handleTraineeTranscript,
           onAiTranscript: handleAiTranscriptDone,
           onAiTranscriptDelta: handleAiDelta,
@@ -131,6 +130,98 @@ export default function SimulationPage() {
     if (Array.isArray(data) && data.length > 0) return data[0] as Record<string, unknown>;
     if (data && typeof data === "object") return data as Record<string, unknown>;
     return {} as Record<string, unknown>;
+  }
+
+  function getScenarioConfig(snapshot: Record<string, unknown>) {
+    return {
+      traits: extractChild(snapshot.scenario_traits) as unknown as ScenarioTraits,
+      voiceConfig: extractChild(snapshot.scenario_voice_config) as unknown as ScenarioVoiceConfig,
+      escalationRules: extractChild(snapshot.escalation_rules) as unknown as EscalationRules,
+    };
+  }
+
+  function getRecentPromptTurns() {
+    return transcriptRef.current
+      .slice(-20)
+      .map((entry) => ({ speaker: entry.speaker, content: entry.content }));
+  }
+
+  function buildPatientInstructions(
+    snapshot: Record<string, unknown>,
+    currentState: ReturnType<EscalationEngine["getState"]>,
+    recentTurns: { speaker: string; content: string }[],
+    voiceProfile: StructuredVoiceProfile | null
+  ) {
+    const { traits, voiceConfig, escalationRules } = getScenarioConfig(snapshot);
+    return buildPrompt({
+      title: snapshot.title as string,
+      aiRole: snapshot.ai_role as string,
+      traineeRole: snapshot.trainee_role as string,
+      backstory: snapshot.backstory as string,
+      emotionalDriver: snapshot.emotional_driver as string,
+      setting: snapshot.setting as string,
+      traits,
+      voiceConfig,
+      escalationRules,
+      currentState,
+      recentTurns,
+      voiceProfile,
+    });
+  }
+
+  async function fetchPatientVoiceProfile(
+    snapshot: Record<string, unknown>,
+    currentState: ReturnType<EscalationEngine["getState"]>,
+    recentTurns: { speaker: string; content: string }[],
+    signal?: AbortSignal
+  ): Promise<StructuredVoiceProfile | null> {
+    const { traits, voiceConfig } = getScenarioConfig(snapshot);
+    const res = await fetch("/api/voice-profile/patient", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: snapshot.title,
+        aiRole: snapshot.ai_role,
+        traineeRole: snapshot.trainee_role,
+        backstory: snapshot.backstory,
+        emotionalDriver: snapshot.emotional_driver,
+        setting: snapshot.setting,
+        traits,
+        voiceConfig,
+        currentState,
+        recentTurns,
+      }),
+      signal,
+    }).catch(() => null);
+
+    if (!res || !res.ok) return null;
+
+    const data = await res.json() as { voiceProfile?: StructuredVoiceProfile | null };
+    return data.voiceProfile || null;
+  }
+
+  async function resolvePatientInstructions(
+    snapshot: Record<string, unknown>,
+    currentState: ReturnType<EscalationEngine["getState"]>,
+    recentTurns: { speaker: string; content: string }[],
+    signal?: AbortSignal
+  ): Promise<string | null> {
+    const requestId = patientVoiceRequestRef.current + 1;
+    patientVoiceRequestRef.current = requestId;
+
+    const voiceProfile = await fetchPatientVoiceProfile(snapshot, currentState, recentTurns, signal);
+    if (signal?.aborted || requestId !== patientVoiceRequestRef.current) return null;
+
+    if (voiceProfile) {
+      patientVoiceProfileRef.current = voiceProfile;
+    }
+
+    return buildPatientInstructions(
+      snapshot,
+      currentState,
+      recentTurns,
+      voiceProfile ?? patientVoiceProfileRef.current
+    );
   }
 
   const handleAiDelta = useCallback((delta: string) => {
@@ -179,10 +270,8 @@ export default function SimulationPage() {
       fetch(`/api/sessions/${sessionId}/events`, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event_index: evtIdx, event_type: delta.trigger_type === "escalation" ? "escalation_change" : delta.trigger_type === "de_escalation" ? "de_escalation_change" : "classification_result", escalation_before: prevState.level, escalation_after: newState.level, trust_before: prevState.trust, trust_after: newState.trust, listening_before: prevState.willingness_to_listen, listening_after: newState.willingness_to_listen, payload: { classifier: classResult, delta } }) });
 
-      const traits = extractChild(snapshot.scenario_traits) as unknown as ScenarioTraits;
-      const voiceConfig = extractChild(snapshot.scenario_voice_config) as unknown as ScenarioVoiceConfig;
-      const escalationRules = extractChild(snapshot.escalation_rules) as unknown as EscalationRules;
-      const newInstructions = buildPrompt({ title: snapshot.title as string, aiRole: snapshot.ai_role as string, traineeRole: snapshot.trainee_role as string, backstory: snapshot.backstory as string, emotionalDriver: snapshot.emotional_driver as string, setting: snapshot.setting as string, traits, voiceConfig, escalationRules, currentState: newState, recentTurns: transcriptRef.current.slice(-20).map((e) => ({ speaker: e.speaker, content: e.content })) });
+      const newInstructions = await resolvePatientInstructions(snapshot, newState, getRecentPromptTurns());
+      if (!newInstructions) return;
 
       if (aiSpeakingRef.current) { pendingUpdateRef.current = newInstructions; } else { updateSession(newInstructions); }
       if (engineRef.current.shouldAutoEnd()) handleEndSession("auto_ceiling");
@@ -237,43 +326,56 @@ export default function SimulationPage() {
       fetch(`/api/sessions/${sessionId}/events`, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event_index: evtIdx, event_type: delta.trigger_type === "escalation" ? "escalation_change" : delta.trigger_type === "de_escalation" ? "de_escalation_change" : "classification_result", escalation_before: prevState.level, escalation_after: newState.level, trust_before: prevState.trust, trust_after: newState.trust, listening_before: prevState.willingness_to_listen, listening_after: newState.willingness_to_listen, payload: { classifier: classResult, delta, source: "bot_clinician" } }) });
 
-      // Update prompt for next patient response
-      const traits = extractChild(snapshot.scenario_traits) as unknown as ScenarioTraits;
-      const voiceConfig = extractChild(snapshot.scenario_voice_config) as unknown as ScenarioVoiceConfig;
-      const escalationRules = extractChild(snapshot.escalation_rules) as unknown as EscalationRules;
-      const newInstructions = buildPrompt({ title: snapshot.title as string, aiRole: snapshot.ai_role as string, traineeRole: snapshot.trainee_role as string, backstory: snapshot.backstory as string, emotionalDriver: snapshot.emotional_driver as string, setting: snapshot.setting as string, traits, voiceConfig, escalationRules, currentState: newState, recentTurns: transcriptRef.current.slice(-20).map((e) => ({ speaker: e.speaker, content: e.content })) });
-      updateSession(newInstructions);
+      const newInstructions = await resolvePatientInstructions(snapshot, newState, getRecentPromptTurns());
+      if (newInstructions) {
+        updateSession(newInstructions);
+      }
     } catch (err) {
       console.error("[Bot] Classification error:", err);
     }
   }
 
-  // Pick a clinician voice that contrasts with the patient voice
-  function getClinicianVoice(): string {
-    const patientVoice = (scenarioRef.current?.scenario_voice_config as unknown as { voice_name?: string })?.voice_name
-      || (extractChild(scenarioRef.current?.scenario_voice_config as unknown) as { voice_name?: string })?.voice_name
-      || "ash";
-    // Map patient voice to a contrasting clinician voice
-    const contrastMap: Record<string, string> = {
-      alloy: "nova", ash: "sage", ballad: "nova", coral: "sage",
-      echo: "nova", fable: "sage", nova: "ash", onyx: "sage",
-      sage: "nova", shimmer: "ash", verse: "nova",
-    };
-    return contrastMap[patientVoice] || "nova";
-  }
-
   const botAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  async function speakWithTTS(text: string, abort: AbortController): Promise<void> {
-    const voice = getClinicianVoice();
+  function getClinicianVoiceContext(technique: string): ClinicianVoiceContext {
+    const snapshot = scenarioRef.current;
+    const state = engineRef.current?.getState();
+
+    return {
+      clinicianRole: "experienced British NHS clinician",
+      patientRole: (snapshot?.ai_role as string | undefined) || "patient",
+      emotionalDriver: (snapshot?.emotional_driver as string | undefined) || "",
+      deescalationTechnique: technique,
+      escalationState: state ? {
+        level: state.level,
+        trust: state.trust,
+        willingness_to_listen: state.willingness_to_listen,
+        anger: state.anger,
+        frustration: state.frustration,
+      } : undefined,
+    };
+  }
+
+  async function speakWithTTS(
+    text: string,
+    technique: string,
+    voiceProfile: StructuredVoiceProfile | null,
+    abort: AbortController
+  ): Promise<void> {
+    const context = getClinicianVoiceContext(technique);
     const res = await fetch("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, voice }),
+      body: JSON.stringify({ text, style: "clinician", context, voiceProfile }),
       signal: abort.signal,
     }).catch(() => null);
 
-    if (!res || !res.ok || abort.signal.aborted) return;
+    if (!res || abort.signal.aborted) return;
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error("[Bot TTS] Failed to generate clinician audio", res.status, errText);
+      return;
+    }
 
     const blob = await res.blob();
     if (abort.signal.aborted) return;
@@ -295,7 +397,7 @@ export default function SimulationPage() {
 
     setBotSpeaking(true);
     const snapshot = scenarioRef.current;
-    if (!snapshot) return;
+    if (!snapshot) { setBotSpeaking(false); return; }
 
     // Generate de-escalation response
     const recentTurns = transcriptRef.current.slice(-8).map((e) => ({ speaker: e.speaker, content: e.content }));
@@ -303,15 +405,22 @@ export default function SimulationPage() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         recentTurns,
-        escalationLevel: engineRef.current?.getLevel() ?? 5,
         scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}. Emotional driver: ${snapshot.emotional_driver}`,
+        emotionalDriver: snapshot.emotional_driver,
+        patientRole: snapshot.ai_role,
+        clinicianRole: "experienced British NHS clinician",
+        escalationState: engineRef.current?.getState() ?? undefined,
       }),
       signal: abort.signal,
     }).catch(() => null);
 
     if (!res || abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
 
-    const { text, technique } = await res.json();
+    const { text, technique, voiceProfile } = await res.json() as {
+      text: string;
+      technique: string;
+      voiceProfile: StructuredVoiceProfile | null;
+    };
     console.log("[Bot] Generated:", text, "| Technique:", technique);
 
     // Add to transcript
@@ -321,7 +430,7 @@ export default function SimulationPage() {
     fetch(`/api/sessions/${sessionId}/transcript`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ turn_index: idx, speaker: "system", content: text }) });
 
     // Speak it aloud via OpenAI TTS
-    await speakWithTTS(text, abort);
+    await speakWithTTS(text, technique, voiceProfile, abort);
     if (abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
 
     // Classify the bot's utterance through the escalation engine
@@ -329,6 +438,9 @@ export default function SimulationPage() {
     if (abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
 
     setBotSpeaking(false);
+
+    // Cancel any in-flight patient response before injecting the bot's reply
+    cancelCurrentResponse();
 
     // Inject the bot's text into the Realtime session so the patient hears and responds
     sendEvent({
@@ -347,18 +459,23 @@ export default function SimulationPage() {
 
   function waitForPatientResponse(abort: AbortController): Promise<void> {
     return new Promise((resolve) => {
+      let sawPatientSpeaking = false;
       const check = setInterval(() => {
-        if (abort.signal.aborted || !botActiveRef.current || !aiSpeakingRef.current === false) {
-          // Wait until AI finishes speaking
-          if (!aiSpeakingRef.current) {
-            clearInterval(check);
-            // Small pause after patient finishes before bot responds
-            setTimeout(resolve, 800);
-          }
-        }
-        if (abort.signal.aborted) {
+        if (abort.signal.aborted || !botActiveRef.current) {
           clearInterval(check);
           resolve();
+          return;
+        }
+
+        if (aiSpeakingRef.current) {
+          sawPatientSpeaking = true;
+          return;
+        }
+
+        if (sawPatientSpeaking) {
+          clearInterval(check);
+          setTimeout(resolve, 800);
+          return;
         }
       }, 200);
     });

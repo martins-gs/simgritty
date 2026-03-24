@@ -176,7 +176,11 @@ export function useRealtimeSession() {
 
       case "error": {
         const error = msg.error as { message?: string };
-        config.onError(error?.message || "Realtime API error");
+        const errorMsg = error?.message || "Realtime API error";
+        // Suppress "active response in progress" — we cancel before creating,
+        // but the cancel/create can still race occasionally. Not user-facing.
+        if (errorMsg.includes("active response")) break;
+        config.onError(errorMsg);
         break;
       }
     }
@@ -232,7 +236,9 @@ export function useRealtimeSession() {
       if (!tokenRes.ok) throw new Error("Failed to get session token");
       const sessionData = await tokenRes.json();
       const ephemeralKey = sessionData.client_secret?.value;
+      const realtimeModel = sessionData.model as string | undefined;
       if (!ephemeralKey) throw new Error("No ephemeral key in response");
+      if (!realtimeModel) throw new Error("No realtime model in response");
       if (isStale()) {
         cleanupAttempt();
         return;
@@ -307,7 +313,7 @@ export function useRealtimeSession() {
       }
 
       const sdpRes = await fetch(
-        "https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
+        `https://api.openai.com/v1/realtime?model=${encodeURIComponent(realtimeModel)}`,
         {
           method: "POST",
           headers: {

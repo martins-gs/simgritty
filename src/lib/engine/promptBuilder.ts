@@ -1,6 +1,8 @@
 import type { ScenarioTraits, ScenarioVoiceConfig, EscalationRules } from "@/types/scenario";
 import type { EscalationState } from "@/types/escalation";
+import type { StructuredVoiceProfile } from "@/types/voice";
 import { ESCALATION_LABELS } from "@/types/escalation";
+import { renderVoiceProfileForPrompt } from "@/lib/voice/renderVoiceProfile";
 
 interface PromptConfig {
   title: string;
@@ -14,6 +16,7 @@ interface PromptConfig {
   escalationRules: EscalationRules;
   currentState: EscalationState;
   recentTurns: { speaker: string; content: string }[];
+  voiceProfile?: StructuredVoiceProfile | null;
 }
 
 // Layer 1: Immutable system/roleplay rules
@@ -98,9 +101,8 @@ function buildMemoryLayer(config: PromptConfig): string {
 
 // Layer 4: Voice & Delivery — multi-dimensional, driven by traits + escalation + emotional driver
 //
-// This follows the OpenAI voice steering format: separate labelled dimensions
-// (Voice Affect, Tone, Pacing, Emotion, Delivery) that the Realtime model
-// responds to when set via session.update instructions.
+// This borrows the explicit labelled-section style used in OpenAI's Realtime
+// prompting guide, while adding domain-specific voice dimensions for simulation.
 //
 // The voice profile is NOT just anger on a scale — it's shaped by:
 // 1. The scenario's emotional driver (grief vs entitlement vs fear vs hostility)
@@ -108,18 +110,22 @@ function buildMemoryLayer(config: PromptConfig): string {
 // 3. The current escalation level
 // 4. The current trust/listening/anger state
 function buildVoiceLayer(config: PromptConfig): string {
-  const { traits, currentState } = config;
+  if (config.voiceProfile) {
+    return renderVoiceProfileForPrompt(config.voiceProfile);
+  }
+
+  const { traits, currentState, voiceConfig } = config;
   const level = currentState.level;
 
   // Derive the dominant emotional flavour from the scenario traits
   const emotionalProfile = deriveEmotionalProfile(traits, config.emotionalDriver);
 
   // Build each voice dimension separately
-  const affect = buildAffect(emotionalProfile, level, currentState);
-  const tone = buildTone(emotionalProfile, traits, level, currentState);
-  const pacing = buildPacing(traits, level, currentState);
-  const emotion = buildEmotion(emotionalProfile, level, currentState);
-  const delivery = buildDelivery(traits, level, currentState);
+  const affect = buildAffect(emotionalProfile, level, currentState, voiceConfig);
+  const tone = buildTone(traits, level, currentState, voiceConfig);
+  const pacing = buildPacing(traits, level, currentState, voiceConfig);
+  const emotion = buildEmotion(emotionalProfile, level, currentState, voiceConfig);
+  const delivery = buildDelivery(traits, level, currentState, voiceConfig);
 
   return `# Personality & Tone
 
@@ -163,7 +169,12 @@ function deriveEmotionalProfile(traits: ScenarioTraits, emotionalDriver: string)
   return "mixed";
 }
 
-function buildAffect(profile: EmotionalProfile, level: number, state: EscalationState): string {
+function buildAffect(
+  profile: EmotionalProfile,
+  level: number,
+  _state: EscalationState,
+  voiceConfig: ScenarioVoiceConfig
+): string {
   const affectMap: Record<EmotionalProfile, Record<string, string>> = {
     grief: {
       low: "Voice affect: Fragile, strained, holding back tears. Underlying sadness in every word.",
@@ -203,10 +214,24 @@ function buildAffect(profile: EmotionalProfile, level: number, state: Escalation
   };
 
   const band = level <= 3 ? "low" : level <= 6 ? "mid" : "high";
-  return affectMap[profile][band];
+  const affect = affectMap[profile][band];
+
+  if (voiceConfig.expressiveness_level >= 8) {
+    return `${affect} Emotional colour should be immediately obvious in pitch and emphasis.`;
+  }
+  if (voiceConfig.expressiveness_level <= 3) {
+    return `${affect} Keep it more contained than theatrical.`;
+  }
+
+  return affect;
 }
 
-function buildTone(profile: EmotionalProfile, traits: ScenarioTraits, level: number, state: EscalationState): string {
+function buildTone(
+  traits: ScenarioTraits,
+  level: number,
+  state: EscalationState,
+  voiceConfig: ScenarioVoiceConfig
+): string {
   const parts: string[] = [];
 
   // Base interpersonal tone from trust level
@@ -221,9 +246,9 @@ function buildTone(profile: EmotionalProfile, traits: ScenarioTraits, level: num
   }
 
   // Sarcasm overlay
-  if (traits.sarcasm >= 7 && level >= 3) {
+  if ((traits.sarcasm >= 7 || voiceConfig.sarcasm_expression >= 7) && level >= 3) {
     parts.push("Heavy sarcasm — cutting, mocking, contemptuous undertone.");
-  } else if (traits.sarcasm >= 4 && level >= 4) {
+  } else if ((traits.sarcasm >= 4 || voiceConfig.sarcasm_expression >= 4) && level >= 4) {
     parts.push("Occasional sarcastic edge when frustrated.");
   }
 
@@ -239,10 +264,19 @@ function buildTone(profile: EmotionalProfile, traits: ScenarioTraits, level: num
     parts.push("Losing the thread. Jumping between grievances. Hard to follow.");
   }
 
+  if (voiceConfig.anger_expression >= 7 && state.anger >= 5) {
+    parts.push("Heat sits close to the surface, even before the wording becomes openly aggressive.");
+  }
+
   return `Tone: ${parts.join(" ")}`;
 }
 
-function buildPacing(traits: ScenarioTraits, level: number, state: EscalationState): string {
+function buildPacing(
+  traits: ScenarioTraits,
+  level: number,
+  state: EscalationState,
+  voiceConfig: ScenarioVoiceConfig
+): string {
   let pace: string;
   if (level <= 2) {
     pace = "Even and steady. Considered. Might trail off when emotion surfaces.";
@@ -266,10 +300,33 @@ function buildPacing(traits: ScenarioTraits, level: number, state: EscalationSta
     pace += " Returns to the same grievance repeatedly. Circles back.";
   }
 
+  if (voiceConfig.speaking_rate >= 1.15) {
+    pace += " Speaking rate should stay brisk and urgent.";
+  } else if (voiceConfig.speaking_rate <= 0.9) {
+    pace += " Speaking rate should slow slightly, as if the emotion is weighing each phrase down.";
+  }
+
+  if (voiceConfig.pause_style === "minimal") {
+    pace += " Keep pauses brief and avoid dead air.";
+  } else if (voiceConfig.pause_style === "short_clipped") {
+    pace += " Use clipped stops rather than long reflective pauses.";
+  } else if (voiceConfig.pause_style === "long_dramatic") {
+    pace += " Let a few heavier pauses land when the emotion peaks.";
+  }
+
+  if (state.willingness_to_listen <= 2) {
+    pace += " Leaves very little space for the clinician to get a word in.";
+  }
+
   return `Pacing: ${pace}`;
 }
 
-function buildEmotion(profile: EmotionalProfile, level: number, state: EscalationState): string {
+function buildEmotion(
+  profile: EmotionalProfile,
+  level: number,
+  state: EscalationState,
+  voiceConfig: ScenarioVoiceConfig
+): string {
   const parts: string[] = [];
 
   // Primary emotion from profile
@@ -297,10 +354,25 @@ function buildEmotion(profile: EmotionalProfile, level: number, state: Escalatio
     parts.push("Barely listening. Hearing words but not processing them.");
   }
 
+  if (voiceConfig.expressiveness_level >= 8) {
+    parts.push("Emotional shifts should be vividly audible, not flattened out.");
+  } else if (voiceConfig.expressiveness_level <= 3) {
+    parts.push("Emotion shows through restraint rather than broad theatrical swings.");
+  }
+
+  if (voiceConfig.anger_expression >= 7 && state.anger >= 4) {
+    parts.push("Anger can flare quickly into the voice when challenged.");
+  }
+
   return `Emotion: ${parts.join(" ")}`;
 }
 
-function buildDelivery(traits: ScenarioTraits, level: number, state: EscalationState): string {
+function buildDelivery(
+  traits: ScenarioTraits,
+  level: number,
+  state: EscalationState,
+  voiceConfig: ScenarioVoiceConfig
+): string {
   const parts: string[] = [];
 
   // Volume
@@ -326,12 +398,26 @@ function buildDelivery(traits: ScenarioTraits, level: number, state: EscalationS
   }
 
   // Interruptions from trait
-  if (traits.interruption_likelihood >= 7 && level >= 4) {
+  if (voiceConfig.interruption_style === "aggressive" && level >= 4) {
+    parts.push("Actively cuts across the clinician and does not wait for them to finish.");
+  } else if (
+    voiceConfig.interruption_style === "frequent" ||
+    (traits.interruption_likelihood >= 7 && level >= 4)
+  ) {
     parts.push("WILL interrupt the clinician mid-sentence. Does not wait for them to finish.");
-  } else if (traits.interruption_likelihood >= 4 && level >= 5) {
+  } else if (
+    voiceConfig.interruption_style === "occasional" ||
+    (traits.interruption_likelihood >= 4 && level >= 5)
+  ) {
     parts.push("May cut across the clinician when emotion spikes.");
   } else {
     parts.push("Generally lets the clinician finish before responding.");
+  }
+
+  if (voiceConfig.pause_style === "minimal") {
+    parts.push("Pauses are short; delivery should feel flowing and responsive.");
+  } else if (voiceConfig.pause_style === "long_dramatic") {
+    parts.push("Allows a few heavier pauses to hang in the air when the emotional stakes hit.");
   }
 
   // Physical vocal characteristics at high levels
@@ -340,6 +426,12 @@ function buildDelivery(traits: ScenarioTraits, level: number, state: EscalationS
   }
   if (level >= 8 && traits.coherence <= 5) {
     parts.push("Words may slur together or become garbled in the heat of the moment.");
+  }
+  if (voiceConfig.expressiveness_level >= 8) {
+    parts.push("Pitch, emphasis, and attack should vary noticeably so the delivery feels alive.");
+  }
+  if (voiceConfig.anger_expression >= 7 && state.anger >= 6) {
+    parts.push("Stress key words hard, with sharper attacks and less gentleness.");
   }
 
   return parts.join("\n");

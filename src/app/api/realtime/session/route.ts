@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+const REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-1.5";
+const DEFAULT_REALTIME_VOICE = process.env.OPENAI_REALTIME_DEFAULT_VOICE || "marin";
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -22,8 +25,8 @@ export async function POST(request: Request) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "gpt-4o-realtime-preview",
-      voice: voice || "alloy",
+      model: REALTIME_MODEL,
+      voice: voice || DEFAULT_REALTIME_VOICE,
       instructions: instructions || "",
       input_audio_transcription: {
         model: "gpt-4o-mini-transcribe",
@@ -48,5 +51,5 @@ export async function POST(request: Request) {
   }
 
   const data = await response.json();
-  return NextResponse.json(data);
+  return NextResponse.json({ ...data, model: REALTIME_MODEL });
 }

@@ -92,7 +92,7 @@ export const DEFAULT_TRAITS: ScenarioTraits = {
 };
 
 export const DEFAULT_VOICE_CONFIG: ScenarioVoiceConfig = {
-  voice_name: "ash",
+  voice_name: "marin",
   speaking_rate: 1.0,
   expressiveness_level: 5,
   anger_expression: 3,
