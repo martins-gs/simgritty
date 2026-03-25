@@ -75,3 +75,41 @@ export async function POST(
 
   return NextResponse.json({ success: true }, { status: 201 });
 }
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await request.json();
+  if (typeof body.turn_index !== "number") {
+    return NextResponse.json({ error: "turn_index required" }, { status: 400 });
+  }
+
+  const snapshotUpdate = {
+    classifier_result: body.classifier_result || null,
+    trigger_type: body.trigger_type || null,
+    state_after: body.state_after || null,
+    patient_voice_profile_after: body.patient_voice_profile_after || null,
+    patient_prompt_after: body.patient_prompt_after || null,
+  };
+
+  const { error } = await supabase
+    .from("transcript_turns")
+    .update(snapshotUpdate)
+    .eq("session_id", id)
+    .eq("turn_index", body.turn_index);
+
+  if (error) {
+    if (isSnapshotColumnError(error.message)) {
+      return NextResponse.json({ success: true });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
+}

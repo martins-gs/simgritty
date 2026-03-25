@@ -13,6 +13,21 @@ interface SpeakOptions {
   instructions?: string;
 }
 
+type RealtimeSpeakResult = "completed" | "partial" | "failed";
+
+const MIN_SPEECH_TIMEOUT_MS = 15000;
+const MAX_SPEECH_TIMEOUT_MS = 30000;
+const SPEECH_TIMEOUT_BASE_MS = 5000;
+const SPEECH_TIMEOUT_PER_WORD_MS = 500;
+
+function estimateSpeechTimeoutMs(text: string) {
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(
+    MIN_SPEECH_TIMEOUT_MS,
+    Math.min(MAX_SPEECH_TIMEOUT_MS, SPEECH_TIMEOUT_BASE_MS + wordCount * SPEECH_TIMEOUT_PER_WORD_MS)
+  );
+}
+
 function teardownRendererResources(
   pc: RTCPeerConnection | null,
   dc: RTCDataChannel | null,
@@ -57,14 +72,15 @@ export function useRealtimeVoiceRenderer() {
   const activeResponseIdRef = useRef<string | null>(null);
   const pendingSpeechRef = useRef<{
     responseId: string | null;
-    resolve: (value: boolean) => void;
+    resolve: (value: RealtimeSpeakResult) => void;
     timeout: ReturnType<typeof setTimeout>;
     completionTimer: ReturnType<typeof setTimeout> | null;
     startedAt: number;
-    sawAudioLifecycle: boolean;
+    sawAudioStarted: boolean;
+    sawAudioCompletion: boolean;
   } | null>(null);
 
-  const clearPendingSpeech = useCallback((value: boolean) => {
+  const clearPendingSpeech = useCallback((value: RealtimeSpeakResult) => {
     if (!pendingSpeechRef.current) return;
     clearTimeout(pendingSpeechRef.current.timeout);
     if (pendingSpeechRef.current.completionTimer) {
@@ -73,6 +89,22 @@ export function useRealtimeVoiceRenderer() {
     pendingSpeechRef.current.resolve(value);
     pendingSpeechRef.current = null;
   }, []);
+
+  const failPendingSpeech = useCallback((
+    reason: string,
+    onFailure?: (outcome: RealtimeSpeakResult) => void
+  ) => {
+    const pendingSpeech = pendingSpeechRef.current;
+    if (!pendingSpeech) return;
+
+    const outcome: RealtimeSpeakResult = pendingSpeech.sawAudioStarted ? "partial" : "failed";
+    const elapsedMs = Math.round(performance.now() - pendingSpeech.startedAt);
+    console.warn(
+      `[Clinician Audio] path=realtime outcome=${outcome} reason=${reason} elapsed_ms=${elapsedMs}`
+    );
+    clearPendingSpeech(outcome);
+    onFailure?.(outcome);
+  }, [clearPendingSpeech]);
 
   const connect = useCallback(async (config: RealtimeVoiceRendererConfig) => {
     if (pcRef.current || dcRef.current || audioElRef.current) {
@@ -187,7 +219,7 @@ export function useRealtimeVoiceRenderer() {
               ? Math.round(performance.now() - pendingSpeechRef.current.startedAt)
               : null;
             if (pendingSpeechRef.current) {
-              pendingSpeechRef.current.sawAudioLifecycle = true;
+              pendingSpeechRef.current.sawAudioStarted = true;
             }
             if (!pendingResponseId || !responseId || responseId === pendingResponseId) {
               console.info(
@@ -207,7 +239,7 @@ export function useRealtimeVoiceRenderer() {
               `[Clinician Audio] path=realtime event=output_audio_buffer.stopped response_id=${responseId || "unknown"} elapsed_ms=${elapsedMs ?? "unknown"}`
             );
             if (!pendingResponseId || !responseId || responseId === pendingResponseId) {
-              clearPendingSpeech(true);
+              clearPendingSpeech("completed");
             }
             return;
           }
@@ -219,7 +251,7 @@ export function useRealtimeVoiceRenderer() {
               ? Math.round(performance.now() - pendingSpeechRef.current.startedAt)
               : null;
             if (pendingSpeechRef.current) {
-              pendingSpeechRef.current.sawAudioLifecycle = true;
+              pendingSpeechRef.current.sawAudioCompletion = true;
             }
             console.info(
               `[Clinician Audio] path=realtime event=response.output_audio.done response_id=${responseId || "unknown"} elapsed_ms=${elapsedMs ?? "unknown"}`
@@ -235,13 +267,15 @@ export function useRealtimeVoiceRenderer() {
 
           if (type === "error") {
             const error = msg.error as { message?: string } | undefined;
-            clearPendingSpeech(false);
-            config.onError(error?.message || "Clinician realtime audio error");
+            const message = error?.message || "Clinician realtime audio error";
+            failPendingSpeech(`error:${message}`, () => config.onError(message));
             return;
           }
 
           if (type === "output_audio_buffer.cleared") {
-            clearPendingSpeech(false);
+            failPendingSpeech("output_audio_buffer.cleared", () => {
+              config.onError("Clinician realtime output audio buffer cleared");
+            });
             return;
           }
 
@@ -265,7 +299,7 @@ export function useRealtimeVoiceRenderer() {
             if (response?.status === "completed") {
               const pendingSpeech = pendingSpeechRef.current;
               if (!pendingSpeech) return;
-              if (pendingSpeech.sawAudioLifecycle) {
+              if (pendingSpeech.sawAudioStarted) {
                 console.info(
                   `[Clinician Audio] path=realtime event=response.done waiting_for=output_audio_buffer.stopped response_id=${response?.id || "unknown"}`
                 );
@@ -283,14 +317,16 @@ export function useRealtimeVoiceRenderer() {
                   console.info(
                     `[Clinician Audio] path=realtime event=response.done fallback_complete response_id=${response?.id || "unknown"} delay_ms=${fallbackMs}`
                   );
-                  clearPendingSpeech(true);
+                  clearPendingSpeech("completed");
                 }
               }, fallbackMs);
               return;
             }
 
             if (response?.status && response.status !== "completed") {
-              clearPendingSpeech(false);
+              failPendingSpeech(`response.done:${response.status}`, () => {
+                config.onError(`Clinician realtime response ended with status ${response.status}`);
+              });
             }
           }
         } catch {
@@ -300,8 +336,9 @@ export function useRealtimeVoiceRenderer() {
 
       nextDc.onerror = () => {
         if (!isStale()) {
-          clearPendingSpeech(false);
-          config.onError("Clinician realtime data channel error");
+          failPendingSpeech("data_channel_error", () => {
+            config.onError("Clinician realtime data channel error");
+          });
         }
       };
 
@@ -352,23 +389,24 @@ export function useRealtimeVoiceRenderer() {
       config.onError(err instanceof Error ? err.message : "Clinician realtime connection failed");
       return false;
     }
-  }, [clearPendingSpeech]);
+  }, [clearPendingSpeech, failPendingSpeech]);
 
   const speakText = useCallback(async ({ text, instructions }: SpeakOptions) => {
     const dc = dcRef.current;
     if (!dc || dc.readyState !== "open" || !readyRef.current || disconnectedRef.current) {
-      return false;
+      return "failed";
     }
 
     if (pendingSpeechRef.current) {
-      clearPendingSpeech(false);
+      clearPendingSpeech("failed");
     }
 
-    return new Promise<boolean>((resolve) => {
+    return new Promise<RealtimeSpeakResult>((resolve) => {
       const startedAt = performance.now();
+      const timeoutMs = estimateSpeechTimeoutMs(text);
       const timeout = setTimeout(() => {
-        clearPendingSpeech(false);
-      }, 15000);
+        failPendingSpeech("timeout");
+      }, timeoutMs);
 
       pendingSpeechRef.current = {
         responseId: null,
@@ -376,10 +414,11 @@ export function useRealtimeVoiceRenderer() {
         timeout,
         completionTimer: null,
         startedAt,
-        sawAudioLifecycle: false,
+        sawAudioStarted: false,
+        sawAudioCompletion: false,
       };
       activeResponseIdRef.current = null;
-      console.info("[Clinician Audio] path=realtime request=response.create");
+      console.info(`[Clinician Audio] path=realtime request=response.create timeout_ms=${timeoutMs}`);
 
       dc.send(JSON.stringify({
         type: "response.create",
@@ -401,14 +440,14 @@ export function useRealtimeVoiceRenderer() {
         },
       }));
     });
-  }, [clearPendingSpeech]);
+  }, [clearPendingSpeech, failPendingSpeech]);
 
   const disconnect = useCallback(() => {
     connectAttemptRef.current += 1;
     disconnectedRef.current = true;
     readyRef.current = false;
     activeResponseIdRef.current = null;
-    clearPendingSpeech(false);
+    clearPendingSpeech("failed");
     teardownRendererResources(pcRef.current, dcRef.current, audioElRef.current);
     pcRef.current = null;
     dcRef.current = null;

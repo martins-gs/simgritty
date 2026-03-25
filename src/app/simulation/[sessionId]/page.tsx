@@ -39,6 +39,7 @@ function escColor(level: number) {
 
 const CLINICIAN_REALTIME_VOICE = "cedar";
 const CLINICIAN_REALTIME_HANDOFF_DELAY_MS = 25;
+const CLINICIAN_REALTIME_PARTIAL_TAIL_GUARD_MS = 2500;
 const BOT_TURN_POST_PATIENT_DELAY_MS = 50;
 const BOT_RESPONSE_CANCEL_SETTLE_MS = 40;
 const BOT_PATIENT_AUDIO_CLEAR_WAIT_MS = 250;
@@ -72,6 +73,14 @@ interface PendingTurnCompletion {
   promise: Promise<void>;
   resolve: () => void;
   timeout: ReturnType<typeof setTimeout>;
+}
+
+interface PatientReplyUpdateResult {
+  snapshot: PersistedTurnSnapshot | null;
+  stateAfter: EscalationState;
+  triggerType: TurnTriggerType;
+  classifierResult: ClassifierResult;
+  recentTurnsForPrompt: { speaker: string; content: string }[];
 }
 
 export default function SimulationPage() {
@@ -126,7 +135,7 @@ export default function SimulationPage() {
   const patientVoiceProfileRef = useRef<StructuredVoiceProfile | null>(null);
   const patientPromptRef = useRef<string | null>(null);
   const patientVoiceRequestRef = useRef(0);
-  const pendingPatientReplyUpdateRef = useRef<Promise<PersistedTurnSnapshot | null> | null>(null);
+  const pendingPatientReplyUpdateRef = useRef<Promise<PatientReplyUpdateResult | null> | null>(null);
   const patientReplyUpdateRequestRef = useRef(0);
   const clinicianRendererReadyRef = useRef(false);
   const clinicianRendererConnectRef = useRef<Promise<boolean> | null>(null);
@@ -310,6 +319,24 @@ export default function SimulationPage() {
         patient_voice_profile_after: snapshot.patientVoiceProfileAfter,
         patient_prompt_after: snapshot.patientPromptAfter,
         started_at: timestamp,
+      }),
+    });
+  }
+
+  function updatePersistedTurnSnapshot(
+    turnIndex: number,
+    snapshot: PersistedTurnSnapshot
+  ) {
+    void fetch(`/api/sessions/${sessionId}/transcript`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        turn_index: turnIndex,
+        classifier_result: snapshot.classifierResult,
+        trigger_type: snapshot.triggerType,
+        state_after: snapshot.stateAfter,
+        patient_voice_profile_after: snapshot.patientVoiceProfileAfter,
+        patient_prompt_after: snapshot.patientPromptAfter,
       }),
     });
   }
@@ -691,11 +718,76 @@ export default function SimulationPage() {
     return requestBotTurn(requestId, { signal, reason: "on_demand" });
   }
 
+  async function refinePatientStateFromBotReply(
+    requestId: number,
+    turnIndex: number,
+    snapshot: Record<string, unknown>,
+    stateAfter: EscalationState,
+    recentTurnsForPrompt: { speaker: string; content: string }[],
+    classifierResult: ClassifierResult,
+    triggerType: TurnTriggerType
+  ): Promise<void> {
+    const startedAt = performance.now();
+    const isStale = () =>
+      requestId !== patientReplyUpdateRequestRef.current || !botActiveRef.current || endingRef.current;
+
+    const nextVoiceProfile = await fetchPatientVoiceProfile(
+      snapshot,
+      stateAfter,
+      recentTurnsForPrompt,
+      null,
+      botAbortRef.current?.signal
+    );
+    if (isStale()) return;
+
+    const effectiveVoiceProfile = nextVoiceProfile ?? patientVoiceProfileRef.current;
+    if (!nextVoiceProfile || !effectiveVoiceProfile) return;
+
+    patientVoiceProfileRef.current = nextVoiceProfile;
+
+    console.info(
+      `[Bot Patient State] voice_profile_ready request_id=${requestId} elapsed_ms=${Math.round(performance.now() - startedAt)}`
+    );
+
+    const refinedInstructions = buildPatientInstructions(
+      snapshot,
+      stateAfter,
+      recentTurnsForPrompt,
+      effectiveVoiceProfile
+    );
+    patientPromptRef.current = refinedInstructions;
+    updateSession(refinedInstructions);
+
+    if (pendingBotTurnRef.current && pendingBotTurnSeedRef.current === requestId) {
+      prefetchNextBotTurn({
+        signal: botAbortRef.current?.signal,
+        snapshot,
+        state: stateAfter,
+        recentTurns: recentTurnsForPrompt,
+        patientVoiceProfile: effectiveVoiceProfile,
+        seed: requestId,
+        reason: "refined_after_patient",
+      });
+    }
+
+    const refinedSnapshot = buildSnapshot({
+      classifierResult,
+      triggerType,
+      stateAfter,
+      patientVoiceProfileAfter: effectiveVoiceProfile,
+      patientPromptAfter: refinedInstructions,
+    });
+    if (!refinedSnapshot) return;
+
+    updatePersistedTurnSnapshot(turnIndex, refinedSnapshot);
+  }
+
   async function syncPatientStateFromBotReply(
     text: string,
     requestId: number,
+    turnIndex: number,
     recentTurnsOverride?: { speaker: string; content: string }[]
-  ): Promise<PersistedTurnSnapshot | null> {
+  ): Promise<PatientReplyUpdateResult | null> {
     if (!engineRef.current || !scenarioRef.current || !botActiveRef.current) return null;
     const startedAt = performance.now();
     const snapshot = scenarioRef.current;
@@ -740,11 +832,17 @@ export default function SimulationPage() {
 
       if (engineRef.current.shouldAutoEnd()) {
         handleEndSession("auto_ceiling");
-        return buildSnapshot({
-          classifierResult: classResult,
-          triggerType: delta.trigger_type,
+        return {
+          snapshot: buildSnapshot({
+            classifierResult: classResult,
+            triggerType: delta.trigger_type,
+            stateAfter: newState,
+          }),
           stateAfter: newState,
-        });
+          triggerType: delta.trigger_type,
+          classifierResult: classResult,
+          recentTurnsForPrompt: getRecentPromptTurns(),
+        };
       }
 
       const evtIdx = eventIndexRef.current++;
@@ -783,52 +881,43 @@ export default function SimulationPage() {
         reason: "fast_after_patient",
       });
 
-      const nextVoiceProfile = await fetchPatientVoiceProfile(
+      const immediateInstructions = buildPatientInstructions(
         snapshot,
         newState,
         recentTurnsForPrompt,
-        null,
-        botAbortRef.current?.signal
+        patientVoiceProfileRef.current
       );
-      if (isStale()) return null;
+      patientPromptRef.current = immediateInstructions;
+      updateSession(immediateInstructions);
 
-      const effectiveVoiceProfile = nextVoiceProfile ?? patientVoiceProfileRef.current;
-      if (nextVoiceProfile) {
-        patientVoiceProfileRef.current = nextVoiceProfile;
-      }
-
-      console.info(
-        `[Bot Patient State] voice_profile_ready elapsed_ms=${Math.round(performance.now() - startedAt)}`
-      );
-
-      const newInstructions = buildPatientInstructions(
-        snapshot,
-        newState,
-        recentTurnsForPrompt,
-        effectiveVoiceProfile
-      );
-      patientPromptRef.current = newInstructions;
-      updateSession(newInstructions);
-
-      if (pendingBotTurnRef.current && pendingBotTurnSeedRef.current === requestId) {
-        prefetchNextBotTurn({
-          signal: botAbortRef.current?.signal,
-          snapshot,
-          state: newState,
-          recentTurns: recentTurnsForPrompt,
-          patientVoiceProfile: effectiveVoiceProfile,
-          seed: requestId,
-          reason: "refined_after_patient",
-        });
-      }
-
-      return buildSnapshot({
+      const immediateSnapshot = buildSnapshot({
         classifierResult: classResult,
         triggerType: delta.trigger_type,
         stateAfter: newState,
-        patientVoiceProfileAfter: effectiveVoiceProfile,
-        patientPromptAfter: newInstructions,
+        patientVoiceProfileAfter: patientVoiceProfileRef.current,
+        patientPromptAfter: immediateInstructions,
       });
+      console.info(
+        `[Bot Patient State] critical_update_ready request_id=${requestId} elapsed_ms=${Math.round(performance.now() - startedAt)}`
+      );
+
+      void refinePatientStateFromBotReply(
+        requestId,
+        turnIndex,
+        snapshot,
+        newState,
+        recentTurnsForPrompt,
+        classResult,
+        delta.trigger_type
+      );
+
+      return {
+        snapshot: immediateSnapshot,
+        stateAfter: newState,
+        triggerType: delta.trigger_type,
+        classifierResult: classResult,
+        recentTurnsForPrompt,
+      };
     } catch (err) {
       if (isStale()) return null;
       console.error("[Bot Patient State] Classification error:", err);
@@ -838,12 +927,13 @@ export default function SimulationPage() {
 
   function queuePatientReplyStateUpdate(
     text: string,
+    turnIndex: number,
     recentTurnsOverride?: { speaker: string; content: string }[]
   ) {
     const requestId = patientReplyUpdateRequestRef.current + 1;
     patientReplyUpdateRequestRef.current = requestId;
 
-    const pending = syncPatientStateFromBotReply(text, requestId, recentTurnsOverride);
+    const pending = syncPatientStateFromBotReply(text, requestId, turnIndex, recentTurnsOverride);
     pendingPatientReplyUpdateRef.current = pending;
 
     void pending.finally(() => {
@@ -869,15 +959,12 @@ export default function SimulationPage() {
     const entry = { speaker: "ai", content: text, timestamp } as const;
     appendTranscriptEntry(entry);
     const idx = turnIndexRef.current++;
-    const turnSnapshot = botActiveRef.current
-      ? await queuePatientReplyStateUpdate(text, recentTurnsBeforeAiTurn) ?? buildSnapshot()
-      : buildSnapshot();
+    const turnResult = botActiveRef.current
+      ? await queuePatientReplyStateUpdate(text, idx, recentTurnsBeforeAiTurn)
+      : null;
+    const turnSnapshot = turnResult?.snapshot ?? buildSnapshot();
     if (turnSnapshot) {
       persistTranscriptTurn(idx, "ai", text, turnSnapshot, timestamp);
-    }
-    if (botActiveRef.current) {
-      // The bot patient-response state update is awaited above so the saved turn snapshot
-      // matches the exact post-turn state that the next fork should restore.
     }
     if (pendingUpdateRef.current) {
       patientPromptRef.current = pendingUpdateRef.current;
@@ -1237,8 +1324,17 @@ export default function SimulationPage() {
 
       if (abort.signal.aborted || !botActiveRef.current) return "none";
 
-      if (rendered) {
+      if (rendered === "completed") {
         console.info(`[Clinician Audio] path=realtime status=done voice=${CLINICIAN_REALTIME_VOICE}`);
+        return "realtime";
+      }
+
+      if (rendered === "partial") {
+        console.warn(
+          `[Clinician Audio] skip_tts_fallback reason="renderer failed after playback started" tail_guard_ms=${CLINICIAN_REALTIME_PARTIAL_TAIL_GUARD_MS}`
+        );
+        await new Promise((resolve) => setTimeout(resolve, CLINICIAN_REALTIME_PARTIAL_TAIL_GUARD_MS));
+        if (abort.signal.aborted || !botActiveRef.current) return "none";
         return "realtime";
       }
 
@@ -1386,6 +1482,7 @@ export default function SimulationPage() {
 
   function stopBot() {
     patientReplyUpdateRequestRef.current += 1;
+    patientVoiceRequestRef.current += 1;
     pendingPatientReplyUpdateRef.current = null;
     resolvePendingPatientTurnCompletion();
     pendingBotTurnRequestRef.current += 1;

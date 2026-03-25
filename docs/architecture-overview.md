@@ -35,6 +35,12 @@ The live simulation is orchestrated from `src/app/simulation/[sessionId]/page.ts
 
 The server route `src/app/api/realtime/session/route.ts` creates ephemeral Realtime sessions. The default realtime model is `gpt-realtime-1.5`, and patient-session input transcription is configured with `gpt-4o-mini-transcribe`.
 
+For clinician speech, the realtime renderer now distinguishes three execution outcomes:
+
+- **completed**: realtime playback reached a clean stop and bot handoff proceeds normally
+- **partial**: realtime playback started, but the control path did not close cleanly; the system does not replay the line via TTS, and instead applies a conservative tail guard before allowing the patient to respond
+- **failed**: realtime speech never got going cleanly, so the system falls back to the HTTP TTS route
+
 ## 2. Prompting And Patient Behaviour
 
 The patient is driven by a four-layer prompt built in `src/lib/engine/promptBuilder.ts`:
@@ -113,8 +119,8 @@ Bot mode is not just “generate text and play audio”. The current flow is:
 5. Fall back to `src/app/api/tts/route.ts` if realtime clinician speech is unavailable.
 6. Classify the clinician turn with `clinician_utterance` mode.
 7. Let the patient respond on the main realtime session.
-8. Classify the patient reply with `patient_response` mode.
-9. Refresh patient prompt / voice-profile state and prefetch the next clinician turn.
+8. Run a **critical patient-state update**: classify the patient reply, update escalation state, rebuild the patient prompt immediately using the cached voice profile, persist that turn snapshot, and prefetch the next clinician turn.
+9. Run a **background refinement**: regenerate the patient voice profile, patch the saved transcript turn with the refined prompt/profile, and refresh the prefetched clinician turn if the refined voice state arrived in time.
 
 The clinician audio system is dual-path:
 
@@ -122,6 +128,11 @@ The clinician audio system is dual-path:
 - **Fallback**: HTTP speech route using `gpt-4o-mini-tts`
 
 The clinician voice instructions are built in `src/lib/engine/clinicianVoiceBuilder.ts`. If a structured clinician voice profile is available, it is used directly; otherwise the builder falls back to deterministic technique- and state-aware instructions.
+
+Two extra protections were added to keep bot-mode speech reliable:
+
+- **Length-aware realtime timeout**: clinician realtime playback is not governed by a fixed 15-second timeout; the timeout scales with utterance length to avoid timing out normal longer clinician turns near the end.
+- **No replay after partial realtime playback**: if realtime audio already started and then degraded, the system avoids replaying the same clinician line through TTS from the beginning, because that caused obvious duplicate speech and voice switching.
 
 ## 6. Persistence, Review, And Forking
 
