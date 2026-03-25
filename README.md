@@ -19,34 +19,38 @@ Built with Next.js 16, OpenAI Realtime API (WebRTC), and Supabase.
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Next.js App Router                        │
-│                                                                   │
-│  /simulation/[id]          /review/[id]          /dashboard       │
-│  ┌──────────────┐    ┌──────────────────┐    ┌────────────────┐  │
-│  │ Live session  │    │ Transcript +     │    │ Scenarios +    │  │
-│  │ Waveform +    │    │ Timeline +       │    │ Sessions       │  │
-│  │ Controls      │    │ Score + Notes    │    │                │  │
-│  └──────┬───────┘    └────────┬─────────┘    └────────────────┘  │
-│         │                     │                                   │
-├─────────┼─────────────────────┼───────────────────────────────────┤
-│         │    API Routes       │                                   │
-│  /api/realtime/session   /api/classify   /api/deescalate         │
-│  /api/sessions/*         /api/scenarios/*  /api/voice-profile/*   │
-├─────────┼─────────────────────┼───────────────────────────────────┤
-│         │    Engine Layer      │                                   │
-│  ┌──────┴──────┐  ┌──────────┴───────┐  ┌────────────────────┐  │
-│  │ Escalation   │  │ Classifier       │  │ Prompt Builder     │  │
-│  │ Engine       │  │ Pipeline         │  │ (4-layer system)   │  │
-│  └──────────────┘  └──────────────────┘  └────────────────────┘  │
-│                                                                   │
-├───────────────────────────────────────────────────────────────────┤
-│  OpenAI Realtime API (WebRTC)    │    Supabase (Auth + Postgres)  │
-│  - gpt-realtime-1.5 (patient)    │    - 11 tables                 │
-│  - cedar voice (clinician)       │    - Row-level security        │
-│  - gpt-5.4-mini (classifier)    │    - Session management        │
-└──────────────────────────────────┴────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                             Next.js App Router                               │
+│                                                                              │
+│  /simulation/[sessionId]      /review/[sessionId]      /dashboard /scenarios │
+│  - live orchestration         - transcript + scoring   - authoring + history │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                         Client Runtime On /simulation                        │
+│                                                                              │
+│  useRealtimeSession          useRealtimeVoiceRenderer      page.tsx          │
+│  - patient WebRTC            - clinician WebRTC voice     - bot loop         │
+│  - mic gating                - playback completion        - transcript sync   │
+│  - prompt/session updates    - response lifecycle wait    - state updates     │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                API Routes                                    │
+│                                                                              │
+│  /api/realtime/session        /api/classify          /api/voice-profile/patient │
+│  /api/deescalate              /api/tts               /api/sessions/* /api/scenarios/* │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                         Domain / Orchestration Layer                         │
+│                                                                              │
+│  promptBuilder      escalationEngine      classifierPipeline                 │
+│  structuredVoice    clinicianVoiceBuilder renderVoiceProfile                 │
+├──────────────────────────────┬──────────────────────────────┬────────────────┤
+│ OpenAI Realtime API          │ OpenAI Responses / Audio API │ Supabase       │
+│ - patient conversation       │ - gpt-5.4-mini classify      │ - auth         │
+│ - clinician voice renderer   │ - gpt-5.4-mini voice profile │ - scenarios    │
+│ - gpt-4o-mini-transcribe     │ - gpt-5.4-mini clinician turn│ - sessions     │
+│                              │ - gpt-4o-mini-tts fallback   │ - transcript   │
+└──────────────────────────────┴──────────────────────────────┴────────────────┘
 ```
+
+More detail: [docs/architecture-overview.md](docs/architecture-overview.md)
 
 ## Getting Started
 
