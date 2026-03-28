@@ -57,7 +57,11 @@ function EscalationImpact({
 }
 
 export function TranscriptViewer({ turns, onTurnSelect, selectedTurnId }: TranscriptViewerProps) {
-  // Build a map of each turn's "before" level by tracking state across turns
+  // Build a map of each turn's "before" level by tracking state across turns.
+  // Only trainee and system (AI clinician) turns update the tracked level because
+  // patient turns never change the score and their state_after may be stale due
+  // to async classification timing (the patient response can arrive before the
+  // preceding trainee classification completes).
   const levelBeforeMap = new Map<string, number>();
   let lastKnownLevel = 3; // default initial level
 
@@ -65,8 +69,8 @@ export function TranscriptViewer({ turns, onTurnSelect, selectedTurnId }: Transc
     const stateAfter = turn.state_after as EscalationState | null;
     // The "before" for this turn is the last known level
     levelBeforeMap.set(turn.id, lastKnownLevel);
-    // Update last known level if this turn has state
-    if (stateAfter) {
+    // Update last known level only from scoring turns (trainee / system)
+    if (stateAfter && (turn.speaker === "trainee" || turn.speaker === "system")) {
       lastKnownLevel = stateAfter.level;
     }
   }

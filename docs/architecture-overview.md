@@ -95,18 +95,25 @@ Clinician turn generation returns:
 
 `src/lib/engine/escalationEngine.ts` holds the live state:
 
-- escalation level
-- trust
-- willingness to listen
-- anger
-- frustration
-- behaviour counters such as interruptions and validations
+- escalation level (1–10)
+- trust (0–10)
+- willingness to listen (0–10)
+- anger (0–10)
+- frustration (0–10)
+- boundary respect (0–10)
+- discrimination active (boolean flag)
+- behaviour counters: interruptions, validations, unanswered questions
 
 Important current behaviour from the code:
 
 - **Trainee** and **clinician** utterances can move escalation state.
 - **Patient-response** classifications do **not** change the escalation level directly; they currently act as state-tracking and behavioural bookkeeping.
-- Clinician-generated recovery is intentionally damped relative to trainee turns, so the bot does not calm the patient unrealistically fast.
+- Clinician-generated recovery is intentionally damped (0.5× multiplier) relative to trainee turns, so the bot does not calm the patient unrealistically fast.
+- **Asymmetric reactivity**: already-escalated patients are more reactive to rudeness (anger multiplier 1.0–1.5×, impatience boost 1.0–1.3×).
+- **Narrow deadzone**: near-neutral effectiveness values (−0.1 to −0.15 depending on state) are treated as no change, preventing drift from borderline classifications.
+- **Trust penalty**: low trust slows recovery, so a patient who has lost trust does not de-escalate as easily.
+- **Anger resistance**: high anger (≥ 4) adds friction to de-escalation.
+- **Per-turn caps**: escalation can rise by at most +3 and fall by at most −2 in a single turn.
 
 ## 5. Bot Clinician Flow
 
@@ -131,19 +138,50 @@ The clinician voice instructions are built in `src/lib/engine/clinicianVoiceBuil
 
 Two extra protections were added to keep bot-mode speech reliable:
 
-- **Length-aware realtime timeout**: clinician realtime playback is not governed by a fixed 15-second timeout; the timeout scales with utterance length to avoid timing out normal longer clinician turns near the end.
+- **Length-aware realtime timeout**: clinician realtime playback timeout scales with utterance length (base 5 s + 500 ms per word, clamped between 15 s and 30 s) to avoid timing out normal longer clinician turns.
 - **No replay after partial realtime playback**: if realtime audio already started and then degraded, the system avoids replaying the same clinician line through TTS from the beginning, because that caused obvious duplicate speech and voice switching.
 
-## 6. Persistence, Review, And Forking
+## 6. Scoring
+
+`src/lib/engine/scoring.ts` computes a post-session performance breakdown with four dimensions:
+
+- **De-escalation effectiveness** (0–40 points): based on peak vs final escalation level relative to the initial level.
+- **Speed of resolution** (0–25 points): rewards quick de-escalation.
+- **Independence** (0–25 points): penalises heavy reliance on the AI clinician by comparing trainee vs bot turn counts.
+- **Stability** (0–10 points): penalises wild escalation swings during the session.
+
+These sum to an overall score (0–100) mapped to a letter grade (A+ through F) with an auto-generated summary sentence.
+
+## 7. Scenario Authoring: Traits And Archetypes
+
+`src/lib/engine/traitDials.ts` defines 15 scenario trait dials across three categories:
+
+- **Emotional**: intensity, hostility, frustration, impatience, trust
+- **Behavioural**: listening, sarcasm, volatility, boundary respect, interruption, coherence, repetition
+- **Cognitive**: entitlement, bias intensity, escalation tendency
+
+Each trait has a 0–10 range with human-readable low/high labels and is paired with a bias category selector (none, gender, racial, age, accent, class/status, role/status, mixed).
+
+`src/lib/engine/archetypePresets.ts` provides five ready-made scenario configurations:
+
+1. **De-escalation Fundamentals** (moderate) — frustrated relative
+2. **Professional Boundary Setting** (moderate) — entitled patient
+3. **Responding to Discriminatory Language** (high) — hostile with active bias
+4. **Breaking Difficult News** (high) — grief-focused
+5. **High-Pressure Confrontation** (extreme) — volatile and accusatory
+
+Each preset bundles scenario defaults, a full trait profile, voice configuration, and escalation rules.
+
+## 8. Persistence, Review, And Forking
 
 Supabase stores:
 
-- authored scenarios
-- live and completed sessions
-- transcript turns
-- simulation state events
+- authored scenarios (`scenario_templates`, `scenario_traits`, `scenario_voice_config`, `escalation_rules`)
+- live and completed sessions (`simulation_sessions` with frozen `scenario_snapshot`)
+- transcript turns (`transcript_turns` with per-turn snapshots: `classifier_result`, `trigger_type`, `state_after`, `patient_voice_profile_after`, `patient_prompt_after`)
+- simulation state events (`simulation_state_events`)
 - educator notes
 
 The session APIs persist transcript turns and state events during the live run, then the review pages reconstruct transcript, escalation history, scoring, and educator annotations from that stored data.
 
-Forking is session-based rather than template-based: a new session can be created from an earlier session and turn index, reusing the frozen scenario snapshot and the saved turn/state history.
+Forking is session-based rather than template-based: a new session can be created from an earlier session and turn index, reusing the frozen scenario snapshot and the saved turn/state history. Fork metadata tracks `parent_session_id`, `forked_from_session_id`, `forked_from_turn_index`, `fork_label`, and `branch_depth`.

@@ -129,6 +129,7 @@ export default function SimulationPage() {
   const aiSpeakingRef = useRef(false);
   const pendingUpdateRef = useRef<string | null>(null);
   const classifyingRef = useRef(false);
+  const classifyDoneRef = useRef<Promise<void>>(Promise.resolve());
   const endingRef = useRef(false);
   const botActiveRef = useRef(false);
   const botAbortRef = useRef<AbortController | null>(null);
@@ -959,6 +960,13 @@ export default function SimulationPage() {
     const entry = { speaker: "ai", content: text, timestamp } as const;
     appendTranscriptEntry(entry);
     const idx = turnIndexRef.current++;
+    // When bot is not active, wait for any in-flight trainee classification so the
+    // engine state is up-to-date before we snapshot. Without this, the patient turn
+    // can be persisted with a stale level (the classify API call for the preceding
+    // trainee utterance may still be in flight).
+    if (!botActiveRef.current && classifyingRef.current) {
+      await classifyDoneRef.current;
+    }
     const turnResult = botActiveRef.current
       ? await queuePatientReplyStateUpdate(text, idx, recentTurnsBeforeAiTurn)
       : null;
@@ -996,6 +1004,8 @@ export default function SimulationPage() {
       return;
     }
     classifyingRef.current = true;
+    let resolveClassifyDone!: () => void;
+    classifyDoneRef.current = new Promise<void>((r) => { resolveClassifyDone = r; });
     const snapshot = scenarioRef.current;
 
     let classResult: ClassifierResult | null = null;
@@ -1040,7 +1050,7 @@ export default function SimulationPage() {
         persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp);
       }
       return;
-    } finally { classifyingRef.current = false; }
+    } finally { classifyingRef.current = false; resolveClassifyDone(); }
 
     // Resolve patient instructions outside the classifying lock so subsequent
     // trainee utterances can be classified without waiting for voice profile fetch
