@@ -84,12 +84,32 @@ export interface SimulationStateEvent {
   created_at: string;
 }
 
+export type ComposureMarker =
+  | "defensive_language"
+  | "dismissive_response"
+  | "hostility_mirroring"
+  | "sarcasm"
+  | "interruption";
+
+export type DeEscalationTechnique =
+  | "validation"
+  | "empathy"
+  | "reframing"
+  | "concrete_help"
+  | "naming_emotion"
+  | "open_question";
+
 export interface ClassifierResult {
   technique: string;
   effectiveness: number; // -1.0 to 1.0
   tags: string[];
   confidence: number; // 0-1
   reasoning: string;
+  // Scoring fields (present on trainee_utterance classifications)
+  composure_markers?: ComposureMarker[];
+  de_escalation_attempt?: boolean;
+  de_escalation_technique?: DeEscalationTechnique | null;
+  clinical_milestone_completed?: string | null;
 }
 
 export interface EducatorNote {
@@ -100,4 +120,42 @@ export interface EducatorNote {
   turn_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export type QualitativeLabel = "Strong" | "Developing" | "Needs practice";
+export type ScoringDimension = "composure" | "de_escalation" | "clinical_task" | "support_seeking";
+
+export interface SessionScore {
+  id: string;
+  session_id: string;
+  composure_score: number;
+  de_escalation_score: number;
+  clinical_task_score: number | null;
+  support_seeking_score: number;
+  overall_score: number;
+  qualitative_label: QualitativeLabel;
+  weights_used: Record<string, number>;
+  session_valid: boolean;
+  turn_count: number;
+  created_at: string;
+}
+
+export interface SessionScoreEvidence {
+  id: string;
+  session_id: string;
+  dimension: ScoringDimension;
+  turn_index: number;
+  evidence_type: string;
+  evidence_data: Record<string, unknown>;
+  score_impact: number;
+  created_at: string;
+}
+
+export interface SessionReflection {
+  id: string;
+  session_id: string;
+  user_id: string;
+  tags: string[];
+  free_text: string | null;
+  created_at: string;
 }

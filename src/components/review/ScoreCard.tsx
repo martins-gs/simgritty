@@ -1,34 +1,61 @@
 "use client";
 
 import type { ScoreBreakdown } from "@/lib/engine/scoring";
+import type { QualitativeLabel } from "@/types/simulation";
 import { cn } from "@/lib/utils";
 
 interface ScoreCardProps {
   score: ScoreBreakdown;
+  preliminary?: boolean;
 }
 
-function getGradeColor(grade: string) {
-  if (grade.startsWith("A")) return { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", ring: "ring-emerald-500/20" };
-  if (grade === "B") return { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", ring: "ring-blue-500/20" };
-  if (grade === "C") return { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", ring: "ring-amber-500/20" };
-  if (grade === "D") return { bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200", ring: "ring-orange-500/20" };
-  return { bg: "bg-red-50", text: "text-red-700", border: "border-red-200", ring: "ring-red-500/20" };
+function getLabelColors(label: QualitativeLabel) {
+  switch (label) {
+    case "Strong":
+      return { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" };
+    case "Developing":
+      return { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" };
+    case "Needs practice":
+      return { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" };
+  }
 }
 
 function getBarColor(ratio: number) {
-  if (ratio >= 0.75) return "bg-emerald-500";
-  if (ratio >= 0.5) return "bg-blue-500";
-  if (ratio >= 0.3) return "bg-amber-500";
+  if (ratio >= 0.8) return "bg-emerald-500";
+  if (ratio >= 0.6) return "bg-blue-500";
+  if (ratio >= 0.4) return "bg-amber-500";
   return "bg-red-400";
 }
 
-function ScoreBar({ label, value, max, description }: { label: string; value: number; max: number; description: string }) {
-  const ratio = max > 0 ? value / max : 0;
+function getRingColor(ratio: number) {
+  if (ratio >= 0.8) return "#10b981";
+  if (ratio >= 0.6) return "#3b82f6";
+  if (ratio >= 0.4) return "#f59e0b";
+  return "#ef4444";
+}
+
+function ScoreBar({
+  label,
+  value,
+  weight,
+  description,
+}: {
+  label: string;
+  value: number;
+  weight: number;
+  description: string;
+}) {
+  const ratio = value / 100;
+  const weightPct = Math.round(weight * 100);
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
         <span className="text-[12px] font-medium text-slate-700">{label}</span>
-        <span className="text-[12px] font-bold tabular-nums text-slate-900">{value}<span className="text-slate-400 font-normal">/{max}</span></span>
+        <span className="text-[12px] tabular-nums text-slate-900">
+          <span className="font-bold">{value}</span>
+          <span className="text-slate-400 font-normal">/100</span>
+          <span className="ml-1.5 text-[10px] text-slate-400 font-normal">({weightPct}%)</span>
+        </span>
       </div>
       <div className="h-2 w-full rounded-full bg-slate-100">
         <div
@@ -41,24 +68,21 @@ function ScoreBar({ label, value, max, description }: { label: string; value: nu
   );
 }
 
-export function ScoreCard({ score }: ScoreCardProps) {
-  const gradeColors = getGradeColor(score.grade);
+export function ScoreCard({ score, preliminary }: ScoreCardProps) {
+  const labelColors = getLabelColors(score.qualitativeLabel);
   const overallRatio = score.overall / 100;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-      {/* Top section — overall score + grade */}
+      {/* Top section — qualitative label + overall score */}
       <div className="flex items-stretch border-b border-slate-100">
-        {/* Grade badge */}
+        {/* Qualitative label badge */}
         <div className={cn(
           "flex flex-col items-center justify-center px-6 py-5 border-r border-slate-100",
-          gradeColors.bg
+          labelColors.bg
         )}>
-          <span className={cn("text-4xl font-black leading-none tracking-tight", gradeColors.text)}>
-            {score.grade}
-          </span>
-          <span className="mt-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">
-            Grade
+          <span className={cn("text-lg font-bold leading-tight text-center", labelColors.text)}>
+            {score.qualitativeLabel}
           </span>
         </div>
 
@@ -73,7 +97,7 @@ export function ScoreCard({ score }: ScoreCardProps) {
               <circle
                 cx="18" cy="18" r="15.5"
                 fill="none"
-                stroke={overallRatio >= 0.7 ? "#10b981" : overallRatio >= 0.5 ? "#3b82f6" : overallRatio >= 0.3 ? "#f59e0b" : "#ef4444"}
+                stroke={getRingColor(overallRatio)}
                 strokeWidth="3"
                 strokeLinecap="round"
                 strokeDasharray={`${overallRatio * 97.4} 97.4`}
@@ -87,6 +111,11 @@ export function ScoreCard({ score }: ScoreCardProps) {
           <div className="min-w-0">
             <p className="text-[13px] font-semibold text-slate-900">Performance Score</p>
             <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{score.summary}</p>
+            {preliminary && (
+              <p className="mt-1 text-[10px] text-amber-600 font-medium">
+                Short session — scores are preliminary.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -94,28 +123,30 @@ export function ScoreCard({ score }: ScoreCardProps) {
       {/* Score breakdown */}
       <div className="grid gap-4 p-5 sm:grid-cols-2">
         <ScoreBar
+          label="Composure"
+          value={score.composure}
+          weight={score.weightsUsed.composure}
+          description="Maintained a steady, professional tone under pressure"
+        />
+        <ScoreBar
           label="De-escalation"
-          value={score.deescalation}
-          max={40}
-          description="How effectively you reduced the escalation level"
+          value={score.deEscalation}
+          weight={score.weightsUsed.de_escalation}
+          description="Effectively managed the subject's emotional state"
         />
+        {score.clinicalTask != null && (
+          <ScoreBar
+            label="Clinical Task"
+            value={score.clinicalTask}
+            weight={score.weightsUsed.clinical_task}
+            description="Continued to address the clinical need"
+          />
+        )}
         <ScoreBar
-          label="Speed"
-          value={score.speed}
-          max={25}
-          description="How quickly you achieved de-escalation"
-        />
-        <ScoreBar
-          label="Independence"
-          value={score.independence}
-          max={25}
-          description="Handling the situation without AI clinician help"
-        />
-        <ScoreBar
-          label="Stability"
-          value={score.stability}
-          max={10}
-          description="Avoiding wild swings and re-escalation"
+          label="Support Seeking"
+          value={score.supportSeeking}
+          weight={score.weightsUsed.support_seeking}
+          description="Appropriately used or declined the AI clinician's help"
         />
       </div>
     </div>

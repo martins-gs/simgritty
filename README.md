@@ -11,9 +11,9 @@ Built with Next.js 16, OpenAI Realtime API (WebRTC), and Supabase.
 - **Dual classifier pipeline** — assesses trainee communication technique (effectiveness -1.0 to +1.0) and patient state shifts independently
 - **AI clinician bot** — press "De-escalate" to hand off to an expert bot that models best practice, then take back over
 - **Session forking** — restart from any turn in a completed session to try a different approach
-- **Performance scoring** — 0-100 score (A+ to F) based on de-escalation, speed, independence, and stability
-- **Scenario builder** — 16 personality trait dials, voice configuration, escalation rules, and archetype presets
-- **Review & reflection** — rich escalation timeline, annotated transcript, event log, and educator notes
+- **Performance scoring** — 0-100 score across four dimensions (composure, de-escalation, clinical task maintenance, support seeking) with scenario-defined weights and qualitative labels (Strong / Developing / Needs practice)
+- **Scenario builder** — 16 personality trait dials, voice configuration, escalation rules, archetype presets, clinical milestones, and scoring weights
+- **Review & reflection** — escalation timeline, annotated transcript, key moments, technique suggestions, event log, educator notes, and trainee reflection prompts
 - **Organisation governance** — ceiling caps, consent gates, content warnings, session duration limits
 
 ## Architecture Overview
@@ -108,13 +108,17 @@ SimGritty uses Supabase Postgres. Apply migrations from `supabase/migrations/` o
 | `organizations` | Multi-tenant org entity |
 | `org_settings` | Governance: ceiling caps, consent gates, session duration limits |
 | `user_profiles` | User accounts linked to org + role (admin/educator/trainee) |
-| `scenario_templates` | Scenario metadata: title, setting, roles, backstory, difficulty |
+| `scenario_templates` | Scenario metadata: title, setting, roles, backstory, difficulty, scoring weights, support/critical thresholds |
 | `scenario_traits` | 16 personality dials per scenario (0-10 each) |
 | `scenario_voice_config` | Voice parameters: voice name, speaking rate, expressiveness, pause/interruption styles |
 | `escalation_rules` | Initial level, ceiling, auto-end threshold, custom triggers |
+| `scenario_milestones` | Optional clinical milestones per scenario (description + classifier hint, max 5) |
 | `simulation_sessions` | Individual runs with scenario snapshot, escalation tracking, fork lineage |
 | `transcript_turns` | Each utterance with classifier result, state snapshot, voice profile |
 | `simulation_state_events` | All state changes: escalation, de-escalation, ceiling, session lifecycle |
+| `session_scores` | Persisted scoring breakdown per completed session |
+| `session_score_evidence` | Per-event evidence linking scores to specific transcript turns |
+| `session_reflections` | Trainee self-reflection (tags + free text, separate from performance record) |
 | `educator_notes` | Post-session feedback anchored to specific turns |
 
 ### Key Schema Details
@@ -128,7 +132,7 @@ emotional_intensity, hostility, frustration, impatience, trust, willingness_to_l
 - `peak_escalation_level` / `final_escalation_level` — tracked for scoring
 
 **`transcript_turns`** stores per-turn snapshots:
-- `classifier_result` (JSONB) — `{technique, effectiveness, tags, confidence, reasoning}`
+- `classifier_result` (JSONB) — `{technique, effectiveness, tags, confidence, reasoning}` plus scoring fields for trainee turns: `composure_markers`, `de_escalation_attempt`, `de_escalation_technique`, `clinical_milestone_completed`
 - `state_after` (JSONB) — full `EscalationState` after this turn
 - `patient_voice_profile_after` (JSONB) — voice delivery profile for the next patient response
 - `patient_prompt_after` — the regenerated 4-layer system prompt
@@ -159,9 +163,9 @@ src/
 │
 ├── components/
 │   ├── layout/                   # AppShell, Sidebar, TopBar
-│   ├── simulation/               # Waveform, LiveTranscript, EscalationMeter, ConsentGate, ExitButton
-│   ├── scenarios/                # ScenarioForm, TraitDialPanel, VoiceConfigPanel, ArchetypeSelector
-│   ├── review/                   # TranscriptViewer, EscalationTimeline, EventLog, ScoreCard, EducatorNotes
+│   ├── simulation/               # Waveform, LiveTranscript, EscalationMeter, ConsentGate
+│   ├── scenarios/                # ScenarioForm, TraitDialPanel, VoiceConfigPanel, ArchetypeSelector, ScoringConfigPanel, MilestonesEditor
+│   ├── review/                   # TranscriptViewer, EscalationTimeline, EventLog, ScoreCard, KeyMoments, ReflectionPrompt, EducatorNotes
 │   ├── governance/               # OrgSettingsForm
 │   └── ui/                       # shadcn/ui v4 primitives
 │
@@ -224,6 +228,7 @@ src/
 | GET/POST | `/api/sessions/[id]/events` | Get / append state events |
 | POST | `/api/sessions/[id]/fork` | Fork session from a specific turn |
 | GET/POST | `/api/sessions/[id]/educator-notes` | Get / create educator notes |
+| POST | `/api/sessions/[id]/reflection` | Save trainee self-reflection (tags + free text) |
 | GET | `/api/sessions/recent` | User's recent sessions |
 | PUT | `/api/org-settings` | Update organisation governance |
 
@@ -275,6 +280,8 @@ Each trainee utterance is classified for effectiveness:
 - Concrete next step (+0.3 to +0.6)
 - Calm boundary setting (+0.3 to +0.6)
 
+The trainee utterance classifier also returns scoring fields: `composure_markers` (defensive language, dismissiveness, hostility mirroring, sarcasm, interruption), `de_escalation_attempt` with technique label, and `clinical_milestone_completed` when milestones are defined.
+
 ### Level Change Rules
 
 - **Escalation**: effectiveness < -0.15 → +1 to +3 level jump, amplified by volatility, anger reactivity, and impatience
@@ -285,18 +292,22 @@ Each trainee utterance is classified for effectiveness:
 
 ## Scoring System
 
-Post-session performance is scored 0-100 across four dimensions:
+Post-session performance is scored 0-100 across four dimensions, each scored 0-100:
 
-| Component | Points | Measures |
-|-----------|--------|----------|
-| De-escalation | 0-40 | How much the level dropped from peak to final |
-| Speed | 0-25 | Turns-per-level-drop efficiency |
-| Independence | 0-25 | Handling the situation without the AI clinician bot |
-| Stability | 0-10 | Avoiding wild swings and re-escalation after progress |
+| Dimension | Measures | How |
+|-----------|----------|-----|
+| Composure | Maintained steady, professional tone under pressure | Start at 100, subtract penalties for detected markers (defensive language, dismissiveness, hostility mirroring, sarcasm) |
+| De-escalation | Effectiveness of de-escalation attempts | 40% attempt rate + 60% success rate, measured against escalation state change |
+| Clinical Task | Continued to address the clinical need (optional) | Ratio of completed milestones to total defined milestones |
+| Support Seeking | Appropriately used or declined the AI clinician | Baseline 70, +15 for appropriate requests, -15 for premature requests |
 
-**Grades**: A+ (90+), A (80+), B (70+), C (60+), D (50+), F (below 50)
+**Overall score** is a weighted average. Weights are defined per scenario (default: equal across active dimensions). When clinical milestones are not defined, that dimension is excluded and weights are renormalized.
 
-**Penalties**: instant exit (-10 de-escalation), hitting ceiling (-15 de-escalation), sessions over 30 turns (-5 speed), over 50 turns (-10 speed)
+**Qualitative labels**: Strong (80-100), Developing (60-79), Needs practice (0-59)
+
+**Session validity gate**: sessions under 6 turns are not scored. Sessions of 6-12 turns show scores with a "preliminary" caveat.
+
+**Score evidence**: every point earned or lost links to a specific transcript turn and classifier output. The review page shows "key moments" (2-3 highest-impact events) and a technique suggestion based on the weakest dimension.
 
 ## Prompt Architecture
 

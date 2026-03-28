@@ -14,8 +14,7 @@ import {
 } from "@/lib/engine/clinicianVoiceBuilder";
 import { Waveform } from "@/components/simulation/Waveform";
 import { LiveTranscript, type TranscriptEntry } from "@/components/simulation/LiveTranscript";
-import { ExitButton } from "@/components/simulation/ExitButton";
-import { Mic, MicOff, Square, MapPin, Bot, Hand } from "lucide-react";
+import { Mic, MicOff, Square, Bot, Hand } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { EscalationState } from "@/types/escalation";
 import { ESCALATION_LABELS } from "@/types/escalation";
@@ -140,6 +139,7 @@ export default function SimulationPage() {
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
   const [botActive, setBotActive] = useState(false);
   const [botSpeaking, setBotSpeaking] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"simulation" | "transcript" | "scenario">("simulation");
 
   const engineRef = useRef<EscalationEngine | null>(null);
   const turnIndexRef = useRef(0);
@@ -1110,7 +1110,7 @@ export default function SimulationPage() {
     try {
       const classifyRes = await fetch("/api/classify", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ utterance: text, context: { recentTurns, scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`, currentEscalation: engineRef.current.getLevel() } }),
+        body: JSON.stringify({ utterance: text, context: { recentTurns, scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`, currentEscalation: engineRef.current.getLevel(), milestones: ((snapshot as Record<string, unknown>).scenario_milestones as { id: string; description: string; classifier_hint: string }[] | undefined)?.map((m) => ({ id: m.id, description: m.description, classifier_hint: m.classifier_hint })) } }),
       });
       if (!classifyRes.ok) {
         console.error("[Escalation] Classify API failed:", classifyRes.status);
@@ -1724,43 +1724,42 @@ export default function SimulationPage() {
   return (
     <div className="flex h-screen flex-col bg-white text-slate-900">
       {/* Header */}
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-slate-100 px-5">
-        <div className="flex items-center gap-4 min-w-0">
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-slate-100 px-4 sm:px-5">
+        <div className="flex items-center gap-3 min-w-0">
           <h1 className="text-[14px] font-semibold truncate">{title}</h1>
-          <div className="hidden sm:flex items-center gap-3 text-[12px] text-slate-400">
-            {setting && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{setting}</span>}
-            <span className="tabular-nums">{formatTime(elapsed)}</span>
-          </div>
+          <span className="hidden sm:inline text-[12px] tabular-nums text-slate-400">{formatTime(elapsed)}</span>
         </div>
-        <div className="flex items-center gap-2.5">
-          {/* Escalation level — always visible, discreet */}
-          <div className="flex items-center gap-1.5">
-            <div className="flex gap-px">
-              {Array.from({ length: 10 }, (_, i) => (
-                <div key={i} className={cn(
-                  "h-3 w-1 rounded-[1px] transition-all duration-300",
-                  i < escalationLevel ? ec.bar : "bg-slate-200"
-                )} />
-              ))}
-            </div>
-            <span className={cn("text-[11px] font-semibold tabular-nums", ec.text)}>{escalationLevel}</span>
-          </div>
-          <div className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
-            connectionStatus === "connected" ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"
-          )}>
-            <span className={cn("h-1.5 w-1.5 rounded-full", connectionStatus === "connected" ? "bg-emerald-500 animate-pulse" : "bg-slate-300")} />
-            {connectionStatus === "connected" ? "Live" : connectionStatus === "connecting" ? "Connecting..." : "Offline"}
-          </div>
-          <ExitButton onClick={() => handleEndSession("instant_exit")} />
+        <div className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
+          connectionStatus === "connected" ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"
+        )}>
+          <span className={cn("h-1.5 w-1.5 rounded-full", connectionStatus === "connected" ? "bg-emerald-500 animate-pulse" : "bg-slate-300")} />
+          {connectionStatus === "connected" ? "Live" : connectionStatus === "connecting" ? "Connecting..." : "Offline"}
         </div>
       </header>
 
+      {/* Mobile tab bar — visible below lg */}
+      <div className="flex lg:hidden shrink-0 border-b border-slate-100">
+        {(["simulation", "transcript", "scenario"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setMobileTab(tab)}
+            className={cn(
+              "flex-1 py-2 text-[12px] font-medium text-center transition-colors",
+              mobileTab === tab
+                ? "text-slate-900 border-b-2 border-slate-900"
+                : "text-slate-400 hover:text-slate-600"
+            )}
+          >
+            {tab === "simulation" ? "Simulation" : tab === "transcript" ? "Transcript" : "Scenario"}
+          </button>
+        ))}
+      </div>
+
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left panel — scenario context + escalation */}
+        {/* Left panel — scenario context + escalation (desktop only) */}
         <aside className="hidden lg:flex w-64 shrink-0 flex-col border-r border-slate-100 bg-slate-50/50">
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
-            {/* Roles */}
             <div>
               <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Your role</p>
               <p className="mt-1 text-[13px] font-medium">{traineeRole}</p>
@@ -1776,7 +1775,6 @@ export default function SimulationPage() {
               </div>
             )}
 
-            {/* Escalation */}
             <div className="pt-2 border-t border-slate-200/60">
               <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Escalation</p>
               <div className="mt-2 flex items-end gap-2">
@@ -1784,8 +1782,6 @@ export default function SimulationPage() {
                 <span className="text-[12px] text-slate-400 pb-0.5">/10</span>
               </div>
               <p className="mt-1 text-[12px] font-medium text-slate-600">{ESCALATION_LABELS[escalationLevel]}</p>
-
-              {/* Bar */}
               <div className="mt-3 flex gap-1">
                 {Array.from({ length: 10 }, (_, i) => (
                   <div key={i} className={cn(
@@ -1800,7 +1796,6 @@ export default function SimulationPage() {
               </div>
             </div>
 
-            {/* Last classification */}
             {lastClassification && (
               <div className="pt-2 border-t border-slate-200/60">
                 <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Last assessment</p>
@@ -1816,7 +1811,24 @@ export default function SimulationPage() {
         </aside>
 
         {/* Centre — waveform and controls */}
-        <main className="flex flex-1 flex-col items-center justify-center px-6 py-8">
+        <main className={cn(
+          "flex flex-1 flex-col items-center justify-center px-4 sm:px-6 py-6 sm:py-8",
+          mobileTab !== "simulation" && "hidden lg:flex"
+        )}>
+          {/* Compact escalation indicator for mobile */}
+          <div className="flex lg:hidden items-center gap-3 mb-4">
+            <span className={cn("text-xl font-bold tabular-nums leading-none", ec.text)}>{escalationLevel}</span>
+            <div className="flex gap-0.5">
+              {Array.from({ length: 10 }, (_, i) => (
+                <div key={i} className={cn(
+                  "h-2 w-1.5 rounded-[1px] transition-all duration-300",
+                  i < escalationLevel ? ec.bar : "bg-slate-200"
+                )} />
+              ))}
+            </div>
+            <span className="text-[11px] text-slate-400">{ESCALATION_LABELS[escalationLevel]}</span>
+          </div>
+
           {/* Status text */}
           <p className={cn("text-[11px] font-medium uppercase tracking-widest mb-6",
             botActive ? "text-indigo-500"
@@ -1841,7 +1853,7 @@ export default function SimulationPage() {
           </div>
 
           {/* Controls */}
-          <div className="mt-10 flex items-center gap-3">
+          <div className="mt-8 sm:mt-10 flex flex-wrap items-center justify-center gap-3">
             {botActive ? (
               <button
                 onClick={stopBot}
@@ -1884,8 +1896,11 @@ export default function SimulationPage() {
           </div>
         </main>
 
-        {/* Right panel — transcript */}
-        <aside className="hidden md:flex w-80 shrink-0 flex-col border-l border-slate-100">
+        {/* Transcript panel — desktop sidebar or mobile tab */}
+        <aside className={cn(
+          "flex-col border-l border-slate-100",
+          mobileTab === "transcript" ? "flex flex-1 lg:w-80 lg:shrink-0 lg:flex-initial" : "hidden lg:flex w-80 shrink-0"
+        )}>
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5">
             <span className="text-[12px] font-medium text-slate-500">Transcript</span>
             <span className="text-[11px] tabular-nums text-slate-400">{transcriptEntries.length} turns</span>
@@ -1894,6 +1909,69 @@ export default function SimulationPage() {
             <LiveTranscript entries={transcriptEntries} currentAiText={currentAiText} />
           </div>
         </aside>
+
+        {/* Scenario info panel — mobile only */}
+        {mobileTab === "scenario" && (
+          <div className="flex flex-1 flex-col lg:hidden overflow-y-auto p-5 space-y-5">
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Your role</p>
+              <p className="mt-1 text-[14px] font-medium">{traineeRole}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Speaking with</p>
+              <p className="mt-1 text-[14px] font-medium">{aiRole}</p>
+            </div>
+            {emotionalDriver && (
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Emotional driver</p>
+                <p className="mt-1 text-[13px] leading-relaxed text-slate-600">{emotionalDriver}</p>
+              </div>
+            )}
+            {setting && (
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Setting</p>
+                <p className="mt-1 text-[13px] text-slate-600">{setting}</p>
+              </div>
+            )}
+
+            <div className="pt-3 border-t border-slate-200/60">
+              <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Escalation</p>
+              <div className="mt-2 flex items-end gap-2">
+                <span className={cn("text-3xl font-bold tabular-nums leading-none", ec.text)}>{escalationLevel}</span>
+                <span className="text-[12px] text-slate-400 pb-0.5">/10</span>
+              </div>
+              <p className="mt-1 text-[13px] font-medium text-slate-600">{ESCALATION_LABELS[escalationLevel]}</p>
+              <div className="mt-3 flex gap-1">
+                {Array.from({ length: 10 }, (_, i) => (
+                  <div key={i} className={cn(
+                    "h-2 flex-1 rounded-full transition-all duration-300",
+                    i < escalationLevel ? ec.bar : i < maxCeiling ? "bg-slate-200" : "bg-slate-100"
+                  )} />
+                ))}
+              </div>
+              <div className="mt-1.5 flex justify-between text-[11px] text-slate-400">
+                <span>Calm</span>
+                <span>Ceiling {maxCeiling}</span>
+              </div>
+            </div>
+
+            {lastClassification && (
+              <div className="pt-3 border-t border-slate-200/60">
+                <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Last assessment</p>
+                <p className="mt-1 text-[13px] font-medium text-slate-700">{lastClassification.technique}</p>
+                <p className={cn("text-[12px] font-medium",
+                  lastClassification.effectiveness > 0.3 ? "text-emerald-600" : lastClassification.effectiveness < -0.3 ? "text-red-600" : "text-slate-500"
+                )}>
+                  {lastClassification.effectiveness > 0 ? "+" : ""}{lastClassification.effectiveness.toFixed(1)} effectiveness
+                </p>
+              </div>
+            )}
+
+            <div className="pt-3">
+              <span className="text-[12px] tabular-nums text-slate-400">{formatTime(elapsed)} elapsed</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

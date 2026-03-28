@@ -33,6 +33,17 @@ export default function EditScenarioPage() {
         : data.escalation_rules;
 
       setStatus(data.status);
+      // Flatten milestones from the API response
+      const milestones = Array.isArray(data.scenario_milestones)
+        ? data.scenario_milestones
+            .sort((a: { order: number }, b: { order: number }) => a.order - b.order)
+            .map((m: { id: string; description: string; classifier_hint: string }) => ({
+              id: m.id,
+              description: m.description,
+              classifier_hint: m.classifier_hint,
+            }))
+        : [];
+
       loadScenario({
         title: data.title,
         setting: data.setting,
@@ -46,6 +57,10 @@ export default function EditScenarioPage() {
         pre_simulation_briefing_text: data.pre_simulation_briefing_text || "",
         content_warning_text: data.content_warning_text || "",
         educator_facilitation_recommended: data.educator_facilitation_recommended || false,
+        support_threshold: data.support_threshold ?? null,
+        critical_threshold: data.critical_threshold ?? null,
+        scoring_weights: data.scoring_weights ?? null,
+        milestones,
         ...(traits && {
           traits: {
             emotional_intensity: traits.emotional_intensity,

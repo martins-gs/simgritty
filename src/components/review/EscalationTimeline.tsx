@@ -258,7 +258,7 @@ export function EscalationTimeline({
       {/* Chart */}
       <div className="h-80 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 12, right: 24, bottom: 8, left: 8 }}>
+          <AreaChart data={data} margin={{ top: 12, right: 60, bottom: 8, left: 8 }}>
             <defs>
               <linearGradient id="escalationGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#ef4444" stopOpacity={0.3} />
@@ -417,11 +417,11 @@ export function EscalationTimeline({
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-0.5 w-4 rounded bg-slate-700" />
+          <svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#334155" strokeWidth="2.5" /></svg>
           Escalation level
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-0.5 w-4 rounded border-b border-dashed border-blue-400" />
+          <svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="4 3" /></svg>
           Trust
         </span>
         <span className="flex items-center gap-1.5">

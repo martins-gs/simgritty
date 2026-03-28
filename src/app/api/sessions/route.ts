@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   // Load full scenario with relations for snapshot
   const { data: scenario, error: scenErr } = await supabase
     .from("scenario_templates")
-    .select("*, scenario_traits(*), scenario_voice_config(*), escalation_rules(*)")
+    .select("*, scenario_traits(*), scenario_voice_config(*), escalation_rules(*), scenario_milestones(*)")
     .eq("id", scenario_id)
     .single();
 

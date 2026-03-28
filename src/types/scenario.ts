@@ -45,6 +45,22 @@ export interface EscalationTrigger {
   delta: number;
 }
 
+export interface ScoringWeights {
+  composure: number;
+  de_escalation: number;
+  clinical_task: number;
+  support_seeking: number;
+}
+
+export interface ScenarioMilestone {
+  id: string;
+  scenario_template_id: string;
+  order: number;
+  description: string;
+  classifier_hint: string;
+  created_at: string;
+}
+
 export interface ScenarioTemplate {
   id: string;
   org_id: string;
@@ -64,12 +80,18 @@ export interface ScenarioTemplate {
   content_warning_text: string;
   educator_facilitation_recommended: boolean;
   post_simulation_reflection_prompts: string[];
+  // Scoring configuration
+  scoring_weights: ScoringWeights | null;
+  support_threshold: number | null;
+  critical_threshold: number | null;
+  clinical_task_enabled: boolean;
   created_at: string;
   updated_at: string;
   // Relations
   traits?: ScenarioTraits;
   voice_config?: ScenarioVoiceConfig;
   escalation_rules?: EscalationRules;
+  scenario_milestones?: ScenarioMilestone[];
 }
 
 export const DEFAULT_TRAITS: ScenarioTraits = {

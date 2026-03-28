@@ -12,6 +12,8 @@ import { Switch } from "@/components/ui/switch";
 import { TraitDialPanel } from "./TraitDialPanel";
 import { VoiceConfigPanel } from "./VoiceConfigPanel";
 import { EscalationRulesEditor } from "./EscalationRulesEditor";
+import { ScoringConfigPanel } from "./ScoringConfigPanel";
+import { MilestonesEditor } from "./MilestonesEditor";
 import { ArchetypeSelector } from "./ArchetypeSelector";
 import { useScenarioStore } from "@/store/scenarioStore";
 import { getArchetypeByTag } from "@/lib/engine/archetypePresets";
@@ -74,6 +76,12 @@ export function ScenarioForm({ scenarioId, orgMaxCeiling = 8 }: ScenarioFormProp
         pre_simulation_briefing_text: store.pre_simulation_briefing_text,
         content_warning_text: store.content_warning_text,
         educator_facilitation_recommended: store.educator_facilitation_recommended,
+        support_threshold: store.support_threshold,
+        critical_threshold: store.critical_threshold,
+        scoring_weights: store.scoring_weights,
+        milestones: store.milestones.filter(
+          (m) => m.description.trim()
+        ),
         traits: store.traits,
         voice_config: store.voice_config,
         escalation_rules: store.escalation_rules,
@@ -235,7 +243,7 @@ export function ScenarioForm({ scenarioId, orgMaxCeiling = 8 }: ScenarioFormProp
             <Textarea
               value={store.content_warning_text}
               onChange={(e) => store.setField("content_warning_text", e.target.value)}
-              placeholder="Describe what the trainee should expect..."
+              placeholder="e.g., This scenario involves verbal aggression, raised voices, and discriminatory language directed at the trainee."
               rows={2}
             />
           </div>
@@ -244,7 +252,7 @@ export function ScenarioForm({ scenarioId, orgMaxCeiling = 8 }: ScenarioFormProp
             <Textarea
               value={store.pre_simulation_briefing_text}
               onChange={(e) => store.setField("pre_simulation_briefing_text", e.target.value)}
-              placeholder="Context shown to the trainee before starting..."
+              placeholder="e.g., You are a registrar on a busy ward. A patient's daughter approaches you, visibly frustrated, to complain that her mother has been waiting too long for discharge."
               rows={3}
             />
           </div>
@@ -253,7 +261,7 @@ export function ScenarioForm({ scenarioId, orgMaxCeiling = 8 }: ScenarioFormProp
             <Textarea
               value={store.learning_objectives}
               onChange={(e) => store.setField("learning_objectives", e.target.value)}
-              placeholder="What should the trainee demonstrate? (one per line)"
+              placeholder={"e.g.,\nMaintain professional composure under verbal hostility\nDemonstrate active listening when a relative is distressed\nBalance interpersonal conflict management with clinical task completion"}
               rows={3}
             />
           </div>
@@ -265,6 +273,31 @@ export function ScenarioForm({ scenarioId, orgMaxCeiling = 8 }: ScenarioFormProp
             <Label className="text-sm">Recommend educator facilitation for this scenario</Label>
           </div>
         </div>
+      </section>
+
+      {/* Scoring Configuration */}
+      <section>
+        <h3 className="mb-3 text-[13px] font-medium uppercase tracking-wide text-muted-foreground">Scoring configuration</h3>
+        <ScoringConfigPanel
+          supportThreshold={store.support_threshold}
+          criticalThreshold={store.critical_threshold}
+          scoringWeights={store.scoring_weights}
+          hasMilestones={store.milestones.length > 0}
+          onSupportThresholdChange={(v) => store.setField("support_threshold", v)}
+          onCriticalThresholdChange={(v) => store.setField("critical_threshold", v)}
+          onWeightsChange={store.setScoringWeights}
+        />
+      </section>
+
+      {/* Clinical Milestones */}
+      <section>
+        <h3 className="mb-3 text-[13px] font-medium uppercase tracking-wide text-muted-foreground">Clinical milestones (optional)</h3>
+        <MilestonesEditor
+          milestones={store.milestones}
+          onAdd={store.addMilestone}
+          onUpdate={store.updateMilestone}
+          onRemove={store.removeMilestone}
+        />
       </section>
 
       {/* Actions */}

@@ -8,7 +8,9 @@ import { EscalationTimeline } from "@/components/review/EscalationTimeline";
 import { EventLog } from "@/components/review/EventLog";
 import { EducatorNotes } from "@/components/review/EducatorNotes";
 import { ScoreCard } from "@/components/review/ScoreCard";
-import { computeScore } from "@/lib/engine/scoring";
+import { KeyMoments } from "@/components/review/KeyMoments";
+import { ReflectionPrompt } from "@/components/review/ReflectionPrompt";
+import { computeScore, isSessionPreliminary, pickKeyMoments, getNextTimeTrySuggestion } from "@/lib/engine/scoring";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +22,7 @@ import type {
   SimulationSession,
   ClinicianAudioPayload,
 } from "@/types/simulation";
+import type { ScenarioMilestone, ScoringWeights } from "@/types/scenario";
 
 function isClinicianAudioEvent(
   event: SimulationStateEvent
@@ -148,19 +151,20 @@ export default function ReviewPage() {
     return `${m}m ${s}s`;
   };
 
-  const initialLevel =
-    (session.scenario_snapshot as { escalation_rules?: { initial_level?: number }[] })
-      ?.escalation_rules?.[0]?.initial_level ?? 3;
-  const traineeTurnCount = turns.filter((t) => t.speaker === "trainee").length;
-  const botTurnCount = turns.filter(
-    (t) => t.speaker === "ai" && t.classifier_result && (t as unknown as { source?: string }).source === "clinician"
-  ).length;
-  // Count bot turns by looking at events triggered by clinician source
-  const clinicianEventCount = events.filter(
-    (e) =>
-      (e.payload as { delta?: { source?: string } } | null)?.delta?.source === "clinician" ||
-      (e.payload as { classifier?: { source?: string } } | null)?.classifier?.source === "clinician"
-  ).length;
+  // Extract scoring configuration from scenario snapshot
+  const snapshot = session.scenario_snapshot as Record<string, unknown>;
+  const milestones: ScenarioMilestone[] =
+    (snapshot.scenario_milestones as ScenarioMilestone[] | undefined) ?? [];
+  const scoringWeights: ScoringWeights | null =
+    (snapshot.scoring_weights as ScoringWeights | undefined) ?? null;
+  const supportThreshold: number | null =
+    (snapshot.support_threshold as number | undefined) ?? null;
+  const criticalThreshold: number | null =
+    (snapshot.critical_threshold as number | undefined) ?? null;
+  const learningObjectives: string =
+    (snapshot.learning_objectives as string | undefined) ?? "";
+
+  // Clinician audio stats (unchanged from before)
   const clinicianAudioEvents = events.filter(isClinicianAudioEvent);
   const clinicianAudioByTurnIndex = new Map<number, ClinicianAudioPayload>();
   for (const event of clinicianAudioEvents) {
@@ -193,13 +197,20 @@ export default function ReviewPage() {
       ? "AI clinician turns were present, but no audio telemetry was saved."
       : null;
 
+  // Compute score with new system
   const score = computeScore({
     session,
+    turns,
     events,
-    initialLevel,
-    botTurnCount: clinicianAudioStats.total || clinicianEventCount || botTurnCount,
-    traineeTurnCount,
+    milestones,
+    weights: scoringWeights,
+    supportThreshold,
+    criticalThreshold,
   });
+
+  const preliminary = isSessionPreliminary(score.turnCount);
+  const keyMoments = pickKeyMoments(score.evidence);
+  const suggestion = getNextTimeTrySuggestion(score);
 
   const selectedTurn = turns.find((turn) => turn.id === selectedTurnId) ?? null;
   const canRestartFromSelectedTurn = Boolean(selectedTurn?.state_after && selectedTurn?.patient_prompt_after);
@@ -257,8 +268,56 @@ export default function ReviewPage() {
           </div>
         </div>
 
-        {/* Score */}
-        <ScoreCard score={score} />
+        {/* Session validity gate */}
+        {!score.sessionValid ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center space-y-3">
+            <p className="text-sm text-amber-800 font-medium">
+              This session ended before enough interaction occurred to generate a score.
+            </p>
+            <div className="flex justify-center gap-3">
+              <Button variant="outline" size="sm" onClick={() => router.back()}>
+                Go back
+              </Button>
+              {canRestartFromSelectedTurn && (
+                <Button size="sm" onClick={handleRestartFromSelectedTurn}>
+                  Practise from this moment
+                </Button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Score */}
+            <ScoreCard score={score} preliminary={preliminary} />
+
+            {/* Learning objectives (if defined) */}
+            {learningObjectives && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
+                <h3 className="text-[12px] font-medium uppercase tracking-wide text-muted-foreground mb-2">
+                  Learning Objectives
+                </h3>
+                <ul className="space-y-1">
+                  {learningObjectives.split("\n").filter(Boolean).map((obj, i) => (
+                    <li key={i} className="text-[13px] text-slate-700">{obj}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Key moments */}
+            <KeyMoments moments={keyMoments} turns={turns} />
+
+            {/* Next time, try */}
+            {suggestion && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+                <h3 className="text-[12px] font-medium uppercase tracking-wide text-blue-600 mb-1">
+                  Next time, try
+                </h3>
+                <p className="text-[13px] text-slate-700">{suggestion}</p>
+              </div>
+            )}
+          </>
+        )}
 
         {/* Summary Cards */}
         <div className="grid gap-4 sm:grid-cols-5">
@@ -311,11 +370,31 @@ export default function ReviewPage() {
           </Card>
         </div>
 
-        {/* Tabs */}
+        {/* Escalation Timeline — always visible on main screen */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Escalation Over Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {session.started_at ? (
+              <EscalationTimeline
+                events={events}
+                maxCeiling={
+                  (session.scenario_snapshot as { escalation_rules?: { max_ceiling?: number } })
+                    ?.escalation_rules?.max_ceiling ?? 8
+                }
+                sessionStartedAt={session.started_at}
+              />
+            ) : (
+              <p className="text-muted-foreground text-sm">No timeline data available</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Transcript + Event Log + Educator Notes */}
         <Tabs defaultValue="transcript">
           <TabsList>
             <TabsTrigger value="transcript">Transcript</TabsTrigger>
-            <TabsTrigger value="timeline">Escalation Timeline</TabsTrigger>
             <TabsTrigger value="events">Event Log</TabsTrigger>
             <TabsTrigger value="notes">Educator Notes</TabsTrigger>
           </TabsList>
@@ -347,28 +426,6 @@ export default function ReviewPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="timeline" className="mt-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Escalation Over Time</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {session.started_at ? (
-                  <EscalationTimeline
-                    events={events}
-                    maxCeiling={
-                      (session.scenario_snapshot as { escalation_rules?: { max_ceiling?: number } })
-                        ?.escalation_rules?.max_ceiling ?? 8
-                    }
-                    sessionStartedAt={session.started_at}
-                  />
-                ) : (
-                  <p className="text-muted-foreground text-sm">No timeline data available</p>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
           <TabsContent value="events" className="mt-4">
             <Card>
               <CardContent className="p-0 h-[500px]">
@@ -393,6 +450,11 @@ export default function ReviewPage() {
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Reflection prompt */}
+        {score.sessionValid && (
+          <ReflectionPrompt sessionId={sessionId} />
+        )}
       </div>
     </AppShell>
   );

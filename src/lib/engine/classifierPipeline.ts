@@ -4,11 +4,18 @@ import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
 
+export interface MilestoneContext {
+  id: string;
+  description: string;
+  classifier_hint: string;
+}
+
 export interface ClassifierContext {
   recentTurns: { speaker: string; content: string }[];
   scenarioContext: string;
   currentEscalation: number;
   speakerVoiceProfile?: StructuredVoiceProfile | null;
+  milestones?: MilestoneContext[];
 }
 
 export type ClassifierMode = "trainee_utterance" | "patient_response" | "clinician_utterance";
@@ -23,20 +30,44 @@ const CLASSIFIER_OUTPUT_SCHEMA = z.object({
   reasoning: z.string(),
 });
 
+const COMPOSURE_MARKER = z.enum([
+  "defensive_language",
+  "dismissive_response",
+  "hostility_mirroring",
+  "sarcasm",
+  "interruption",
+]);
+
+const DE_ESCALATION_TECHNIQUE = z.enum([
+  "validation",
+  "empathy",
+  "reframing",
+  "concrete_help",
+  "naming_emotion",
+  "open_question",
+]);
+
+const TRAINEE_SCORING_SCHEMA = z.object({
+  technique: z.string(),
+  effectiveness: z.number(),
+  tags: z.array(z.string()),
+  confidence: z.number(),
+  reasoning: z.string(),
+  composure_markers: z.array(COMPOSURE_MARKER)
+    .describe("Negative composure indicators detected in this utterance. Empty array if none."),
+  de_escalation_attempt: z.boolean()
+    .describe("Whether this utterance contains a deliberate de-escalation behaviour."),
+  de_escalation_technique: DE_ESCALATION_TECHNIQUE.nullable()
+    .describe("The de-escalation technique used, if de_escalation_attempt is true. Null otherwise."),
+  clinical_milestone_completed: z.string().nullable()
+    .describe("The milestone ID satisfied by this utterance, if applicable. Null otherwise."),
+});
+
 const TRAINEE_CLASSIFIER_SYSTEM_PROMPT = `You are an expert communication skills assessor for clinical training scenarios.
 
 Analyse the trainee clinician's latest utterance and classify the communication technique used.
 
 IMPORTANT: You are assessing the TRAINEE's communication quality, not the simulated patient's behaviour.
-
-Respond in JSON format only:
-{
-  "technique": "string - name of the communication technique detected",
-  "effectiveness": "number from -1.0 to 1.0 where negative means escalating/poor, positive means de-escalating/good",
-  "tags": ["array of short descriptor tags"],
-  "confidence": "number from 0 to 1",
-  "reasoning": "brief one-sentence explanation"
-}
 
 Escalating behaviours (negative effectiveness):
 - dismissive language (-0.5 to -1.0)
@@ -47,6 +78,7 @@ Escalating behaviours (negative effectiveness):
 - patronising tone (-0.4 to -0.8)
 - perceived blame (-0.5 to -0.9)
 - failure to answer a direct question (-0.3 to -0.6)
+- minimal or non-substantive responses when the subject is asking for help, information, or engagement — e.g. "yes", "ok", "right", "mmm" repeated without addressing what the subject actually said (-0.2 to -0.5)
 
 De-escalating behaviours (positive effectiveness):
 - acknowledgement of distress (+0.3 to +0.7)
@@ -56,7 +88,28 @@ De-escalating behaviours (positive effectiveness):
 - reflective listening (+0.4 to +0.8)
 - respectful tone (+0.2 to +0.4)
 - calm boundary setting (+0.3 to +0.6)
-- naming the emotion (+0.4 to +0.7)`;
+- naming the emotion (+0.4 to +0.7)
+
+COMPOSURE MARKERS — flag any of these negative indicators if present in the utterance:
+- "defensive_language": trainee justifies or deflects rather than engaging (e.g. "I'm just doing my job", "That's not my fault")
+- "dismissive_response": trainee minimises or brushes off the subject's concern (e.g. "Calm down", "You're overreacting")
+- "hostility_mirroring": trainee matches the subject's aggressive tone or language
+- "sarcasm": trainee uses sarcasm or passive-aggressive phrasing
+- "interruption": trainee interrupts the subject mid-utterance
+
+Return an empty array for composure_markers if none are detected.
+
+DE-ESCALATION ATTEMPT — set de_escalation_attempt to true if the utterance contains a deliberate de-escalation behaviour. If true, classify the technique:
+- "validation": acknowledging the subject's emotion or experience
+- "empathy": expressing understanding of the subject's position
+- "reframing": redirecting the conversation toward a constructive frame
+- "concrete_help": offering a specific, actionable next step
+- "naming_emotion": explicitly identifying what the subject appears to be feeling
+- "open_question": asking an open question that invites the subject to express their concern
+
+Set de_escalation_technique to null if de_escalation_attempt is false.
+
+CLINICAL MILESTONES — if milestones are provided in the user prompt, check whether this utterance satisfies any of them. Return the milestone ID if so, null otherwise. Each milestone can only be completed once.`;
 
 const PATIENT_RESPONSE_CLASSIFIER_SYSTEM_PROMPT = `You are monitoring a simulated patient or relative in a live clinical de-escalation scenario.
 
@@ -133,7 +186,8 @@ function formatVoiceProfile(profile?: StructuredVoiceProfile | null): string {
 async function requestClassification(
   apiKey: string,
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
+  options?: { schema?: z.ZodType; schemaName?: string; maxTokens?: number }
 ): Promise<ClassifierResult> {
   const client = getOpenAIClient();
   if (!client || !apiKey) {
@@ -150,6 +204,10 @@ async function requestClassification(
     };
   }
 
+  const schema = options?.schema ?? CLASSIFIER_OUTPUT_SCHEMA;
+  const schemaName = options?.schemaName ?? "utterance_classifier";
+  const maxTokens = options?.maxTokens ?? 220;
+
   try {
     const response = await client.responses.parse({
       model: CLASSIFIER_MODEL,
@@ -157,25 +215,42 @@ async function requestClassification(
       input: userPrompt,
       store: false,
       reasoning: { effort: "none" },
-      max_output_tokens: 220,
+      max_output_tokens: maxTokens,
       text: {
-        format: zodTextFormat(CLASSIFIER_OUTPUT_SCHEMA, "utterance_classifier"),
+        format: zodTextFormat(schema, schemaName),
         verbosity: "low",
       },
     });
 
-    const parsed = response.output_parsed;
-    if (!parsed) {
+    const raw = response.output_parsed;
+    if (!raw) {
       throw new Error("No parsed classifier output returned");
     }
 
-    return {
-      technique: parsed.technique || "unknown",
-      effectiveness: Math.max(-1, Math.min(1, parsed.effectiveness || 0)),
-      tags: Array.isArray(parsed.tags) ? parsed.tags : [],
-      confidence: Math.max(0, Math.min(1, parsed.confidence || 0)),
-      reasoning: parsed.reasoning || "",
+    // Cast to Record for dynamic field access — the Zod schema guarantees shape
+    const parsed = raw as Record<string, unknown>;
+
+    const base: ClassifierResult = {
+      technique: (parsed.technique as string) || "unknown",
+      effectiveness: Math.max(-1, Math.min(1, (parsed.effectiveness as number) || 0)),
+      tags: Array.isArray(parsed.tags) ? (parsed.tags as string[]) : [],
+      confidence: Math.max(0, Math.min(1, (parsed.confidence as number) || 0)),
+      reasoning: (parsed.reasoning as string) || "",
     };
+
+    // Attach scoring fields when using the trainee scoring schema
+    if ("composure_markers" in parsed) {
+      base.composure_markers = Array.isArray(parsed.composure_markers)
+        ? (parsed.composure_markers as ClassifierResult["composure_markers"])
+        : [];
+      base.de_escalation_attempt = Boolean(parsed.de_escalation_attempt);
+      base.de_escalation_technique =
+        (parsed.de_escalation_technique as ClassifierResult["de_escalation_technique"]) ?? null;
+      base.clinical_milestone_completed =
+        (parsed.clinical_milestone_completed as string) ?? null;
+    }
+
+    return base;
   } catch (error) {
     if (shouldFailLoudOnOpenAIError()) {
       throw error;
@@ -201,6 +276,16 @@ export async function classifyUtterance(
     .map((t) => `${t.speaker}: ${t.content}`)
     .join("\n");
 
+  let milestoneBlock = "";
+  if (context.milestones && context.milestones.length > 0) {
+    const milestoneLines = context.milestones
+      .map((m) => `- ID: "${m.id}" | ${m.description} | Hint: ${m.classifier_hint}`)
+      .join("\n");
+    milestoneBlock = `\n\nClinical milestones to check against:\n${milestoneLines}`;
+  } else {
+    milestoneBlock = "\n\nNo clinical milestones defined for this scenario. Return null for clinical_milestone_completed.";
+  }
+
   const userPrompt = `Scenario: ${context.scenarioContext}
 Current escalation level: ${context.currentEscalation}/10
 
@@ -215,12 +300,13 @@ TRAINEE's latest utterance to classify:
 
 Assess the trainee's effect on the interaction using both:
 - the literal words
-- the structured delivery profile, if provided, which describes how the utterance sounded emotionally and vocally.`;
+- the structured delivery profile, if provided, which describes how the utterance sounded emotionally and vocally.${milestoneBlock}`;
 
   return requestClassification(
     apiKey,
     TRAINEE_CLASSIFIER_SYSTEM_PROMPT,
-    userPrompt
+    userPrompt,
+    { schema: TRAINEE_SCORING_SCHEMA, schemaName: "trainee_scoring", maxTokens: 400 }
   );
 }
 

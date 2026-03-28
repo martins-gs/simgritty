@@ -52,10 +52,11 @@ The patient is driven by a four-layer prompt built in `src/lib/engine/promptBuil
 
 Scenarios are authored through the App Router scenario pages and stored across:
 
-- `scenario_templates`
+- `scenario_templates` (includes `scoring_weights`, `support_threshold`, `critical_threshold`, `clinical_task_enabled`)
 - `scenario_traits`
 - `scenario_voice_config`
 - `escalation_rules`
+- `scenario_milestones` (optional, 0-5 per scenario — each has a description and classifier hint)
 
 When a session is created, the scenario is frozen into `simulation_sessions.scenario_snapshot`, so session playback and forking are based on the original session state rather than the latest template edits.
 
@@ -67,13 +68,15 @@ There are three GPT-5.4-mini structured-output routes, all using the Responses A
 - `src/app/api/voice-profile/patient/route.ts` via `src/lib/openai/structuredVoice.ts`
 - `src/app/api/deescalate/route.ts` via `src/lib/openai/structuredVoice.ts`
 
-The classifier pipeline now has **three modes**, not two:
+The classifier pipeline has **three modes**:
 
-- `trainee_utterance`
+- `trainee_utterance` — uses an extended Zod schema (`TRAINEE_SCORING_SCHEMA`) that adds scoring fields: `composure_markers` (array of negative indicators), `de_escalation_attempt` (boolean), `de_escalation_technique` (technique label), and `clinical_milestone_completed` (milestone ID or null). When milestones are defined for the scenario, they are passed in the classifier context.
 - `patient_response`
 - `clinician_utterance`
 
-It can also take the latest structured delivery profile as context, so classification is based on both the words spoken and how the utterance was delivered.
+Patient and clinician modes use the base schema (`CLASSIFIER_OUTPUT_SCHEMA`). The trainee mode uses a higher token limit (400 vs 220) to accommodate the additional fields.
+
+Classification also takes the latest structured delivery profile as context, so it is based on both the words spoken and how the utterance was delivered.
 
 Patient voice-profile generation returns a seven-field structured profile:
 
@@ -158,14 +161,22 @@ All persistence calls from the simulation page (`persistTranscriptTurn`, `update
 
 ## 6. Scoring
 
-`src/lib/engine/scoring.ts` computes a post-session performance breakdown with four dimensions:
+`src/lib/engine/scoring.ts` computes a post-session performance breakdown across four dimensions, each scored 0–100:
 
-- **De-escalation effectiveness** (0–40 points): based on peak vs final escalation level relative to the initial level.
-- **Speed of resolution** (0–25 points): rewards quick de-escalation.
-- **Independence** (0–25 points): penalises heavy reliance on the AI clinician by comparing trainee vs bot turn counts.
-- **Stability** (0–10 points): penalises wild escalation swings during the session.
+- **Composure**: starts at 100, subtracts penalties when composure markers are detected (defensive language, dismissive responses, hostility mirroring, sarcasm). Multiple markers on one turn incur a 1.5× penalty.
+- **De-escalation**: measures the rate and effectiveness of de-escalation attempts. Score = attempt_rate × 0.4 + success_rate × 0.6. Effectiveness is measured by whether escalation level dropped after the attempt. Only turns where the patient is actively escalated count.
+- **Clinical Task Maintenance** (optional): ratio of completed milestones to total milestones defined for the scenario. Excluded entirely if no milestones are defined.
+- **Support Seeking**: starts at a baseline of 70. Each bot clinician invocation at or above the scenario's support threshold adds +15; below the threshold subtracts -15. Sustained critical escalation without help-seeking incurs additional penalties.
 
-These sum to an overall score (0–100) mapped to a letter grade (A+ through F) with an auto-generated summary sentence.
+The overall score is a weighted average using scenario-defined weights (or equal defaults). When clinical task is excluded, weights are renormalized across the remaining three dimensions.
+
+**Qualitative labels**: Strong (80–100), Developing (60–79), Needs practice (0–59).
+
+**Session validity gate**: sessions under 6 turns show no score. Sessions of 6–12 turns display scores with a "preliminary" caveat.
+
+**Evidence tracking**: every scoring event (marker detected, attempt made, milestone completed, support invoked) is recorded with its turn index and score impact. The review page shows the 2–3 highest-impact moments and a technique suggestion based on the weakest dimension.
+
+Scoring data is persisted to `session_scores` (one row per session) and `session_score_evidence` (one row per scoring event).
 
 ## 7. Scenario Authoring: Traits And Archetypes
 
@@ -191,10 +202,12 @@ Each preset bundles scenario defaults, a full trait profile, voice configuration
 
 Supabase stores:
 
-- authored scenarios (`scenario_templates`, `scenario_traits`, `scenario_voice_config`, `escalation_rules`)
+- authored scenarios (`scenario_templates`, `scenario_traits`, `scenario_voice_config`, `escalation_rules`, `scenario_milestones`)
 - live and completed sessions (`simulation_sessions` with frozen `scenario_snapshot`)
 - transcript turns (`transcript_turns` with per-turn snapshots: `classifier_result`, `trigger_type`, `state_after`, `patient_voice_profile_after`, `patient_prompt_after`)
 - simulation state events (`simulation_state_events` — event types: `session_started`, `session_ended`, `escalation_change`, `de_escalation_change`, `ceiling_reached`, `trainee_exit`, `classification_result`, `clinician_audio`, `prompt_update`, `error`)
+- session scores and evidence (`session_scores`, `session_score_evidence`)
+- trainee reflections (`session_reflections`)
 - educator notes
 
 The session APIs persist transcript turns and state events during the live run, then the review pages reconstruct transcript, escalation history, scoring, and educator annotations from that stored data.
@@ -203,6 +216,16 @@ The session APIs persist transcript turns and state events during the live run, 
 
 The review page (`src/app/review/[sessionId]/page.tsx`) loads session, transcript, events, and educator notes in parallel. It includes a retry mechanism (up to 8 attempts at 750 ms intervals) that re-fetches if the session data appears incomplete — specifically if `exit_type`, `peak_escalation_level`, or `ended_at` are missing, or if clinician turns are present but no `clinician_audio` events have arrived yet. This handles the race between the simulation page's final persistence flush and the review page load.
 
-Summary cards include a **Clinician Audio** card showing the Realtime success rate and breakdown (completed / partial / TTS fallback). The `TranscriptViewer` displays per-turn audio delivery badges, and the `EventLog` renders clinician audio events with path, timing, and error details.
+The review page displays:
+
+- **ScoreCard**: qualitative label badge (Strong / Developing / Needs practice), overall circular progress, and four dimension bars (0–100) with weight percentages. A session validity gate blocks scoring for sessions under 6 turns.
+- **Escalation timeline**: always visible on the main screen (no longer in a tab), showing escalation level and trust over time with event markers.
+- **Key moments**: 2–3 highest-impact scoring events with transcript excerpts and context.
+- **Technique suggestion**: one "Next time, try" recommendation based on the weakest scoring dimension.
+- **Summary cards**: turns, events, peak level, exit type, and clinician audio success rate.
+- **Tabs**: Transcript, Event Log, Educator Notes.
+- **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data.
+
+The `TranscriptViewer` displays per-turn audio delivery badges, and the `EventLog` renders clinician audio events with path, timing, and error details.
 
 Forking is session-based rather than template-based: a new session can be created from an earlier session and turn index, reusing the frozen scenario snapshot and the saved turn/state history. Fork metadata tracks `parent_session_id`, `forked_from_session_id`, `forked_from_turn_index`, `fork_label`, and `branch_depth`.
