@@ -14,8 +14,23 @@ export type StateEventType =
   | "ceiling_reached"
   | "trainee_exit"
   | "classification_result"
+  | "clinician_audio"
   | "prompt_update"
   | "error";
+
+export type ClinicianAudioPath = "realtime" | "tts" | "none";
+export type ClinicianAudioOutcome = "completed" | "partial" | "failed";
+
+export interface ClinicianAudioPayload {
+  source: "bot_clinician";
+  turn_index: number;
+  technique: string;
+  path: ClinicianAudioPath;
+  realtime_outcome: ClinicianAudioOutcome | null;
+  fallback_reason: string | null;
+  renderer_error: string | null;
+  elapsed_ms: number | null;
+}
 
 export interface SimulationSession {
   id: string;

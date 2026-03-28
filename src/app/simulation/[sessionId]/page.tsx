@@ -22,6 +22,8 @@ import { ESCALATION_LABELS } from "@/types/escalation";
 import type { ScenarioTraits, ScenarioVoiceConfig, EscalationRules } from "@/types/scenario";
 import type {
   ClassifierResult,
+  ClinicianAudioOutcome,
+  ClinicianAudioPath,
   SimulationSession,
   Speaker,
   TranscriptTurn,
@@ -75,12 +77,32 @@ interface PendingTurnCompletion {
   timeout: ReturnType<typeof setTimeout>;
 }
 
+interface ClinicianAudioResult {
+  path: ClinicianAudioPath;
+  realtimeOutcome: ClinicianAudioOutcome | null;
+  fallbackReason: string | null;
+  rendererError: string | null;
+  elapsedMs: number | null;
+}
+
 interface PatientReplyUpdateResult {
   snapshot: PersistedTurnSnapshot | null;
   stateAfter: EscalationState;
   triggerType: TurnTriggerType;
   classifierResult: ClassifierResult;
   recentTurnsForPrompt: { speaker: string; content: string }[];
+}
+
+interface SessionEventInput {
+  event_index: number;
+  event_type: string;
+  escalation_before?: number | null;
+  escalation_after?: number | null;
+  trust_before?: number | null;
+  trust_after?: number | null;
+  listening_before?: number | null;
+  listening_after?: number | null;
+  payload?: Record<string, unknown>;
 }
 
 export default function SimulationPage() {
@@ -138,6 +160,7 @@ export default function SimulationPage() {
   const patientVoiceRequestRef = useRef(0);
   const pendingPatientReplyUpdateRef = useRef<Promise<PatientReplyUpdateResult | null> | null>(null);
   const patientReplyUpdateRequestRef = useRef(0);
+  const pendingPersistenceRef = useRef<Set<Promise<unknown>>>(new Set());
   const clinicianRendererReadyRef = useRef(false);
   const clinicianRendererConnectRef = useRef<Promise<boolean> | null>(null);
   const clinicianRendererErrorRef = useRef<string | null>(null);
@@ -300,6 +323,67 @@ export default function SimulationPage() {
     setTranscriptEntries((prev) => [...prev, entry]);
   }
 
+  function trackPersistence<T>(promise: Promise<T>) {
+    pendingPersistenceRef.current.add(promise);
+    void promise.finally(() => {
+      pendingPersistenceRef.current.delete(promise);
+    });
+    return promise;
+  }
+
+  async function flushPendingPersistence(timeoutMs: number = 2500) {
+    const pending = Array.from(pendingPersistenceRef.current);
+    if (pending.length === 0) return;
+
+    await Promise.race([
+      Promise.allSettled(pending),
+      new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+  }
+
+  async function persistRequest(
+    label: string,
+    input: RequestInfo | URL,
+    init: RequestInit
+  ) {
+    const res = await fetch(input, init).catch((error) => {
+      console.error(`[Persistence] ${label} request failed`, error);
+      return null;
+    });
+
+    if (!res) return null;
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => "");
+      console.error(`[Persistence] ${label} failed status=${res.status}`, errorText);
+    }
+
+    return res;
+  }
+
+  function persistSessionEvent(event: SessionEventInput) {
+    void trackPersistence(
+      persistRequest(
+        `event ${event.event_type}`,
+        `/api/sessions/${sessionId}/events`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          keepalive: true,
+          body: JSON.stringify({
+            escalation_before: null,
+            escalation_after: null,
+            trust_before: null,
+            trust_after: null,
+            listening_before: null,
+            listening_after: null,
+            payload: {},
+            ...event,
+          }),
+        }
+      )
+    );
+  }
+
   function persistTranscriptTurn(
     turnIndex: number,
     speaker: Speaker,
@@ -307,39 +391,53 @@ export default function SimulationPage() {
     snapshot: PersistedTurnSnapshot,
     timestamp?: string
   ) {
-    void fetch(`/api/sessions/${sessionId}/transcript`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        turn_index: turnIndex,
-        speaker,
-        content,
-        classifier_result: snapshot.classifierResult,
-        trigger_type: snapshot.triggerType,
-        state_after: snapshot.stateAfter,
-        patient_voice_profile_after: snapshot.patientVoiceProfileAfter,
-        patient_prompt_after: snapshot.patientPromptAfter,
-        started_at: timestamp,
-      }),
-    });
+    void trackPersistence(
+      persistRequest(
+        `transcript turn ${turnIndex} ${speaker}`,
+        `/api/sessions/${sessionId}/transcript`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          keepalive: true,
+          body: JSON.stringify({
+            turn_index: turnIndex,
+            speaker,
+            content,
+            classifier_result: snapshot.classifierResult,
+            trigger_type: snapshot.triggerType,
+            state_after: snapshot.stateAfter,
+            patient_voice_profile_after: snapshot.patientVoiceProfileAfter,
+            patient_prompt_after: snapshot.patientPromptAfter,
+            started_at: timestamp,
+          }),
+        }
+      )
+    );
   }
 
   function updatePersistedTurnSnapshot(
     turnIndex: number,
     snapshot: PersistedTurnSnapshot
   ) {
-    void fetch(`/api/sessions/${sessionId}/transcript`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        turn_index: turnIndex,
-        classifier_result: snapshot.classifierResult,
-        trigger_type: snapshot.triggerType,
-        state_after: snapshot.stateAfter,
-        patient_voice_profile_after: snapshot.patientVoiceProfileAfter,
-        patient_prompt_after: snapshot.patientPromptAfter,
-      }),
-    });
+    void trackPersistence(
+      persistRequest(
+        `transcript patch ${turnIndex}`,
+        `/api/sessions/${sessionId}/transcript`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          keepalive: true,
+          body: JSON.stringify({
+            turn_index: turnIndex,
+            classifier_result: snapshot.classifierResult,
+            trigger_type: snapshot.triggerType,
+            state_after: snapshot.stateAfter,
+            patient_voice_profile_after: snapshot.patientVoiceProfileAfter,
+            patient_prompt_after: snapshot.patientPromptAfter,
+          }),
+        }
+      )
+    );
   }
 
   function buildSnapshot(
@@ -847,28 +945,24 @@ export default function SimulationPage() {
       }
 
       const evtIdx = eventIndexRef.current++;
-      fetch(`/api/sessions/${sessionId}/events`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event_index: evtIdx,
-          event_type: delta.trigger_type === "escalation"
-            ? "escalation_change"
-            : delta.trigger_type === "de_escalation"
-              ? "de_escalation_change"
-              : "classification_result",
-          escalation_before: prevState.level,
-          escalation_after: newState.level,
-          trust_before: prevState.trust,
-          trust_after: newState.trust,
-          listening_before: prevState.willingness_to_listen,
-          listening_after: newState.willingness_to_listen,
-          payload: {
-            classifier: classResult,
-            delta,
-            source: "bot_patient_response",
-          },
-        }),
+      persistSessionEvent({
+        event_index: evtIdx,
+        event_type: delta.trigger_type === "escalation"
+          ? "escalation_change"
+          : delta.trigger_type === "de_escalation"
+            ? "de_escalation_change"
+            : "classification_result",
+        escalation_before: prevState.level,
+        escalation_after: newState.level,
+        trust_before: prevState.trust,
+        trust_after: newState.trust,
+        listening_before: prevState.willingness_to_listen,
+        listening_after: newState.willingness_to_listen,
+        payload: {
+          classifier: classResult,
+          delta,
+          source: "bot_patient_response",
+        },
       });
 
       const recentTurnsForPrompt = getRecentPromptTurns();
@@ -1039,8 +1133,17 @@ export default function SimulationPage() {
       peakLevelRef.current = Math.max(peakLevelRef.current, newState.level);
 
       const evtIdx = eventIndexRef.current++;
-      fetch(`/api/sessions/${sessionId}/events`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ event_index: evtIdx, event_type: delta.trigger_type === "escalation" ? "escalation_change" : delta.trigger_type === "de_escalation" ? "de_escalation_change" : "classification_result", escalation_before: prevState.level, escalation_after: newState.level, trust_before: prevState.trust, trust_after: newState.trust, listening_before: prevState.willingness_to_listen, listening_after: newState.willingness_to_listen, payload: { classifier: classResult, delta } }) });
+      persistSessionEvent({
+        event_index: evtIdx,
+        event_type: delta.trigger_type === "escalation" ? "escalation_change" : delta.trigger_type === "de_escalation" ? "de_escalation_change" : "classification_result",
+        escalation_before: prevState.level,
+        escalation_after: newState.level,
+        trust_before: prevState.trust,
+        trust_after: newState.trust,
+        listening_before: prevState.willingness_to_listen,
+        listening_after: newState.willingness_to_listen,
+        payload: { classifier: classResult, delta },
+      });
 
       if (engineRef.current.shouldAutoEnd()) handleEndSession("auto_ceiling");
     } catch (err) {
@@ -1100,7 +1203,23 @@ export default function SimulationPage() {
     cancelCurrentResponse();
     await new Promise((r) => setTimeout(r, 50));
     disconnect();
-    fetch(`/api/sessions/${sessionId}/end`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ exit_type: exitType, final_escalation_level: engineRef.current?.getLevel(), peak_escalation_level: peakLevelRef.current }) });
+    await trackPersistence(
+      persistRequest(
+        `session end ${exitType}`,
+        `/api/sessions/${sessionId}/end`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          keepalive: true,
+          body: JSON.stringify({
+            exit_type: exitType,
+            final_escalation_level: engineRef.current?.getLevel(),
+            peak_escalation_level: peakLevelRef.current,
+          }),
+        }
+      )
+    );
+    await flushPendingPersistence();
     router.push(`/review/${sessionId}`);
   }
 
@@ -1168,8 +1287,17 @@ export default function SimulationPage() {
       peakLevelRef.current = Math.max(peakLevelRef.current, newState.level);
 
       const evtIdx = eventIndexRef.current++;
-      fetch(`/api/sessions/${sessionId}/events`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ event_index: evtIdx, event_type: delta.trigger_type === "escalation" ? "escalation_change" : delta.trigger_type === "de_escalation" ? "de_escalation_change" : "classification_result", escalation_before: prevState.level, escalation_after: newState.level, trust_before: prevState.trust, trust_after: newState.trust, listening_before: prevState.willingness_to_listen, listening_after: newState.willingness_to_listen, payload: { classifier: classResult, delta, source: "bot_clinician" } }) });
+      persistSessionEvent({
+        event_index: evtIdx,
+        event_type: delta.trigger_type === "escalation" ? "escalation_change" : delta.trigger_type === "de_escalation" ? "de_escalation_change" : "classification_result",
+        escalation_before: prevState.level,
+        escalation_after: newState.level,
+        trust_before: prevState.trust,
+        trust_after: newState.trust,
+        listening_before: prevState.willingness_to_listen,
+        listening_after: newState.willingness_to_listen,
+        payload: { classifier: classResult, delta, source: "bot_clinician" },
+      });
 
       // Voice profile fetch was running in parallel — await it now
       const voiceProfile = await voiceProfilePromise;
@@ -1282,7 +1410,7 @@ export default function SimulationPage() {
     technique: string,
     voiceProfile: StructuredVoiceProfile | null,
     abort: AbortController
-  ): Promise<void> {
+  ): Promise<boolean> {
     const context = getClinicianVoiceContext(technique);
     console.info('[Clinician Audio] path=tts status=requested');
     const res = await fetch("/api/tts", {
@@ -1292,26 +1420,26 @@ export default function SimulationPage() {
       signal: abort.signal,
     }).catch(() => null);
 
-    if (!res || abort.signal.aborted) return;
+    if (!res || abort.signal.aborted) return false;
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
       console.error("[Clinician Audio] path=tts status=failed", res.status, errText);
-      return;
+      return false;
     }
 
     console.info("[Clinician Audio] path=tts status=playing");
     const blob = await res.blob();
-    if (abort.signal.aborted) return;
+    if (abort.signal.aborted) return false;
 
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     botAudioRef.current = audio;
 
-    return new Promise<void>((resolve) => {
-      audio.onended = () => { URL.revokeObjectURL(url); botAudioRef.current = null; resolve(); };
-      audio.onerror = () => { URL.revokeObjectURL(url); botAudioRef.current = null; resolve(); };
-      if (abort.signal.aborted) { URL.revokeObjectURL(url); resolve(); return; }
-      audio.play().catch(() => { URL.revokeObjectURL(url); resolve(); });
+    return new Promise<boolean>((resolve) => {
+      audio.onended = () => { URL.revokeObjectURL(url); botAudioRef.current = null; resolve(true); };
+      audio.onerror = () => { URL.revokeObjectURL(url); botAudioRef.current = null; resolve(false); };
+      if (abort.signal.aborted) { URL.revokeObjectURL(url); resolve(false); return; }
+      audio.play().catch(() => { URL.revokeObjectURL(url); resolve(false); });
     });
   }
 
@@ -1320,10 +1448,19 @@ export default function SimulationPage() {
     technique: string,
     voiceProfile: StructuredVoiceProfile | null,
     abort: AbortController
-  ): Promise<"realtime" | "tts" | "none"> {
+  ): Promise<ClinicianAudioResult> {
+    const startedAt = performance.now();
+    const finish = (
+      partial: Omit<ClinicianAudioResult, "elapsedMs">
+    ): ClinicianAudioResult => ({
+      ...partial,
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
     const realtimeInstructions = getClinicianRealtimeInstructions(technique, voiceProfile);
     const connected = await ensureClinicianRendererConnected(realtimeInstructions);
-    if (abort.signal.aborted || !botActiveRef.current) return "none";
+    if (abort.signal.aborted || !botActiveRef.current) {
+      return finish({ path: "none", realtimeOutcome: null, fallbackReason: null, rendererError: null });
+    }
 
     if (connected) {
       console.info(`[Clinician Audio] path=realtime status=speaking voice=${CLINICIAN_REALTIME_VOICE}`);
@@ -1332,11 +1469,13 @@ export default function SimulationPage() {
         instructions: realtimeInstructions,
       });
 
-      if (abort.signal.aborted || !botActiveRef.current) return "none";
+      if (abort.signal.aborted || !botActiveRef.current) {
+        return finish({ path: "none", realtimeOutcome: null, fallbackReason: null, rendererError: null });
+      }
 
       if (rendered === "completed") {
         console.info(`[Clinician Audio] path=realtime status=done voice=${CLINICIAN_REALTIME_VOICE}`);
-        return "realtime";
+        return finish({ path: "realtime", realtimeOutcome: "completed", fallbackReason: null, rendererError: null });
       }
 
       if (rendered === "partial") {
@@ -1344,8 +1483,15 @@ export default function SimulationPage() {
           `[Clinician Audio] skip_tts_fallback reason="renderer failed after playback started" tail_guard_ms=${CLINICIAN_REALTIME_PARTIAL_TAIL_GUARD_MS}`
         );
         await new Promise((resolve) => setTimeout(resolve, CLINICIAN_REALTIME_PARTIAL_TAIL_GUARD_MS));
-        if (abort.signal.aborted || !botActiveRef.current) return "none";
-        return "realtime";
+        if (abort.signal.aborted || !botActiveRef.current) {
+          return finish({ path: "none", realtimeOutcome: "partial", fallbackReason: null, rendererError: clinicianRendererErrorRef.current });
+        }
+        return finish({
+          path: "realtime",
+          realtimeOutcome: "partial",
+          fallbackReason: "renderer failed after playback started",
+          rendererError: clinicianRendererErrorRef.current,
+        });
       }
 
       clinicianRendererReadyRef.current = false;
@@ -1353,9 +1499,24 @@ export default function SimulationPage() {
       console.warn('[Clinician Audio] fallback=tts reason="renderer speak failed"');
     }
 
-    await speakWithTtsFallback(text, technique, voiceProfile, abort);
-    if (abort.signal.aborted || !botActiveRef.current) return "none";
-    return "tts";
+    const fallbackReason = connected
+      ? "renderer speak failed"
+      : clinicianRendererErrorRef.current || "renderer connect failed";
+    const ttsPlayed = await speakWithTtsFallback(text, technique, voiceProfile, abort);
+    if (abort.signal.aborted || !botActiveRef.current) {
+      return finish({
+        path: "none",
+        realtimeOutcome: "failed",
+        fallbackReason,
+        rendererError: clinicianRendererErrorRef.current,
+      });
+    }
+    return finish({
+      path: ttsPlayed ? "tts" : "none",
+      realtimeOutcome: "failed",
+      fallbackReason,
+      rendererError: clinicianRendererErrorRef.current,
+    });
   }
 
   async function runBotTurn(abort: AbortController) {
@@ -1389,10 +1550,26 @@ export default function SimulationPage() {
       recentTurnsBeforeBotTurn
     );
 
-    const clinicianAudioPath = await speakWithClinicianAudio(text, technique, voiceProfile, abort);
+    const clinicianAudioResult = await speakWithClinicianAudio(text, technique, voiceProfile, abort);
     if (abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }
 
-    if (clinicianAudioPath === "realtime") {
+    const clinicianAudioEventIdx = eventIndexRef.current++;
+    persistSessionEvent({
+      event_index: clinicianAudioEventIdx,
+      event_type: "clinician_audio",
+      payload: {
+        source: "bot_clinician",
+        turn_index: idx,
+        technique,
+        path: clinicianAudioResult.path,
+        realtime_outcome: clinicianAudioResult.realtimeOutcome,
+        fallback_reason: clinicianAudioResult.fallbackReason,
+        renderer_error: clinicianAudioResult.rendererError,
+        elapsed_ms: clinicianAudioResult.elapsedMs,
+      },
+    });
+
+    if (clinicianAudioResult.path === "realtime") {
       console.info(`[Clinician Audio] path=realtime status=handoff_wait delay_ms=${CLINICIAN_REALTIME_HANDOFF_DELAY_MS}`);
       await new Promise((resolve) => setTimeout(resolve, CLINICIAN_REALTIME_HANDOFF_DELAY_MS));
       if (abort.signal.aborted || !botActiveRef.current) { setBotSpeaking(false); return; }

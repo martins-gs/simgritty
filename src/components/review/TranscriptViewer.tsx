@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { ArrowUp, ArrowDown, Minus } from "lucide-react";
-import type { TranscriptTurn, ClassifierResult } from "@/types/simulation";
+import type { TranscriptTurn, ClassifierResult, ClinicianAudioPayload } from "@/types/simulation";
 import type { EscalationState } from "@/types/escalation";
 import { ESCALATION_LABELS } from "@/types/escalation";
 
@@ -12,6 +12,7 @@ interface TranscriptViewerProps {
   turns: TranscriptTurn[];
   onTurnSelect?: (turnId: string) => void;
   selectedTurnId?: string | null;
+  clinicianAudioByTurnIndex?: Map<number, ClinicianAudioPayload>;
 }
 
 function getSpeakerLabel(speaker: string): string {
@@ -56,7 +57,12 @@ function EscalationImpact({
   );
 }
 
-export function TranscriptViewer({ turns, onTurnSelect, selectedTurnId }: TranscriptViewerProps) {
+export function TranscriptViewer({
+  turns,
+  onTurnSelect,
+  selectedTurnId,
+  clinicianAudioByTurnIndex,
+}: TranscriptViewerProps) {
   // Build a map of each turn's "before" level by tracking state across turns.
   // Only trainee and system (AI clinician) turns update the tracked level because
   // patient turns never change the score and their state_after may be stale due
@@ -81,6 +87,9 @@ export function TranscriptViewer({ turns, onTurnSelect, selectedTurnId }: Transc
         {turns.map((turn) => {
           const classifier = turn.classifier_result as ClassifierResult | null;
           const stateAfter = turn.state_after as EscalationState | null;
+          const clinicianAudio = turn.speaker === "system"
+            ? clinicianAudioByTurnIndex?.get(turn.turn_index)
+            : undefined;
           const showImpact =
             (turn.speaker === "trainee" || turn.speaker === "system") &&
             stateAfter !== null;
@@ -118,6 +127,39 @@ export function TranscriptViewer({ turns, onTurnSelect, selectedTurnId }: Transc
                 )}
               </div>
               <p className="text-sm">{turn.content}</p>
+              {clinicianAudio && (
+                <div className="mt-2 space-y-1">
+                  <div className="flex flex-wrap gap-1">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-[10px]",
+                        clinicianAudio.path === "tts"
+                          ? "border-amber-500 text-amber-700"
+                          : clinicianAudio.realtime_outcome === "partial"
+                            ? "border-yellow-500 text-yellow-700"
+                            : "border-emerald-500 text-emerald-700"
+                      )}
+                    >
+                      {clinicianAudio.path === "tts"
+                        ? "TTS fallback"
+                        : clinicianAudio.realtime_outcome === "partial"
+                          ? "Realtime partial"
+                          : "Realtime"}
+                    </Badge>
+                    {clinicianAudio.elapsed_ms !== null && (
+                      <Badge variant="outline" className="text-[10px]">
+                        {(clinicianAudio.elapsed_ms / 1000).toFixed(1)}s
+                      </Badge>
+                    )}
+                  </div>
+                  {(clinicianAudio.fallback_reason || clinicianAudio.renderer_error) && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {clinicianAudio.fallback_reason || clinicianAudio.renderer_error}
+                    </p>
+                  )}
+                </div>
+              )}
               {classifier && (turn.speaker === "trainee" || turn.speaker === "system") && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   <Badge

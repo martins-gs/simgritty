@@ -13,7 +13,58 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import type { TranscriptTurn, SimulationStateEvent, EducatorNote, SimulationSession } from "@/types/simulation";
+import type {
+  TranscriptTurn,
+  SimulationStateEvent,
+  EducatorNote,
+  SimulationSession,
+  ClinicianAudioPayload,
+} from "@/types/simulation";
+
+function isClinicianAudioEvent(
+  event: SimulationStateEvent
+): event is SimulationStateEvent & { payload: ClinicianAudioPayload & { __event_kind?: string } } {
+  if (typeof event.payload !== "object" || event.payload === null || !("turn_index" in event.payload)) {
+    return false;
+  }
+
+  return (
+    event.event_type === "clinician_audio" ||
+    (event.payload as { __event_kind?: string }).__event_kind === "clinician_audio"
+  );
+}
+
+function expectsClinicianAudio(
+  turns: TranscriptTurn[],
+  events: SimulationStateEvent[]
+): boolean {
+  if (turns.some((turn) => turn.speaker === "system")) {
+    return true;
+  }
+
+  return events.some((event) => {
+    const payload = event.payload as { source?: string } | null;
+    return payload?.source === "bot_clinician";
+  });
+}
+
+function needsReviewRefresh(
+  session: SimulationSession | null,
+  turns: TranscriptTurn[],
+  events: SimulationStateEvent[]
+): boolean {
+  if (!session) return true;
+
+  const missingSessionSummary =
+    !session.exit_type ||
+    session.peak_escalation_level == null ||
+    !session.ended_at;
+  const missingClinicianAudio =
+    expectsClinicianAudio(turns, events) &&
+    !events.some(isClinicianAudioEvent);
+
+  return missingSessionSummary || missingClinicianAudio;
+}
 
 export default function ReviewPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -27,21 +78,48 @@ export default function ReviewPage() {
   const [restarting, setRestarting] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+
     async function load() {
       const [sessionRes, turnsRes, eventsRes, notesRes] = await Promise.all([
-        fetch(`/api/sessions/${sessionId}`),
-        fetch(`/api/sessions/${sessionId}/transcript`),
-        fetch(`/api/sessions/${sessionId}/events`),
-        fetch(`/api/sessions/${sessionId}/educator-notes`),
+        fetch(`/api/sessions/${sessionId}`).catch(() => null),
+        fetch(`/api/sessions/${sessionId}/transcript`).catch(() => null),
+        fetch(`/api/sessions/${sessionId}/events`).catch(() => null),
+        fetch(`/api/sessions/${sessionId}/educator-notes`).catch(() => null),
       ]);
+      if (cancelled) return;
 
-      if (sessionRes.ok) setSession(await sessionRes.json());
-      if (turnsRes.ok) setTurns(await turnsRes.json());
-      if (eventsRes.ok) setEvents(await eventsRes.json());
-      if (notesRes.ok) setNotes(await notesRes.json());
+      const nextSession = sessionRes?.ok ? await sessionRes.json() as SimulationSession : null;
+      const nextTurns = turnsRes?.ok ? await turnsRes.json() as TranscriptTurn[] : [];
+      const nextEvents = eventsRes?.ok ? await eventsRes.json() as SimulationStateEvent[] : [];
+      const nextNotes = notesRes?.ok ? await notesRes.json() as EducatorNote[] : [];
+      if (cancelled) return;
+
+      setSession(nextSession);
+      setTurns(nextTurns);
+      setEvents(nextEvents);
+      setNotes(nextNotes);
       setLoading(false);
+
+      if (attempts >= 8 || !needsReviewRefresh(nextSession, nextTurns, nextEvents)) {
+        return;
+      }
+
+      attempts += 1;
+      retryTimeout = setTimeout(() => {
+        void load();
+      }, 750);
     }
-    load();
+    void load();
+
+    return () => {
+      cancelled = true;
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
+    };
   }, [sessionId]);
 
   if (loading || !session) {
@@ -83,12 +161,43 @@ export default function ReviewPage() {
       (e.payload as { delta?: { source?: string } } | null)?.delta?.source === "clinician" ||
       (e.payload as { classifier?: { source?: string } } | null)?.classifier?.source === "clinician"
   ).length;
+  const clinicianAudioEvents = events.filter(isClinicianAudioEvent);
+  const clinicianAudioByTurnIndex = new Map<number, ClinicianAudioPayload>();
+  for (const event of clinicianAudioEvents) {
+    clinicianAudioByTurnIndex.set((event.payload as ClinicianAudioPayload).turn_index, event.payload as ClinicianAudioPayload);
+  }
+  const clinicianAudioStats = clinicianAudioEvents.reduce(
+    (acc, event) => {
+      const payload = event.payload as ClinicianAudioPayload;
+      acc.total++;
+      if (payload.path === "tts") acc.tts++;
+      if (payload.path === "realtime" && payload.realtime_outcome === "completed") acc.realtimeCompleted++;
+      if (payload.path === "realtime" && payload.realtime_outcome === "partial") acc.realtimePartial++;
+      if (payload.path === "none") acc.none++;
+      return acc;
+    },
+    { total: 0, realtimeCompleted: 0, realtimePartial: 0, tts: 0, none: 0 }
+  );
+  const clinicianAudioSuccessRate = clinicianAudioStats.total > 0
+    ? Math.round((clinicianAudioStats.realtimeCompleted / clinicianAudioStats.total) * 100)
+    : null;
+  const clinicianAudioExpected = expectsClinicianAudio(turns, events);
+  const clinicianAudioHeadline = clinicianAudioSuccessRate !== null
+    ? `${clinicianAudioSuccessRate}% RT`
+    : clinicianAudioExpected
+      ? "Missing"
+      : "Not used";
+  const clinicianAudioSubtext = clinicianAudioStats.total > 0
+    ? `${clinicianAudioStats.realtimeCompleted} realtime, ${clinicianAudioStats.realtimePartial} partial, ${clinicianAudioStats.tts} TTS`
+    : clinicianAudioExpected
+      ? "AI clinician turns were present, but no audio telemetry was saved."
+      : null;
 
   const score = computeScore({
     session,
     events,
     initialLevel,
-    botTurnCount: clinicianEventCount || botTurnCount,
+    botTurnCount: clinicianAudioStats.total || clinicianEventCount || botTurnCount,
     traineeTurnCount,
   });
 
@@ -152,7 +261,7 @@ export default function ReviewPage() {
         <ScoreCard score={score} />
 
         {/* Summary Cards */}
-        <div className="grid gap-4 sm:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-5">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm text-muted-foreground">Turns</CardTitle>
@@ -187,6 +296,19 @@ export default function ReviewPage() {
               </p>
             </CardContent>
           </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm text-muted-foreground">Clinician Audio</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-bold">{clinicianAudioHeadline}</p>
+              {clinicianAudioSubtext && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {clinicianAudioSubtext}
+                </p>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         {/* Tabs */}
@@ -219,6 +341,7 @@ export default function ReviewPage() {
                   turns={turns}
                   onTurnSelect={setSelectedTurnId}
                   selectedTurnId={selectedTurnId}
+                  clinicianAudioByTurnIndex={clinicianAudioByTurnIndex}
                 />
               </CardContent>
             </Card>

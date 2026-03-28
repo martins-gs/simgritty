@@ -141,6 +141,21 @@ Two extra protections were added to keep bot-mode speech reliable:
 - **Length-aware realtime timeout**: clinician realtime playback timeout scales with utterance length (base 5 s + 500 ms per word, clamped between 15 s and 30 s) to avoid timing out normal longer clinician turns.
 - **No replay after partial realtime playback**: if realtime audio already started and then degraded, the system avoids replaying the same clinician line through TTS from the beginning, because that caused obvious duplicate speech and voice switching.
 
+### Clinician Audio Telemetry
+
+Every bot clinician turn emits a `clinician_audio` state event recording:
+
+- `path`: `"realtime"`, `"tts"`, or `"none"` (aborted before any audio)
+- `realtime_outcome`: `"completed"`, `"partial"`, or `"failed"` (null if realtime was never attempted)
+- `fallback_reason` and `renderer_error`: diagnostic strings when the primary path did not succeed
+- `elapsed_ms`: wall-clock time from audio request to completion
+
+These events are persisted via `POST /api/sessions/:id/events`. Because the `clinician_audio` event type requires a DB migration, the events route includes a graceful fallback: if the insert fails with a constraint error (migration not yet applied), the event is re-inserted as `classification_result` with an `__event_kind: "clinician_audio"` marker in the payload. The EventLog and review page detect both storage forms transparently.
+
+### Persistence Infrastructure
+
+All persistence calls from the simulation page (`persistTranscriptTurn`, `updatePersistedTurnSnapshot`, `persistSessionEvent`, session end) are tracked through a central `pendingPersistenceRef` set. Requests use `keepalive: true` for reliability during page transitions. Before navigating to the review page on session end, `flushPendingPersistence()` awaits all in-flight persistence calls (with a 2.5 s timeout), ensuring the review page loads with complete data.
+
 ## 6. Scoring
 
 `src/lib/engine/scoring.ts` computes a post-session performance breakdown with four dimensions:
@@ -179,9 +194,15 @@ Supabase stores:
 - authored scenarios (`scenario_templates`, `scenario_traits`, `scenario_voice_config`, `escalation_rules`)
 - live and completed sessions (`simulation_sessions` with frozen `scenario_snapshot`)
 - transcript turns (`transcript_turns` with per-turn snapshots: `classifier_result`, `trigger_type`, `state_after`, `patient_voice_profile_after`, `patient_prompt_after`)
-- simulation state events (`simulation_state_events`)
+- simulation state events (`simulation_state_events` — event types: `session_started`, `session_ended`, `escalation_change`, `de_escalation_change`, `ceiling_reached`, `trainee_exit`, `classification_result`, `clinician_audio`, `prompt_update`, `error`)
 - educator notes
 
 The session APIs persist transcript turns and state events during the live run, then the review pages reconstruct transcript, escalation history, scoring, and educator annotations from that stored data.
+
+### Review Page
+
+The review page (`src/app/review/[sessionId]/page.tsx`) loads session, transcript, events, and educator notes in parallel. It includes a retry mechanism (up to 8 attempts at 750 ms intervals) that re-fetches if the session data appears incomplete — specifically if `exit_type`, `peak_escalation_level`, or `ended_at` are missing, or if clinician turns are present but no `clinician_audio` events have arrived yet. This handles the race between the simulation page's final persistence flush and the review page load.
+
+Summary cards include a **Clinician Audio** card showing the Realtime success rate and breakdown (completed / partial / TTS fallback). The `TranscriptViewer` displays per-turn audio delivery badges, and the `EventLog` renders clinician audio events with path, timing, and error details.
 
 Forking is session-based rather than template-based: a new session can be created from an earlier session and turn index, reusing the frozen scenario snapshot and the saved turn/state history. Fork metadata tracks `parent_session_id`, `forked_from_session_id`, `forked_from_turn_index`, `fork_label`, and `branch_depth`.
