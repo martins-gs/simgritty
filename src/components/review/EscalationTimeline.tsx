@@ -256,9 +256,9 @@ export function EscalationTimeline({
       </div>
 
       {/* Chart */}
-      <div className="h-80 w-full">
+      <div className="h-56 sm:h-80 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 12, right: 60, bottom: 8, left: 8 }}>
+          <AreaChart data={data} margin={{ top: 8, right: 52, bottom: 6, left: 4 }}>
             <defs>
               <linearGradient id="escalationGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#ef4444" stopOpacity={0.3} />

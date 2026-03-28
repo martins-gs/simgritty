@@ -63,7 +63,7 @@ function ScoreBar({
           style={{ width: `${ratio * 100}%` }}
         />
       </div>
-      <p className="text-[10px] text-slate-400">{description}</p>
+      <p className="text-[10px] text-slate-400 hidden sm:block">{description}</p>
     </div>
   );
 }
@@ -74,32 +74,42 @@ export function ScoreCard({ score, preliminary }: ScoreCardProps) {
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-      {/* Top section — qualitative label + overall score */}
-      <div className="flex items-stretch border-b border-slate-100">
-        {/* Qualitative label badge */}
+      {/* Top section — stacks on mobile, side-by-side on sm+ */}
+      <div className="flex flex-col sm:flex-row sm:items-stretch border-b border-slate-100">
+        {/* Qualitative label + overall score — combined row on mobile */}
         <div className={cn(
-          "flex flex-col items-center justify-center px-6 py-5 border-r border-slate-100",
+          "flex items-center gap-4 px-4 py-4 sm:flex-col sm:justify-center sm:px-6 sm:py-5 sm:border-r border-b sm:border-b-0 border-slate-100",
           labelColors.bg
         )}>
-          <span className={cn("text-lg font-bold leading-tight text-center", labelColors.text)}>
+          <span className={cn("text-lg font-bold leading-tight", labelColors.text)}>
             {score.qualitativeLabel}
           </span>
+          {/* Ring visible inline on mobile */}
+          <div className="relative h-12 w-12 shrink-0 sm:hidden">
+            <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
+              <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e2e8f0" strokeWidth="3" />
+              <circle
+                cx="18" cy="18" r="15.5" fill="none"
+                stroke={getRingColor(overallRatio)}
+                strokeWidth="3" strokeLinecap="round"
+                strokeDasharray={`${overallRatio * 97.4} 97.4`}
+              />
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-[13px] font-bold tabular-nums text-slate-900">{score.overall}</span>
+            </div>
+          </div>
         </div>
 
-        {/* Overall score + ring */}
-        <div className="flex flex-1 items-center gap-5 px-5 py-4">
+        {/* Desktop score ring + summary */}
+        <div className="hidden sm:flex flex-1 items-center gap-5 px-5 py-4">
           <div className="relative h-16 w-16 shrink-0">
             <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
+              <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e2e8f0" strokeWidth="3" />
               <circle
-                cx="18" cy="18" r="15.5"
-                fill="none" stroke="#e2e8f0" strokeWidth="3"
-              />
-              <circle
-                cx="18" cy="18" r="15.5"
-                fill="none"
+                cx="18" cy="18" r="15.5" fill="none"
                 stroke={getRingColor(overallRatio)}
-                strokeWidth="3"
-                strokeLinecap="round"
+                strokeWidth="3" strokeLinecap="round"
                 strokeDasharray={`${overallRatio * 97.4} 97.4`}
                 className="transition-all duration-700"
               />
@@ -118,10 +128,20 @@ export function ScoreCard({ score, preliminary }: ScoreCardProps) {
             )}
           </div>
         </div>
+
+        {/* Mobile summary text */}
+        <div className="sm:hidden px-4 py-3">
+          <p className="text-[12px] leading-relaxed text-slate-500">{score.summary}</p>
+          {preliminary && (
+            <p className="mt-1 text-[10px] text-amber-600 font-medium">
+              Short session — scores are preliminary.
+            </p>
+          )}
+        </div>
       </div>
 
-      {/* Score breakdown */}
-      <div className="grid gap-4 p-5 sm:grid-cols-2">
+      {/* Score breakdown — single column on mobile */}
+      <div className="grid gap-3 p-4 sm:gap-4 sm:p-5 sm:grid-cols-2">
         <ScoreBar
           label="Composure"
           value={score.composure}

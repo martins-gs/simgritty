@@ -30,7 +30,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-border/60 bg-sidebar">
+    <aside className="hidden md:flex h-screen w-56 shrink-0 flex-col border-r border-border/60 bg-sidebar">
       <div className="flex h-12 items-center px-5">
         <Link href="/dashboard" className="flex items-center gap-2">
           <div className="h-6 w-6 rounded bg-primary flex items-center justify-center">

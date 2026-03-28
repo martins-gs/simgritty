@@ -239,10 +239,10 @@ export default function ReviewPage() {
 
   return (
     <AppShell>
-      <div className="space-y-6">
+      <div className="space-y-4 sm:space-y-6 px-1 sm:px-0">
         {/* Header */}
         <div>
-          <h1 className="text-2xl font-bold">{scenarioTitle}</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">{scenarioTitle}</h1>
           <div className="mt-2 flex flex-wrap gap-2">
             <Badge variant={session.status === "completed" ? "default" : "destructive"}>
               {session.exit_type === "instant_exit" ? "Exited early" : session.status}
@@ -320,47 +320,47 @@ export default function ReviewPage() {
         )}
 
         {/* Summary Cards */}
-        <div className="grid gap-4 sm:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 sm:gap-4">
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Turns</CardTitle>
+            <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
+              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Turns</CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{turns.length}</p>
+            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+              <p className="text-xl sm:text-2xl font-bold">{turns.length}</p>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Events</CardTitle>
+            <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
+              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Peak Level</CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{events.length}</p>
+            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+              <p className="text-xl sm:text-2xl font-bold">{session.peak_escalation_level ?? "N/A"}</p>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Peak Level</CardTitle>
+            <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
+              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Exit Type</CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{session.peak_escalation_level ?? "N/A"}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Exit Type</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold capitalize">
+            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+              <p className="text-xl sm:text-2xl font-bold capitalize">
                 {session.exit_type?.replace(/_/g, " ") ?? "N/A"}
               </p>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Clinician Audio</CardTitle>
+          <Card className="hidden sm:block">
+            <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
+              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Events</CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{clinicianAudioHeadline}</p>
+            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+              <p className="text-xl sm:text-2xl font-bold">{events.length}</p>
+            </CardContent>
+          </Card>
+          <Card className="hidden lg:block">
+            <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
+              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Clinician Audio</CardTitle>
+            </CardHeader>
+            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
+              <p className="text-xl sm:text-2xl font-bold">{clinicianAudioHeadline}</p>
               {clinicianAudioSubtext && (
                 <p className="mt-1 text-xs text-muted-foreground">
                   {clinicianAudioSubtext}
@@ -401,21 +401,23 @@ export default function ReviewPage() {
 
           <TabsContent value="transcript" className="mt-4">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between gap-4">
+              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
                 <div>
-                  <CardTitle>Transcript</CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    Select a turn to anchor notes or restart from that exact snapshot.
+                  <CardTitle className="text-base">Transcript</CardTitle>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    Select a turn to anchor notes or restart from that point.
                   </p>
                 </div>
                 <Button
+                  size="sm"
                   onClick={handleRestartFromSelectedTurn}
                   disabled={!canRestartFromSelectedTurn || restarting}
+                  className="w-full sm:w-auto"
                 >
-                  {restarting ? "Restarting..." : "Restart From Selected Turn"}
+                  {restarting ? "Restarting..." : "Restart From Turn"}
                 </Button>
               </CardHeader>
-              <CardContent className="p-0 h-[500px]">
+              <CardContent className="p-0 h-[60vh] sm:h-[500px]">
                 <TranscriptViewer
                   turns={turns}
                   onTurnSelect={setSelectedTurnId}
@@ -428,7 +430,7 @@ export default function ReviewPage() {
 
           <TabsContent value="events" className="mt-4">
             <Card>
-              <CardContent className="p-0 h-[500px]">
+              <CardContent className="p-0 h-[60vh] sm:h-[500px]">
                 <EventLog
                   events={events}
                   sessionStartedAt={session.started_at || session.created_at}
@@ -439,7 +441,7 @@ export default function ReviewPage() {
 
           <TabsContent value="notes" className="mt-4">
             <Card>
-              <CardContent className="p-0 h-[500px]">
+              <CardContent className="p-0 h-[60vh] sm:h-[500px]">
                 <EducatorNotes
                   sessionId={sessionId}
                   notes={notes}

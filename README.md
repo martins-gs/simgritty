@@ -162,7 +162,7 @@ src/
 │   └── api/                      # API routes (see below)
 │
 ├── components/
-│   ├── layout/                   # AppShell, Sidebar, TopBar
+│   ├── layout/                   # AppShell, Sidebar (hidden on mobile), TopBar (includes mobile nav)
 │   ├── simulation/               # Waveform, LiveTranscript, EscalationMeter, ConsentGate
 │   ├── scenarios/                # ScenarioForm, TraitDialPanel, VoiceConfigPanel, ArchetypeSelector, ScoringConfigPanel, MilestonesEditor
 │   ├── review/                   # TranscriptViewer, EscalationTimeline, EventLog, ScoreCard, KeyMoments, ReflectionPrompt, EducatorNotes
