@@ -14,14 +14,6 @@ export interface TraitDialDefinition {
 export const TRAIT_DIALS: TraitDialDefinition[] = [
   // Emotional
   {
-    key: "emotional_intensity",
-    label: "Emotional Intensity",
-    description: "Overall strength of emotional expression",
-    category: "emotional",
-    min: 0, max: 10,
-    lowLabel: "Flat", highLabel: "Extreme",
-  },
-  {
     key: "hostility",
     label: "Hostility",
     description: "Degree of hostility directed at the clinician",

@@ -63,7 +63,6 @@ export default function EditScenarioPage() {
         milestones,
         ...(traits && {
           traits: {
-            emotional_intensity: traits.emotional_intensity,
             hostility: traits.hostility,
             frustration: traits.frustration,
             impatience: traits.impatience,

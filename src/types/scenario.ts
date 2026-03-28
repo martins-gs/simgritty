@@ -4,7 +4,6 @@ export type ScenarioStatus = "draft" | "published" | "archived";
 export type BiasCategory = string;
 
 export interface ScenarioTraits {
-  emotional_intensity: number; // 0-10
   hostility: number;
   frustration: number;
   impatience: number;
@@ -95,7 +94,6 @@ export interface ScenarioTemplate {
 }
 
 export const DEFAULT_TRAITS: ScenarioTraits = {
-  emotional_intensity: 5,
   hostility: 3,
   frustration: 5,
   impatience: 5,

@@ -12,7 +12,7 @@ Built with Next.js 16, OpenAI Realtime API (WebRTC), and Supabase.
 - **AI clinician bot** — press "De-escalate" to hand off to an expert bot that models best practice, then take back over
 - **Session forking** — restart from any turn in a completed session to try a different approach
 - **Performance scoring** — 0-100 score across four dimensions (composure, de-escalation, clinical task maintenance, support seeking) with scenario-defined weights and qualitative labels (Strong / Developing / Needs practice)
-- **Scenario builder** — 16 personality trait dials, voice configuration, escalation rules, archetype presets, clinical milestones, and scoring weights
+- **Scenario builder** — 15 personality trait dials, voice configuration, escalation rules, archetype presets, clinical milestones, and scoring weights
 - **Review & reflection** — escalation timeline, annotated transcript, key moments, technique suggestions, event log, educator notes, and trainee reflection prompts
 - **Organisation governance** — ceiling caps, consent gates, content warnings, session duration limits
 
@@ -123,8 +123,8 @@ SimGritty uses Supabase Postgres. Apply migrations from `supabase/migrations/` o
 
 ### Key Schema Details
 
-**`scenario_traits`** — 16 numeric dials (0-10):
-emotional_intensity, hostility, frustration, impatience, trust, willingness_to_listen, sarcasm, bias_intensity, volatility, boundary_respect, coherence, repetition, entitlement, interruption_likelihood, escalation_tendency, plus bias_category (string).
+**`scenario_traits`** — 15 numeric dials (0-10):
+hostility, frustration, impatience, trust, willingness_to_listen, sarcasm, bias_intensity, volatility, boundary_respect, coherence, repetition, entitlement, interruption_likelihood, escalation_tendency, plus bias_category (string).
 
 **`simulation_sessions`** supports forking:
 - `forked_from_session_id` / `forked_from_turn_index` — restart from a specific turn

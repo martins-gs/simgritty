@@ -35,7 +35,7 @@ export const ARCHETYPE_PRESETS: ArchetypePreset[] = [
       pre_simulation_briefing_text: "You are a registrar on a medical ward. A relative of one of your patients approaches you in the corridor. They have been waiting for some time and appear frustrated. Your goal is to listen, acknowledge their concerns, and provide a clear update.",
     },
     traits: {
-      emotional_intensity: 6, hostility: 3, frustration: 7, impatience: 6,
+      hostility: 3, frustration: 7, impatience: 6,
       trust: 4, willingness_to_listen: 5, sarcasm: 2, bias_intensity: 0,
       bias_category: "none", volatility: 4, boundary_respect: 6, coherence: 8,
       repetition: 5, entitlement: 3, interruption_likelihood: 4, escalation_tendency: 5,
@@ -65,7 +65,7 @@ export const ARCHETYPE_PRESETS: ArchetypePreset[] = [
       pre_simulation_briefing_text: "You are a GP receptionist handling phone calls. A patient is calling to demand an urgent same-day appointment. All slots are full. You need to maintain a professional boundary while being helpful and offering appropriate alternatives.",
     },
     traits: {
-      emotional_intensity: 5, hostility: 4, frustration: 6, impatience: 8,
+      hostility: 4, frustration: 6, impatience: 8,
       trust: 3, willingness_to_listen: 3, sarcasm: 4, bias_intensity: 0,
       bias_category: "none", volatility: 3, boundary_respect: 2, coherence: 8,
       repetition: 7, entitlement: 8, interruption_likelihood: 6, escalation_tendency: 6,
@@ -95,7 +95,7 @@ export const ARCHETYPE_PRESETS: ArchetypePreset[] = [
       pre_simulation_briefing_text: "You are a nurse in the emergency department. A patient has been triaged and is waiting for treatment. They are in pain and have started making inappropriate and discriminatory remarks. Your goal is to maintain professionalism, set boundaries on unacceptable behaviour, and continue to provide care.",
     },
     traits: {
-      emotional_intensity: 8, hostility: 7, frustration: 6, impatience: 7,
+      hostility: 7, frustration: 6, impatience: 7,
       trust: 1, willingness_to_listen: 2, sarcasm: 5, bias_intensity: 7,
       bias_category: "racial", volatility: 6, boundary_respect: 2, coherence: 6,
       repetition: 5, entitlement: 6, interruption_likelihood: 7, escalation_tendency: 7,
@@ -125,7 +125,7 @@ export const ARCHETYPE_PRESETS: ArchetypePreset[] = [
       pre_simulation_briefing_text: "You are a registrar. You need to speak with the spouse of a patient whose condition has deteriorated significantly overnight. The spouse is in the family room and does not yet know the extent of the situation. Your goal is to communicate the situation clearly and compassionately.",
     },
     traits: {
-      emotional_intensity: 9, hostility: 2, frustration: 4, impatience: 3,
+      hostility: 2, frustration: 4, impatience: 3,
       trust: 5, willingness_to_listen: 6, sarcasm: 0, bias_intensity: 0,
       bias_category: "none", volatility: 7, boundary_respect: 7, coherence: 5,
       repetition: 6, entitlement: 2, interruption_likelihood: 3, escalation_tendency: 4,
@@ -155,7 +155,7 @@ export const ARCHETYPE_PRESETS: ArchetypePreset[] = [
       pre_simulation_briefing_text: "You are a registrar on a medical ward. You have been stopped in the corridor by the daughter of an elderly patient admitted overnight. She has been waiting for three hours and is visibly distressed and angry. Your goal is to de-escalate, listen, and provide information.",
     },
     traits: {
-      emotional_intensity: 8, hostility: 6, frustration: 9, impatience: 8,
+      hostility: 6, frustration: 9, impatience: 8,
       trust: 2, willingness_to_listen: 3, sarcasm: 6, bias_intensity: 0,
       bias_category: "none", volatility: 7, boundary_respect: 4, coherence: 8,
       repetition: 7, entitlement: 5, interruption_likelihood: 8, escalation_tendency: 8,

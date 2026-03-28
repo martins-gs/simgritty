@@ -33,7 +33,6 @@ const scenarioSchema = z.object({
   scoring_weights: scoringWeightsSchema.nullable().default(null),
   milestones: z.array(milestoneSchema).max(5).default([]),
   traits: z.object({
-    emotional_intensity: z.number().min(0).max(10),
     hostility: z.number().min(0).max(10),
     frustration: z.number().min(0).max(10),
     impatience: z.number().min(0).max(10),
