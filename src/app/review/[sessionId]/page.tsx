@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { TranscriptViewer } from "@/components/review/TranscriptViewer";
@@ -79,6 +79,9 @@ export default function ReviewPage() {
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [restarting, setRestarting] = useState(false);
+  const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
+  const [recordingStartedAt, setRecordingStartedAt] = useState<string | null>(null);
+  const audioFetchedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +108,22 @@ export default function ReviewPage() {
       setEvents(nextEvents);
       setNotes(nextNotes);
       setLoading(false);
+
+      // Fetch audio recording URL if available (non-blocking, once only)
+      if (nextSession?.recording_path && !audioFetchedRef.current) {
+        audioFetchedRef.current = true;
+        fetch(`/api/sessions/${sessionId}/audio`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => {
+            if (!cancelled && data?.url) {
+              setRecordingUrl(data.url);
+              if (data.recordingStartedAt) {
+                setRecordingStartedAt(data.recordingStartedAt);
+              }
+            }
+          })
+          .catch(() => {});
+      }
 
       if (attempts >= 8 || !needsReviewRefresh(nextSession, nextTurns, nextEvents)) {
         return;
@@ -423,6 +442,8 @@ export default function ReviewPage() {
                   onTurnSelect={setSelectedTurnId}
                   selectedTurnId={selectedTurnId}
                   clinicianAudioByTurnIndex={clinicianAudioByTurnIndex}
+                  sessionRecordingUrl={recordingUrl}
+                  sessionStartedAt={recordingStartedAt ?? session.started_at}
                 />
               </CardContent>
             </Card>

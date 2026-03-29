@@ -485,5 +485,6 @@ export function useRealtimeSession() {
     setMicEnabled,
     setMicForcedOff,
     audioElRef,
+    localStreamRef,
   };
 }

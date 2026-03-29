@@ -50,6 +50,7 @@ export interface SimulationSession {
   trainee_consented_at: string | null;
   final_escalation_level: number | null;
   peak_escalation_level: number | null;
+  recording_path: string | null;
   created_at: string;
 }
 

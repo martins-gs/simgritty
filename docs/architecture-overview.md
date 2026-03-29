@@ -22,8 +22,13 @@ flowchart LR
 
   Sim --> Domain["promptBuilder\nescalationEngine\nclassifierPipeline\nstructuredVoice\nclinicianVoiceBuilder"]
 
+  Sim --> Recorder["useSessionRecorder\nMediaRecorder on merged\nmic + remote streams"]
+
   Sim --> SessionAPI["/api/sessions/*\n/api/scenarios/*"]
   SessionAPI --> Supabase["Supabase Auth + Postgres\nscenario tables\nsession/transcript/events/notes"]
+
+  Recorder --> AudioAPI["/api/sessions/:id/audio\nupload + signed URL"]
+  AudioAPI --> Storage["Supabase Storage\nsimulation-audio bucket"]
 ```
 
 ## 1. Core Runtime
@@ -32,6 +37,7 @@ The live simulation is orchestrated from `src/app/simulation/[sessionId]/page.ts
 
 - **Patient conversation path** via `src/hooks/useRealtimeSession.ts`: handles the primary WebRTC session, trainee microphone input, patient audio playback, input transcription events, mic gating, and `session.update` prompt refreshes.
 - **Clinician voice path** via `src/hooks/useRealtimeVoiceRenderer.ts`: a second, separate WebRTC connection used only when the bot clinician speaks.
+- **Session audio recording** via `src/hooks/useSessionRecorder.ts`: merges the trainee's local mic stream and the AI's remote audio stream into a single mixed recording using `AudioContext` + `MediaStreamDestination` and records continuously with `MediaRecorder`. The recording runs passively alongside the simulation with zero per-turn overhead. On session end, the blob is uploaded to Supabase Storage and the path is persisted on the session record.
 
 The server route `src/app/api/realtime/session/route.ts` creates ephemeral Realtime sessions. The default realtime model is `gpt-realtime-1.5`, and patient-session input transcription is configured with `gpt-4o-mini-transcribe`.
 
@@ -203,7 +209,8 @@ Each preset bundles scenario defaults, a full trait profile, voice configuration
 Supabase stores:
 
 - authored scenarios (`scenario_templates`, `scenario_traits`, `scenario_voice_config`, `escalation_rules`, `scenario_milestones`)
-- live and completed sessions (`simulation_sessions` with frozen `scenario_snapshot`)
+- live and completed sessions (`simulation_sessions` with frozen `scenario_snapshot`, `recording_path`, `recording_started_at`)
+- session audio recordings (Supabase Storage bucket `simulation-audio`, private, one `.webm` file per session)
 - transcript turns (`transcript_turns` with per-turn snapshots: `classifier_result`, `trigger_type`, `state_after`, `patient_voice_profile_after`, `patient_prompt_after`)
 - simulation state events (`simulation_state_events` — event types: `session_started`, `session_ended`, `escalation_change`, `de_escalation_change`, `ceiling_reached`, `trainee_exit`, `classification_result`, `clinician_audio`, `prompt_update`, `error`)
 - session scores and evidence (`session_scores`, `session_score_evidence`)
@@ -234,6 +241,15 @@ The review page displays:
 - **Tabs**: Transcript, Event Log, Educator Notes.
 - **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data.
 
-The `TranscriptViewer` displays per-turn audio delivery badges, and the `EventLog` renders clinician audio events with path, timing, and error details.
+The `TranscriptViewer` displays per-turn audio delivery badges, and the `EventLog` renders clinician audio events with path, timing, and error details. When a session has a recording, each trainee and patient turn shows a play button that seeks to the correct offset in the full session recording and plays the audio for that utterance.
+
+### Session Audio Recording And Playback
+
+Each simulation session is continuously recorded as a single mixed audio file (trainee mic + AI remote audio). The recording is uploaded to Supabase Storage (`simulation-audio` bucket) at session end via `POST /api/sessions/:id/audio`, which also persists `recording_path` and `recording_started_at` on the session record.
+
+On the review page, `GET /api/sessions/:id/audio` returns a time-limited signed URL. The `TranscriptViewer` calculates per-turn seek offsets relative to `recording_started_at` (the exact timestamp when `MediaRecorder.start()` was called, not `session.started_at` which is set earlier during session init). Offset calculation accounts for the fact that transcript `started_at` timestamps represent speech *end* rather than speech *start*:
+
+- **Trainee turns**: seek to the previous AI turn's `started_at` (AI speech end ≈ trainee speech start).
+- **Patient/AI turns**: seek to the previous trainee turn's `started_at` minus a 3-second buffer, because the AI begins responding before the trainee's transcript event arrives.
 
 Forking is session-based rather than template-based: a new session can be created from an earlier session and turn index, reusing the frozen scenario snapshot and the saved turn/state history. Fork metadata tracks `parent_session_id`, `forked_from_session_id`, `forked_from_turn_index`, `fork_label`, and `branch_depth`.

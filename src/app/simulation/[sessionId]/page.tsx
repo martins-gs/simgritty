@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useSimulationStore } from "@/store/simulationStore";
 import { useRealtimeSession } from "@/hooks/useRealtimeSession";
 import { useRealtimeVoiceRenderer } from "@/hooks/useRealtimeVoiceRenderer";
+import { useSessionRecorder } from "@/hooks/useSessionRecorder";
 import { EscalationEngine } from "@/lib/engine/escalationEngine";
 import { buildPrompt } from "@/lib/engine/promptBuilder";
 import {
@@ -117,12 +118,21 @@ export default function SimulationPage() {
     setMicForcedOff,
     sendEvent,
     audioElRef,
+    localStreamRef,
   } = useRealtimeSession();
   const {
     connect: connectClinicianRenderer,
     disconnect: disconnectClinicianRenderer,
     speakText: speakWithClinicianRenderer,
   } = useRealtimeVoiceRenderer();
+
+  const {
+    start: startRecording,
+    addRemoteStream: addRecordingRemoteStream,
+    stop: stopRecording,
+    dispose: disposeRecorder,
+    getStartedAt: getRecordingStartedAt,
+  } = useSessionRecorder();
 
   const connectionStatus = useSimulationStore((s) => s.connectionStatus);
   const micMuted = useSimulationStore((s) => s.micMuted);
@@ -287,6 +297,26 @@ export default function SimulationPage() {
         });
         if (cancelled) { disconnect(); return; }
 
+        // Start continuous audio recording (mixed mic + AI)
+        const localStream = localStreamRef.current;
+        const remoteStream = audioElRef.current?.srcObject as MediaStream | null;
+        if (localStream) {
+          startRecording(localStream, remoteStream);
+          // If the remote stream hasn't arrived yet, add it when the audio
+          // element gets a source (the ontrack handler sets srcObject async).
+          if (!remoteStream) {
+            const pollRemote = setInterval(() => {
+              const rs = audioElRef.current?.srcObject as MediaStream | null;
+              if (rs && rs.getAudioTracks().length > 0) {
+                clearInterval(pollRemote);
+                addRecordingRemoteStream(rs);
+              }
+            }, 200);
+            // Stop polling after 30s to avoid leaks
+            setTimeout(() => clearInterval(pollRemote), 30_000);
+          }
+        }
+
         const baseElapsed = session.started_at
           ? Math.max(0, Math.round((Date.now() - new Date(session.started_at).getTime()) / 1000))
           : 0;
@@ -300,7 +330,7 @@ export default function SimulationPage() {
       }
     }
     init();
-    return () => { cancelled = true; abortController.abort(); if (timerRef.current) clearInterval(timerRef.current); disconnect(); };
+    return () => { cancelled = true; abortController.abort(); if (timerRef.current) clearInterval(timerRef.current); disconnect(); disposeRecorder(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
@@ -1202,7 +1232,38 @@ export default function SimulationPage() {
     stopBot();
     cancelCurrentResponse();
     await new Promise((r) => setTimeout(r, 50));
+
+    // Stop the recorder BEFORE disconnect — disconnect tears down the
+    // MediaStream tracks which would leave the MediaRecorder with no input.
+    const recordingBlob = await stopRecording().catch((err) => {
+      console.error("[SessionRecorder] Failed to stop recording", err);
+      return null;
+    });
+
     disconnect();
+
+    // Upload the recording in parallel with end-session persistence
+    const audioUploadPromise = recordingBlob
+      ? fetch(`/api/sessions/${sessionId}/audio`, {
+          method: "POST",
+          body: (() => {
+            const fd = new FormData();
+            fd.append(
+              "file",
+              recordingBlob,
+              `recording.${recordingBlob.type.includes("mp4") ? "mp4" : "webm"}`
+            );
+            const recStartedAt = getRecordingStartedAt();
+            if (recStartedAt) {
+              fd.append("recording_started_at", recStartedAt);
+            }
+            return fd;
+          })(),
+        }).catch((err) => {
+          console.error("[SessionRecorder] Audio upload failed", err);
+        })
+      : Promise.resolve();
+
     await trackPersistence(
       persistRequest(
         `session end ${exitType}`,
@@ -1220,6 +1281,7 @@ export default function SimulationPage() {
       )
     );
     await flushPendingPersistence();
+    await audioUploadPromise;
     router.push(`/review/${sessionId}`);
   }
 

@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { ArrowUp, ArrowDown, Minus } from "lucide-react";
+import { AudioPlayButton } from "@/components/review/AudioPlayButton";
 import type { TranscriptTurn, ClassifierResult, ClinicianAudioPayload } from "@/types/simulation";
 import type { EscalationState } from "@/types/escalation";
 import { ESCALATION_LABELS } from "@/types/escalation";
@@ -13,6 +14,10 @@ interface TranscriptViewerProps {
   onTurnSelect?: (turnId: string) => void;
   selectedTurnId?: string | null;
   clinicianAudioByTurnIndex?: Map<number, ClinicianAudioPayload>;
+  /** Signed URL for the session's full audio recording */
+  sessionRecordingUrl?: string | null;
+  /** ISO timestamp of when the session started (used to calculate seek offsets) */
+  sessionStartedAt?: string | null;
 }
 
 function getSpeakerLabel(speaker: string): string {
@@ -62,7 +67,12 @@ export function TranscriptViewer({
   onTurnSelect,
   selectedTurnId,
   clinicianAudioByTurnIndex,
+  sessionRecordingUrl,
+  sessionStartedAt,
 }: TranscriptViewerProps) {
+  const sessionStartMs = sessionStartedAt
+    ? new Date(sessionStartedAt).getTime()
+    : null;
   // Build a map of each turn's "before" level by tracking state across turns.
   // Only trainee and system (AI clinician) turns update the tracked level because
   // patient turns never change the score and their state_after may be stale due
@@ -95,6 +105,55 @@ export function TranscriptViewer({
             stateAfter !== null;
           const levelBefore = levelBeforeMap.get(turn.id) ?? 3;
 
+          // Audio playback offset calculation.
+          //
+          // started_at on transcript turns ≈ when the transcript event was
+          // *received*, which is close to speech END (not start).
+          //
+          // For TRAINEE turns the previous turn is an AI turn whose
+          // started_at ≈ AI speech end ≈ trainee speech start. Works well.
+          //
+          // For AI/PATIENT turns the previous turn is a trainee turn whose
+          // started_at arrives at roughly the same time as (or slightly
+          // after) the AI already begins speaking. So we need to seek a
+          // few seconds earlier to catch the AI response from the start.
+          const canPlayAudio =
+            sessionRecordingUrl &&
+            sessionStartMs &&
+            (turn.speaker === "trainee" || turn.speaker === "ai");
+
+          let audioStartOffset = 0;
+          let audioEndOffset = 30;
+          if (canPlayAudio) {
+            const turnIdx = turns.indexOf(turn);
+            const prevTurn = turnIdx > 0 ? turns[turnIdx - 1] : null;
+            const thisEndMs = new Date(turn.started_at).getTime();
+
+            if (prevTurn) {
+              const prevEndSec =
+                (new Date(prevTurn.started_at).getTime() - sessionStartMs) / 1000;
+
+              if (turn.speaker === "ai") {
+                // AI speech starts roughly when the trainee stops speaking,
+                // which is a few seconds BEFORE the trainee transcript
+                // arrives. Seek earlier to capture the full AI response.
+                const AI_SEEK_BUFFER_S = 3;
+                audioStartOffset = Math.max(0, prevEndSec - AI_SEEK_BUFFER_S);
+              } else {
+                // Trainee: previous AI turn's end ≈ trainee speech start
+                audioStartOffset = Math.max(0, prevEndSec);
+              }
+            }
+
+            // End: this turn's started_at (≈ this turn's speech end)
+            audioEndOffset = (thisEndMs - sessionStartMs) / 1000;
+
+            // Safety: ensure end > start, cap at +30s if something looks wrong
+            if (audioEndOffset <= audioStartOffset) {
+              audioEndOffset = audioStartOffset + 30;
+            }
+          }
+
           return (
             <div
               key={turn.id}
@@ -118,6 +177,13 @@ export function TranscriptViewer({
                   <span className="text-[10px] text-muted-foreground tabular-nums">
                     {new Date(turn.started_at).toLocaleTimeString()}
                   </span>
+                  {canPlayAudio && (
+                    <AudioPlayButton
+                      audioUrl={sessionRecordingUrl!}
+                      startOffset={audioStartOffset}
+                      endOffset={audioEndOffset}
+                    />
+                  )}
                 </div>
                 {showImpact && (
                   <EscalationImpact
