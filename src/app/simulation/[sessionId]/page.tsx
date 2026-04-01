@@ -167,6 +167,7 @@ export default function SimulationPage() {
   const botAbortRef = useRef<AbortController | null>(null);
   const patientVoiceProfileRef = useRef<StructuredVoiceProfile | null>(null);
   const patientPromptRef = useRef<string | null>(null);
+  const completedMilestonesRef = useRef<Set<string>>(new Set());
   const patientVoiceRequestRef = useRef(0);
   const pendingPatientReplyUpdateRef = useRef<Promise<PatientReplyUpdateResult | null> | null>(null);
   const patientReplyUpdateRequestRef = useRef(0);
@@ -262,6 +263,13 @@ export default function SimulationPage() {
             technique: latestCurrentSnapshot.classifierResult.technique,
             effectiveness: latestCurrentSnapshot.classifierResult.effectiveness,
           });
+        }
+
+        // Recover completed milestones from persisted turns so the classifier
+        // doesn't re-flag already-completed milestones on session resume
+        for (const turn of allTurns) {
+          const milestoneId = turn.classifier_result?.clinical_milestone_completed;
+          if (milestoneId) completedMilestonesRef.current.add(milestoneId);
         }
 
         const recentTurns = inheritedEntries
@@ -1162,7 +1170,7 @@ export default function SimulationPage() {
     try {
       const classifyRes = await fetch("/api/classify", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ utterance: text, context: { recentTurns, scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`, currentEscalation: engineRef.current.getLevel(), milestones: ((snapshot as Record<string, unknown>).scenario_milestones as { id: string; description: string; classifier_hint: string }[] | undefined)?.map((m) => ({ id: m.id, description: m.description, classifier_hint: m.classifier_hint })) } }),
+        body: JSON.stringify({ utterance: text, context: { recentTurns, scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`, currentEscalation: engineRef.current.getLevel(), milestones: ((snapshot as Record<string, unknown>).scenario_milestones as { id: string; description: string; classifier_hint: string }[] | undefined)?.filter((m) => !completedMilestonesRef.current.has(m.id)).map((m) => ({ id: m.id, description: m.description, classifier_hint: m.classifier_hint })) } }),
       });
       if (!classifyRes.ok) {
         console.error("[Escalation] Classify API failed:", classifyRes.status);
@@ -1174,6 +1182,9 @@ export default function SimulationPage() {
       }
       classResult = await classifyRes.json();
       setLastClassification({ technique: classResult!.technique, effectiveness: classResult!.effectiveness });
+      if (classResult!.clinical_milestone_completed) {
+        completedMilestonesRef.current.add(classResult!.clinical_milestone_completed);
+      }
       console.log("[Escalation] Classifier:", classResult);
 
       prevState = engineRef.current.getState();

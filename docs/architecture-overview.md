@@ -76,7 +76,7 @@ There are three GPT-5.4-mini structured-output routes, all using the Responses A
 
 The classifier pipeline has **three modes**:
 
-- `trainee_utterance` — uses an extended Zod schema (`TRAINEE_SCORING_SCHEMA`) that adds scoring fields: `composure_markers` (array of negative indicators), `de_escalation_attempt` (boolean), `de_escalation_technique` (technique label), and `clinical_milestone_completed` (milestone ID or null). When milestones are defined for the scenario, they are passed in the classifier context.
+- `trainee_utterance` — uses an extended Zod schema (`TRAINEE_SCORING_SCHEMA`) that adds scoring fields: `composure_markers` (array of negative indicators), `de_escalation_attempt` (boolean), `de_escalation_technique` (technique label), and `clinical_milestone_completed` (milestone ID or null). When milestones are defined for the scenario, only **uncompleted** milestones are passed in the classifier context — the simulation page tracks completed milestone IDs in a ref and filters them out before each classifier call, so the model focuses on detecting new completions rather than re-flagging the same one. On session resume or fork, completed milestone state is recovered from persisted transcript turns.
 - `patient_response`
 - `clinician_utterance`
 
@@ -171,7 +171,7 @@ All persistence calls from the simulation page (`persistTranscriptTurn`, `update
 
 - **Composure**: starts at 100, subtracts penalties when composure markers are detected (defensive language, dismissive responses, hostility mirroring, sarcasm). Multiple markers on one turn incur a 1.5× penalty.
 - **De-escalation**: measures the rate and effectiveness of de-escalation attempts. Score = attempt_rate × 0.4 + success_rate × 0.6. Effectiveness is measured by whether escalation level dropped after the attempt. Only turns where the patient is actively escalated count.
-- **Clinical Task Maintenance** (optional): ratio of completed milestones to total milestones defined for the scenario. Excluded entirely if no milestones are defined.
+- **Clinical Task Maintenance** (optional): ratio of completed milestones to total milestones defined for the scenario. Excluded entirely if no milestones are defined. Milestones are tracked silently during the session (not shown to the trainee) and appear on the review page as natural clinical evidence rather than checklist items.
 - **Support Seeking**: starts at a baseline of 70. Each bot clinician invocation at or above the scenario's support threshold adds +15; below the threshold subtracts -15. Sustained critical escalation without help-seeking incurs additional penalties.
 
 The overall score is a weighted average using scenario-defined weights (or equal defaults). When clinical task is excluded, weights are renormalized across the remaining three dimensions.

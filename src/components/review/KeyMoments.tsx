@@ -33,7 +33,7 @@ const EVIDENCE_DESCRIPTIONS: Record<string, (data: Record<string, unknown>) => s
   },
   milestone_completed: (data) => {
     const desc = data.description as string | undefined;
-    return desc ? `Milestone completed: ${desc}` : "Clinical milestone completed";
+    return desc ? `Addressed the clinical need: ${desc}` : "Addressed a clinical need during the conversation";
   },
   support_invoked: (data) => {
     const appropriate = data.appropriate as boolean;

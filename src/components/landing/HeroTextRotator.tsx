@@ -48,11 +48,16 @@ export function HeroTextRotator() {
         .hero-rotator-strip {
           display: flex;
           flex-direction: column;
-          transition: none;
         }
         .hero-rotator-strip.rolling {
-          transition: transform 500ms cubic-bezier(0.4, 0, 0.2, 1);
-          transform: translateY(-50%);
+          animation: hero-spring 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+        @keyframes hero-spring {
+          0%   { transform: translateY(0); }
+          50%  { transform: translateY(-54%); }
+          72%  { transform: translateY(-48.5%); }
+          88%  { transform: translateY(-50.8%); }
+          100% { transform: translateY(-50%); }
         }
         .hero-rotator-item {
           height: 1.15em;
@@ -63,7 +68,7 @@ export function HeroTextRotator() {
       <span className="hero-rotator" ref={containerRef}>
         <span
           className={`hero-rotator-strip${rolling ? " rolling" : ""}`}
-          onTransitionEnd={handleTransitionEnd}
+          onAnimationEnd={handleTransitionEnd}
         >
           <span className="hero-rotator-item font-bold" style={{ color: current.color }}>
             {current.text}
