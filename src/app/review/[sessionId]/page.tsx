@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import type {
   TranscriptTurn,
   SimulationStateEvent,
@@ -22,18 +23,37 @@ import type {
   SimulationSession,
   ClinicianAudioPayload,
 } from "@/types/simulation";
-import type { ScenarioMilestone, ScoringWeights } from "@/types/scenario";
+import {
+  getStoredEventKind,
+  parseClinicianAudioPayload,
+  parseEducatorNotes,
+  parseScenarioSnapshot,
+  parseSimulationEvents,
+  parseSimulationSession,
+  parseStringIdRecord,
+  parseTranscriptTurns,
+} from "@/lib/validation/schemas";
+
+async function readJsonSafely<T>(
+  res: Response,
+  parser: (data: unknown) => T,
+  fallback: T,
+  label: string
+): Promise<T> {
+  try {
+    return parser(await res.json());
+  } catch (error) {
+    console.error(`[Review] Failed to parse ${label} response`, error);
+    return fallback;
+  }
+}
 
 function isClinicianAudioEvent(
   event: SimulationStateEvent
-): event is SimulationStateEvent & { payload: ClinicianAudioPayload & { __event_kind?: string } } {
-  if (typeof event.payload !== "object" || event.payload === null || !("turn_index" in event.payload)) {
-    return false;
-  }
-
+): boolean {
   return (
     event.event_type === "clinician_audio" ||
-    (event.payload as { __event_kind?: string }).__event_kind === "clinician_audio"
+    getStoredEventKind(event.payload) === "clinician_audio"
   );
 }
 
@@ -46,7 +66,7 @@ function expectsClinicianAudio(
   }
 
   return events.some((event) => {
-    const payload = event.payload as { source?: string } | null;
+    const payload = parseClinicianAudioPayload(event.payload);
     return payload?.source === "bot_clinician";
   });
 }
@@ -97,10 +117,18 @@ export default function ReviewPage() {
       ]);
       if (cancelled) return;
 
-      const nextSession = sessionRes?.ok ? await sessionRes.json() as SimulationSession : null;
-      const nextTurns = turnsRes?.ok ? await turnsRes.json() as TranscriptTurn[] : [];
-      const nextEvents = eventsRes?.ok ? await eventsRes.json() as SimulationStateEvent[] : [];
-      const nextNotes = notesRes?.ok ? await notesRes.json() as EducatorNote[] : [];
+      const nextSession = sessionRes?.ok
+        ? await readJsonSafely(sessionRes, parseSimulationSession, null, "session")
+        : null;
+      const nextTurns = turnsRes?.ok
+        ? await readJsonSafely(turnsRes, parseTranscriptTurns, [], "transcript")
+        : [];
+      const nextEvents = eventsRes?.ok
+        ? await readJsonSafely(eventsRes, parseSimulationEvents, [], "events")
+        : [];
+      const nextNotes = notesRes?.ok
+        ? await readJsonSafely(notesRes, parseEducatorNotes, [], "notes")
+        : [];
       if (cancelled) return;
 
       setSession(nextSession);
@@ -155,8 +183,7 @@ export default function ReviewPage() {
   }
 
   const scenarioTitle =
-    (session as unknown as { scenario_templates?: { title?: string } })
-      .scenario_templates?.title || "Simulation";
+    session.scenario_templates?.title || "Simulation";
 
   const duration = session.started_at && session.ended_at
     ? Math.round(
@@ -171,27 +198,26 @@ export default function ReviewPage() {
   };
 
   // Extract scoring configuration from scenario snapshot
-  const snapshot = session.scenario_snapshot as Record<string, unknown>;
-  const milestones: ScenarioMilestone[] =
-    (snapshot.scenario_milestones as ScenarioMilestone[] | undefined) ?? [];
-  const scoringWeights: ScoringWeights | null =
-    (snapshot.scoring_weights as ScoringWeights | undefined) ?? null;
-  const supportThreshold: number | null =
-    (snapshot.support_threshold as number | undefined) ?? null;
-  const criticalThreshold: number | null =
-    (snapshot.critical_threshold as number | undefined) ?? null;
-  const learningObjectives: string =
-    (snapshot.learning_objectives as string | undefined) ?? "";
+  const snapshot = parseScenarioSnapshot(session.scenario_snapshot);
+  const milestones = snapshot.scenario_milestones;
+  const scoringWeights = snapshot.scoring_weights;
+  const supportThreshold = snapshot.support_threshold;
+  const criticalThreshold = snapshot.critical_threshold;
+  const learningObjectives = snapshot.learning_objectives;
 
   // Clinician audio stats (unchanged from before)
-  const clinicianAudioEvents = events.filter(isClinicianAudioEvent);
+  const clinicianAudioEvents = events
+    .filter(isClinicianAudioEvent)
+    .flatMap((event) => {
+      const payload = parseClinicianAudioPayload(event.payload);
+      return payload ? [{ event, payload }] : [];
+    });
   const clinicianAudioByTurnIndex = new Map<number, ClinicianAudioPayload>();
-  for (const event of clinicianAudioEvents) {
-    clinicianAudioByTurnIndex.set((event.payload as ClinicianAudioPayload).turn_index, event.payload as ClinicianAudioPayload);
+  for (const { payload } of clinicianAudioEvents) {
+    clinicianAudioByTurnIndex.set(payload.turn_index, payload);
   }
   const clinicianAudioStats = clinicianAudioEvents.reduce(
-    (acc, event) => {
-      const payload = event.payload as ClinicianAudioPayload;
+    (acc, { payload }) => {
       acc.total++;
       if (payload.path === "tts") acc.tts++;
       if (payload.path === "realtime" && payload.realtime_outcome === "completed") acc.realtimeCompleted++;
@@ -248,11 +274,15 @@ export default function ReviewPage() {
     });
 
     if (!res.ok) {
+      toast.error("Failed to create forked session");
       setRestarting(false);
       return;
     }
 
-    const forked = await res.json() as { id: string };
+    const forked = parseStringIdRecord(await res.json());
+    if (!forked) {
+      throw new Error("Fork response invalid");
+    }
     router.push(`/simulation/${forked.id}`);
   }
 
@@ -398,10 +428,7 @@ export default function ReviewPage() {
             {session.started_at ? (
               <EscalationTimeline
                 events={events}
-                maxCeiling={
-                  (session.scenario_snapshot as { escalation_rules?: { max_ceiling?: number } })
-                    ?.escalation_rules?.max_ceiling ?? 8
-                }
+                maxCeiling={snapshot.escalation_rules[0]?.max_ceiling ?? 8}
                 sessionStartedAt={session.started_at}
               />
             ) : (

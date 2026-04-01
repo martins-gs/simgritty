@@ -11,8 +11,12 @@ export const config = {
      * Match all paths except:
      * - _next/static, _next/image
      * - favicon, images
-     * - API routes (they handle auth themselves)
+     *
+     * API routes ARE included so that Supabase auth tokens get
+     * refreshed before Route Handlers run — otherwise long-lived
+     * sessions (e.g. simulations) fail with 401 once the access
+     * token expires.
      */
-    "/((?!_next/static|_next/image|api/|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

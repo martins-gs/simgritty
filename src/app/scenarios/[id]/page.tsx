@@ -13,13 +13,27 @@ export default function EditScenarioPage() {
   const { id } = useParams<{ id: string }>();
   const loadScenario = useScenarioStore((s) => s.loadScenario);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [status, setStatus] = useState<string>("draft");
   const [creatorName, setCreatorName] = useState<string | null>(null);
+  const [orgMaxCeiling, setOrgMaxCeiling] = useState<number>(10);
 
   useEffect(() => {
+    // Fetch org ceiling in parallel with scenario data
+    fetch("/api/org-settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => {
+        if (s?.max_escalation_ceiling) setOrgMaxCeiling(s.max_escalation_ceiling);
+      })
+      .catch(() => {});
+
     async function load() {
       const res = await fetch(`/api/scenarios/${id}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        setLoadError(true);
+        setLoading(false);
+        return;
+      }
       const data = await res.json();
 
       // Flatten the nested relations into the store shape
@@ -118,6 +132,22 @@ export default function EditScenarioPage() {
     );
   }
 
+  if (loadError) {
+    return (
+      <AppShell>
+        <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
+          <p>Failed to load scenario.</p>
+          <Link
+            href="/scenarios"
+            className="text-[13px] font-medium text-primary hover:underline"
+          >
+            Back to scenarios
+          </Link>
+        </div>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell>
       <div className="space-y-5">
@@ -147,7 +177,7 @@ export default function EditScenarioPage() {
             Run simulation
           </Link>
         </div>
-        <ScenarioForm scenarioId={id} />
+        <ScenarioForm scenarioId={id} orgMaxCeiling={orgMaxCeiling} />
       </div>
     </AppShell>
   );

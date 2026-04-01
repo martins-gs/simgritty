@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { parseRequestJson } from "@/lib/validation/http";
+import {
+  transcriptTurnCreateRequestBodySchema,
+  transcriptTurnPatchRequestBodySchema,
+} from "@/lib/validation/schemas";
 
 function isSnapshotColumnError(message: string) {
   return [
@@ -41,7 +46,10 @@ export async function POST(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await request.json();
+  const parsed = await parseRequestJson(request, transcriptTurnCreateRequestBodySchema);
+  if (!parsed.success) return parsed.response;
+
+  const body = parsed.data;
 
   const baseInsert = {
     session_id: id,
@@ -85,10 +93,10 @@ export async function PATCH(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await request.json();
-  if (typeof body.turn_index !== "number") {
-    return NextResponse.json({ error: "turn_index required" }, { status: 400 });
-  }
+  const parsed = await parseRequestJson(request, transcriptTurnPatchRequestBodySchema);
+  if (!parsed.success) return parsed.response;
+
+  const body = parsed.data;
 
   const snapshotUpdate = {
     classifier_result: body.classifier_result || null,

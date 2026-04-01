@@ -2,7 +2,12 @@
 
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { SimulationStateEvent, ClinicianAudioPayload } from "@/types/simulation";
+import type { SimulationStateEvent } from "@/types/simulation";
+import {
+  getClassifierReasoningFromEventPayload,
+  getStoredEventKind,
+  parseClinicianAudioPayload,
+} from "@/lib/validation/schemas";
 
 interface EventLogProps {
   events: SimulationStateEvent[];
@@ -33,8 +38,7 @@ const eventTypeColors: Record<string, string> = {
 };
 
 function getDisplayEventType(event: SimulationStateEvent): string {
-  const payload = event.payload as { __event_kind?: string } | null;
-  if (payload?.__event_kind === "clinician_audio") {
+  if (getStoredEventKind(event.payload) === "clinician_audio") {
     return "clinician_audio";
   }
   return event.event_type;
@@ -80,7 +84,10 @@ export function EventLog({ events, sessionStartedAt }: EventLogProps) {
                 {displayEventType === "clinician_audio" ? (
                   <div className="space-y-1 text-xs text-muted-foreground">
                     {(() => {
-                      const payload = event.payload as Partial<ClinicianAudioPayload>;
+                      const payload = parseClinicianAudioPayload(event.payload);
+                      if (!payload) {
+                        return <p>Audio event recorded</p>;
+                      }
                       const pathLabel =
                         payload.path === "tts"
                           ? "TTS fallback"
@@ -103,9 +110,9 @@ export function EventLog({ events, sessionStartedAt }: EventLogProps) {
                       );
                     })()}
                   </div>
-                ) : event.payload && typeof event.payload === "object" && "classifier" in event.payload ? (
+                ) : getClassifierReasoningFromEventPayload(event.payload) ? (
                   <p className="text-xs text-muted-foreground">
-                    {(event.payload as { classifier?: { reasoning?: string } }).classifier?.reasoning}
+                    {getClassifierReasoningFromEventPayload(event.payload)}
                   </p>
                 ) : null}
               </div>

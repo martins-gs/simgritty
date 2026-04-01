@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import type { SimulationSession, TranscriptTurn } from "@/types/simulation";
+import { parseRequestJson } from "@/lib/validation/http";
+import {
+  forkSessionRequestBodySchema,
+  parseSimulationSession,
+  transcriptTurnSchema,
+} from "@/lib/validation/schemas";
 
 export async function POST(
   request: Request,
@@ -13,14 +18,11 @@ export async function POST(
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await request.json().catch(() => null) as
-    | { turn_index?: number; fork_label?: string }
-    | null;
-  const turnIndex = body?.turn_index;
+  const parsedBody = await parseRequestJson(request, forkSessionRequestBodySchema);
+  if (!parsedBody.success) return parsedBody.response;
 
-  if (!Number.isInteger(turnIndex) || turnIndex == null || turnIndex < 0) {
-    return NextResponse.json({ error: "turn_index must be a non-negative integer" }, { status: 400 });
-  }
+  const body = parsedBody.data;
+  const turnIndex = body.turn_index;
 
   const { data: sourceSession, error: sessionError } = await supabase
     .from("simulation_sessions")
@@ -32,7 +34,10 @@ export async function POST(
     return NextResponse.json({ error: "Source session not found" }, { status: 404 });
   }
 
-  const typedSourceSession = sourceSession as SimulationSession;
+  const typedSourceSession = parseSimulationSession(sourceSession);
+  if (!typedSourceSession) {
+    return NextResponse.json({ error: "Source session data invalid" }, { status: 500 });
+  }
 
   const { data: sourceTurn, error: turnError } = await supabase
     .from("transcript_turns")
@@ -45,7 +50,12 @@ export async function POST(
     return NextResponse.json({ error: "Source turn not found" }, { status: 404 });
   }
 
-  const typedSourceTurn = sourceTurn as TranscriptTurn;
+  const parsedTurn = transcriptTurnSchema.safeParse(sourceTurn);
+  if (!parsedTurn.success) {
+    return NextResponse.json({ error: "Source turn data invalid" }, { status: 500 });
+  }
+
+  const typedSourceTurn = parsedTurn.data;
 
   if (!typedSourceTurn.state_after || !typedSourceTurn.patient_prompt_after) {
     return NextResponse.json(

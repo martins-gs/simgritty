@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { parseRequestJson } from "@/lib/validation/http";
+import { createSessionRequestBodySchema } from "@/lib/validation/schemas";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -14,8 +16,10 @@ export async function POST(request: Request) {
 
   if (!profile) return NextResponse.json({ error: "No profile" }, { status: 403 });
 
-  const { scenario_id } = await request.json();
-  if (!scenario_id) return NextResponse.json({ error: "scenario_id required" }, { status: 400 });
+  const parsed = await parseRequestJson(request, createSessionRequestBodySchema);
+  if (!parsed.success) return parsed.response;
+
+  const { scenario_id } = parsed.data;
 
   // Load full scenario with relations for snapshot
   const { data: scenario, error: scenErr } = await supabase

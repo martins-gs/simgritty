@@ -47,19 +47,26 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function load() {
-      const [scenRes, sessRes, profileRes] = await Promise.all([
-        fetch("/api/scenarios"),
-        fetch("/api/sessions/recent"),
-        fetch("/api/profile"),
-      ]);
-      if (scenRes.ok) setScenarios((await scenRes.json()).slice(0, 6));
-      if (sessRes.ok) setSessions(await sessRes.json());
-      if (profileRes.ok) {
-        const profile = await profileRes.json();
-        if (profile.display_name) setUserName(profile.display_name);
-        if (profile.id) setUserId(profile.id);
+      try {
+        const [scenRes, sessRes, profileRes] = await Promise.all([
+          fetch("/api/scenarios"),
+          fetch("/api/sessions/recent"),
+          fetch("/api/profile"),
+        ]);
+        if (scenRes.ok) setScenarios((await scenRes.json()).slice(0, 6));
+        else toast.error("Failed to load scenarios");
+        if (sessRes.ok) setSessions(await sessRes.json());
+        else toast.error("Failed to load recent sessions");
+        if (profileRes.ok) {
+          const profile = await profileRes.json();
+          if (profile.display_name) setUserName(profile.display_name);
+          if (profile.id) setUserId(profile.id);
+        }
+      } catch {
+        toast.error("Failed to load dashboard data");
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     load();
   }, []);

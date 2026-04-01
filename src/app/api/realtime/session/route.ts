@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { parseRequestJson } from "@/lib/validation/http";
+import { realtimeSessionRequestBodySchema } from "@/lib/validation/schemas";
 
 const REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-1.5";
 const DEFAULT_REALTIME_VOICE = process.env.OPENAI_REALTIME_DEFAULT_VOICE || "marin";
@@ -9,12 +11,10 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await request.json();
-  const { voice, instructions, outputOnly } = body as {
-    voice?: string;
-    instructions?: string;
-    outputOnly?: boolean;
-  };
+  const parsed = await parseRequestJson(request, realtimeSessionRequestBodySchema);
+  if (!parsed.success) return parsed.response;
+
+  const { voice, instructions, outputOnly } = parsed.data;
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {

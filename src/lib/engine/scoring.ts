@@ -6,6 +6,7 @@ import type {
   ComposureMarker,
 } from "@/types/simulation";
 import type { ScoringWeights, ScenarioMilestone } from "@/types/scenario";
+import { parseClinicianAudioPayload } from "@/lib/validation/schemas";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -295,8 +296,8 @@ function computeSupportSeeking(
   // Also check clinician_audio events for bot invocations
   for (const event of events) {
     if (event.event_type === "clinician_audio") {
-      const payload = event.payload as { turn_index?: number } | null;
-      if (payload?.turn_index != null) {
+      const payload = parseClinicianAudioPayload(event.payload);
+      if (payload) {
         // Only add if not already tracked via turns
         const alreadyTracked = botInvocations.some(
           (b) => b.turnIndex === payload.turn_index

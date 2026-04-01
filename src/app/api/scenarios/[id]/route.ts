@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { parseRequestJson } from "@/lib/validation/http";
+import { scenarioUpsertBodySchema } from "@/lib/validation/schemas";
 
 export async function GET(
   _request: Request,
@@ -43,8 +45,10 @@ export async function PUT(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await request.json();
-  const { traits, voice_config, escalation_rules, publish, milestones, ...scenarioFields } = body;
+  const parsed = await parseRequestJson(request, scenarioUpsertBodySchema);
+  if (!parsed.success) return parsed.response;
+
+  const { traits, voice_config, escalation_rules, publish, milestones, ...scenarioFields } = parsed.data;
 
   console.log("[Scenarios PUT] id:", id);
   console.log("[Scenarios PUT] milestones received:", JSON.stringify(milestones));
@@ -52,7 +56,7 @@ export async function PUT(
   console.log("[Scenarios PUT] scoring_weights:", JSON.stringify(scenarioFields.scoring_weights));
 
   // Update scenario
-  const updateData = { ...scenarioFields };
+  const updateData: Record<string, unknown> = { ...scenarioFields };
   if (publish !== undefined) {
     updateData.status = publish ? "published" : "draft";
   }
@@ -76,19 +80,31 @@ export async function PUT(
 
   // Update child records
   if (traits) {
-    await supabase
+    const { error: traitsErr } = await supabase
       .from("scenario_traits")
       .upsert({ scenario_id: id, ...traits }, { onConflict: "scenario_id" });
+    if (traitsErr) {
+      console.error("[Scenarios PUT] traits upsert failed:", traitsErr.message);
+      return NextResponse.json({ error: `Failed to save traits: ${traitsErr.message}` }, { status: 500 });
+    }
   }
   if (voice_config) {
-    await supabase
+    const { error: voiceErr } = await supabase
       .from("scenario_voice_config")
       .upsert({ scenario_id: id, ...voice_config }, { onConflict: "scenario_id" });
+    if (voiceErr) {
+      console.error("[Scenarios PUT] voice_config upsert failed:", voiceErr.message);
+      return NextResponse.json({ error: `Failed to save voice config: ${voiceErr.message}` }, { status: 500 });
+    }
   }
   if (escalation_rules) {
-    await supabase
+    const { error: rulesErr } = await supabase
       .from("escalation_rules")
       .upsert({ scenario_id: id, ...escalation_rules }, { onConflict: "scenario_id" });
+    if (rulesErr) {
+      console.error("[Scenarios PUT] escalation_rules upsert failed:", rulesErr.message);
+      return NextResponse.json({ error: `Failed to save escalation rules: ${rulesErr.message}` }, { status: 500 });
+    }
   }
 
   // Replace milestones (delete + re-insert)
@@ -159,17 +175,25 @@ export async function DELETE(
 
   if (sessions && sessions.length > 0) {
     const sessionIds = sessions.map((s) => s.id);
-    await supabase.from("educator_notes").delete().in("session_id", sessionIds);
-    await supabase.from("simulation_state_events").delete().in("session_id", sessionIds);
-    await supabase.from("transcript_turns").delete().in("session_id", sessionIds);
-    await supabase.from("simulation_sessions").delete().in("id", sessionIds);
+    const { error: e1 } = await supabase.from("educator_notes").delete().in("session_id", sessionIds);
+    const { error: e2 } = await supabase.from("simulation_state_events").delete().in("session_id", sessionIds);
+    const { error: e3 } = await supabase.from("transcript_turns").delete().in("session_id", sessionIds);
+    const { error: e4 } = await supabase.from("simulation_sessions").delete().in("id", sessionIds);
+    const cascadeErr = [e1, e2, e3, e4].find(Boolean);
+    if (cascadeErr) {
+      return NextResponse.json({ error: `Failed to delete session data: ${cascadeErr.message}` }, { status: 500 });
+    }
   }
 
   // Delete scenario child records
-  await supabase.from("scenario_milestones").delete().eq("scenario_template_id", id);
-  await supabase.from("escalation_rules").delete().eq("scenario_id", id);
-  await supabase.from("scenario_voice_config").delete().eq("scenario_id", id);
-  await supabase.from("scenario_traits").delete().eq("scenario_id", id);
+  const { error: e5 } = await supabase.from("scenario_milestones").delete().eq("scenario_template_id", id);
+  const { error: e6 } = await supabase.from("escalation_rules").delete().eq("scenario_id", id);
+  const { error: e7 } = await supabase.from("scenario_voice_config").delete().eq("scenario_id", id);
+  const { error: e8 } = await supabase.from("scenario_traits").delete().eq("scenario_id", id);
+  const childErr = [e5, e6, e7, e8].find(Boolean);
+  if (childErr) {
+    return NextResponse.json({ error: `Failed to delete scenario data: ${childErr.message}` }, { status: 500 });
+  }
 
   const { error } = await supabase.from("scenario_templates").delete().eq("id", id);
 

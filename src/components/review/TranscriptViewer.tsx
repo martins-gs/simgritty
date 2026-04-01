@@ -5,8 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { ArrowUp, ArrowDown, Minus } from "lucide-react";
 import { AudioPlayButton } from "@/components/review/AudioPlayButton";
-import type { TranscriptTurn, ClassifierResult, ClinicianAudioPayload } from "@/types/simulation";
-import type { EscalationState } from "@/types/escalation";
+import type { TranscriptTurn, ClinicianAudioPayload } from "@/types/simulation";
 import { ESCALATION_LABELS } from "@/types/escalation";
 
 interface TranscriptViewerProps {
@@ -82,7 +81,7 @@ export function TranscriptViewer({
   let lastKnownLevel = 3; // default initial level
 
   for (const turn of turns) {
-    const stateAfter = turn.state_after as EscalationState | null;
+    const stateAfter = turn.state_after;
     // The "before" for this turn is the last known level
     levelBeforeMap.set(turn.id, lastKnownLevel);
     // Update last known level only from scoring turns (trainee / system)
@@ -95,8 +94,8 @@ export function TranscriptViewer({
     <ScrollArea className="h-full">
       <div className="space-y-3 p-4">
         {turns.map((turn) => {
-          const classifier = turn.classifier_result as ClassifierResult | null;
-          const stateAfter = turn.state_after as EscalationState | null;
+          const classifier = turn.classifier_result;
+          const stateAfter = turn.state_after;
           const clinicianAudio = turn.speaker === "system"
             ? clinicianAudioByTurnIndex?.get(turn.turn_index)
             : undefined;

@@ -24,16 +24,16 @@ export function useSessionRecorder() {
   const startedAtRef = useRef<string | null>(null);
 
   const start = useCallback(
-    (localStream: MediaStream, remoteStream: MediaStream | null) => {
+    (localStream: MediaStream, remoteStream: MediaStream | null): boolean => {
       if (typeof MediaRecorder === "undefined") {
         console.warn("[SessionRecorder] MediaRecorder not available");
-        return;
+        return false;
       }
 
       const mimeType = getSupportedMimeType();
       if (!mimeType) {
         console.warn("[SessionRecorder] No supported audio MIME type found");
-        return;
+        return false;
       }
       mimeTypeRef.current = mimeType;
 
@@ -66,8 +66,10 @@ export function useSessionRecorder() {
         recorder.start(1000);
         recorderRef.current = recorder;
         startedAtRef.current = new Date().toISOString();
+        return true;
       } catch (err) {
         console.error("[SessionRecorder] Failed to start recording", err);
+        return false;
       }
     },
     []

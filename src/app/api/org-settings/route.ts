@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { parseRequestJson } from "@/lib/validation/http";
+import { orgSettingsUpdateRequestBodySchema } from "@/lib/validation/schemas";
 
 export async function GET() {
   const supabase = await createClient();
@@ -40,7 +42,10 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Admin access required" }, { status: 403 });
   }
 
-  const body = await request.json();
+  const parsed = await parseRequestJson(request, orgSettingsUpdateRequestBodySchema);
+  if (!parsed.success) return parsed.response;
+
+  const body = parsed.data;
 
   const { error } = await supabase
     .from("org_settings")

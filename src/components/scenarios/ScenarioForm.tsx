@@ -24,7 +24,7 @@ interface ScenarioFormProps {
   orgMaxCeiling?: number;
 }
 
-export function ScenarioForm({ scenarioId, orgMaxCeiling = 8 }: ScenarioFormProps) {
+export function ScenarioForm({ scenarioId, orgMaxCeiling = 10 }: ScenarioFormProps) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const store = useScenarioStore();

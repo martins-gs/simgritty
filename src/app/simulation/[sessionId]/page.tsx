@@ -19,17 +19,31 @@ import { Mic, MicOff, Square, Bot, Hand } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { EscalationState } from "@/types/escalation";
 import { ESCALATION_LABELS } from "@/types/escalation";
-import type { ScenarioTraits, ScenarioVoiceConfig, EscalationRules } from "@/types/scenario";
+import {
+  DEFAULT_ESCALATION_RULES,
+  DEFAULT_TRAITS,
+  DEFAULT_VOICE_CONFIG,
+} from "@/types/scenario";
 import type {
   ClassifierResult,
   ClinicianAudioOutcome,
   ClinicianAudioPath,
   SimulationSession,
+  SimulationStateEvent,
   Speaker,
   TranscriptTurn,
   TurnTriggerType,
 } from "@/types/simulation";
 import type { StructuredVoiceProfile } from "@/types/voice";
+import {
+  parseClassifierResult,
+  parseScenarioSnapshot,
+  parseSimulationEvents,
+  parseSimulationSession,
+  parseStructuredVoiceProfile,
+  parseTranscriptTurns,
+  type ValidatedScenarioSnapshot,
+} from "@/lib/validation/schemas";
 
 function escColor(level: number) {
   if (level <= 2) return { bar: "bg-emerald-500", text: "text-emerald-600", ring: "ring-emerald-500/20" };
@@ -57,7 +71,7 @@ interface BotTurnRequestOptions {
   patientVoiceProfile?: StructuredVoiceProfile | null;
   recentTurns?: { speaker: string; content: string }[];
   signal?: AbortSignal;
-  snapshot?: Record<string, unknown> | null;
+  snapshot?: ValidatedScenarioSnapshot | null;
   state?: ReturnType<EscalationEngine["getState"]> | null;
   seed?: number | null;
   reason?: string;
@@ -155,7 +169,7 @@ export default function SimulationPage() {
   const turnIndexRef = useRef(0);
   const eventIndexRef = useRef(1);
   const peakLevelRef = useRef(3);
-  const scenarioRef = useRef<Record<string, unknown> | null>(null);
+  const scenarioRef = useRef<ValidatedScenarioSnapshot | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const transcriptRef = useRef<TranscriptEntry[]>([]);
   const aiSpeakingRef = useRef(false);
@@ -203,10 +217,10 @@ export default function SimulationPage() {
         if (cancelled) return;
         if (!sessionRes.ok) { router.push("/dashboard"); return; }
 
-        const session = await readJsonSafely<SimulationSession | null>(sessionRes, null, "session");
+        const session = await readJsonSafely(sessionRes, parseSimulationSession, null, "session");
         if (cancelled) return;
         if (!session) { router.push("/dashboard"); return; }
-        const snapshot = session.scenario_snapshot;
+        const snapshot = parseScenarioSnapshot(session.scenario_snapshot);
         scenarioRef.current = snapshot;
 
         const [persistedTurns, persistedEvents, forkHistory] = await Promise.all([
@@ -217,7 +231,21 @@ export default function SimulationPage() {
         if (cancelled) return;
 
         const { traits, voiceConfig, escalationRules } = getScenarioConfig(snapshot);
-        const ceiling = Math.min(escalationRules.max_ceiling, 8);
+
+        // Fetch org ceiling so the scenario cap respects the org-wide limit
+        let orgCeiling = 10;
+        try {
+          const orgRes = await fetch("/api/org-settings", { signal: abortController.signal });
+          if (orgRes.ok) {
+            const orgData = await orgRes.json();
+            if (orgData?.max_escalation_ceiling) orgCeiling = orgData.max_escalation_ceiling;
+          }
+        } catch {
+          // Non-fatal — fall back to 10
+        }
+        if (cancelled) return;
+
+        const ceiling = Math.min(escalationRules.max_ceiling, orgCeiling);
         setMaxCeiling(ceiling);
 
         const engine = new EscalationEngine(escalationRules, traits, ceiling);
@@ -343,17 +371,11 @@ export default function SimulationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
-  function extractChild(data: unknown): Record<string, unknown> {
-    if (Array.isArray(data) && data.length > 0) return data[0] as Record<string, unknown>;
-    if (data && typeof data === "object") return data as Record<string, unknown>;
-    return {} as Record<string, unknown>;
-  }
-
-  function getScenarioConfig(snapshot: Record<string, unknown>) {
+  function getScenarioConfig(snapshot: ValidatedScenarioSnapshot) {
     return {
-      traits: extractChild(snapshot.scenario_traits) as unknown as ScenarioTraits,
-      voiceConfig: extractChild(snapshot.scenario_voice_config) as unknown as ScenarioVoiceConfig,
-      escalationRules: extractChild(snapshot.escalation_rules) as unknown as EscalationRules,
+      traits: snapshot.scenario_traits[0] ?? DEFAULT_TRAITS,
+      voiceConfig: snapshot.scenario_voice_config[0] ?? DEFAULT_VOICE_CONFIG,
+      escalationRules: snapshot.escalation_rules[0] ?? DEFAULT_ESCALATION_RULES,
     };
   }
 
@@ -509,11 +531,12 @@ export default function SimulationPage() {
 
   async function readJsonSafely<T>(
     res: Response,
+    parser: (data: unknown) => T,
     fallback: T,
     label: string
   ): Promise<T> {
     try {
-      return await res.json() as T;
+      return parser(await res.json());
     } catch (error) {
       console.error(`[Simulation] Failed to parse ${label} response`, error);
       return fallback;
@@ -526,7 +549,7 @@ export default function SimulationPage() {
   ): Promise<SimulationSession | null> {
     const res = await fetch(`/api/sessions/${id}`, { signal }).catch(() => null);
     if (!res || !res.ok) return null;
-    return readJsonSafely<SimulationSession | null>(res, null, "session");
+    return readJsonSafely(res, parseSimulationSession, null, "session");
   }
 
   async function fetchSessionTurns(
@@ -535,16 +558,16 @@ export default function SimulationPage() {
   ): Promise<TranscriptTurn[]> {
     const res = await fetch(`/api/sessions/${id}/transcript`, { signal }).catch(() => null);
     if (!res || !res.ok) return [];
-    return readJsonSafely<TranscriptTurn[]>(res, [], "transcript");
+    return readJsonSafely(res, parseTranscriptTurns, [], "transcript");
   }
 
   async function fetchSessionEvents(
     id: string,
     signal?: AbortSignal
-  ): Promise<{ event_index: number }[]> {
+  ): Promise<SimulationStateEvent[]> {
     const res = await fetch(`/api/sessions/${id}/events`, { signal }).catch(() => null);
     if (!res || !res.ok) return [];
-    return readJsonSafely<{ event_index: number }[]>(res, [], "events");
+    return readJsonSafely(res, parseSimulationEvents, [], "events");
   }
 
   async function startSession(signal?: AbortSignal): Promise<boolean> {
@@ -670,7 +693,7 @@ export default function SimulationPage() {
   }
 
   function buildPatientInstructions(
-    snapshot: Record<string, unknown>,
+    snapshot: ValidatedScenarioSnapshot,
     currentState: ReturnType<EscalationEngine["getState"]>,
     recentTurns: { speaker: string; content: string }[],
     voiceProfile: StructuredVoiceProfile | null
@@ -693,7 +716,7 @@ export default function SimulationPage() {
   }
 
   async function fetchPatientVoiceProfile(
-    snapshot: Record<string, unknown>,
+    snapshot: ValidatedScenarioSnapshot,
     currentState: ReturnType<EscalationEngine["getState"]>,
     recentTurns: { speaker: string; content: string }[],
     latestClinicianVoiceProfile?: StructuredVoiceProfile | null,
@@ -721,17 +744,21 @@ export default function SimulationPage() {
 
     if (!res || !res.ok) return null;
 
-    const data = await readJsonSafely<{ voiceProfile?: StructuredVoiceProfile | null } | null>(
+    return readJsonSafely<StructuredVoiceProfile | null>(
       res,
+      (raw) => {
+        if (typeof raw !== "object" || raw === null || !("voiceProfile" in raw)) {
+          return null;
+        }
+        return parseStructuredVoiceProfile(raw.voiceProfile);
+      },
       null,
       "patient voice profile"
     );
-    if (!data) return null;
-    return data.voiceProfile || null;
   }
 
   async function resolvePatientInstructions(
-    snapshot: Record<string, unknown>,
+    snapshot: ValidatedScenarioSnapshot,
     currentState: ReturnType<EscalationEngine["getState"]>,
     recentTurns: { speaker: string; content: string }[],
     latestClinicianVoiceProfile?: StructuredVoiceProfile | null,
@@ -862,7 +889,7 @@ export default function SimulationPage() {
   async function refinePatientStateFromBotReply(
     requestId: number,
     turnIndex: number,
-    snapshot: Record<string, unknown>,
+    snapshot: ValidatedScenarioSnapshot,
     stateAfter: EscalationState,
     recentTurnsForPrompt: { speaker: string; content: string }[],
     classifierResult: ClassifierResult,
@@ -955,7 +982,8 @@ export default function SimulationPage() {
 
       if (!res || !res.ok || isStale() || !engineRef.current) return null;
 
-      const classResult = await res.json() as ClassifierResult;
+      const classResult = await readJsonSafely(res, parseClassifierResult, null, "classification");
+      if (!classResult || isStale() || !engineRef.current) return null;
       if (isStale() || !engineRef.current) return null;
 
       console.log("[Bot Patient State] Classifier:", classResult);
@@ -1170,7 +1198,7 @@ export default function SimulationPage() {
     try {
       const classifyRes = await fetch("/api/classify", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ utterance: text, context: { recentTurns, scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`, currentEscalation: engineRef.current.getLevel(), milestones: ((snapshot as Record<string, unknown>).scenario_milestones as { id: string; description: string; classifier_hint: string }[] | undefined)?.filter((m) => !completedMilestonesRef.current.has(m.id)).map((m) => ({ id: m.id, description: m.description, classifier_hint: m.classifier_hint })) } }),
+        body: JSON.stringify({ utterance: text, context: { recentTurns, scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`, currentEscalation: engineRef.current.getLevel(), milestones: snapshot.scenario_milestones.filter((m) => m.id && !completedMilestonesRef.current.has(m.id)).map((m) => ({ id: m.id!, description: m.description, classifier_hint: m.classifier_hint })) } }),
       });
       if (!classifyRes.ok) {
         console.error("[Escalation] Classify API failed:", classifyRes.status);
@@ -1446,8 +1474,8 @@ export default function SimulationPage() {
 
     return {
       clinicianRole: "experienced British NHS clinician",
-      patientRole: (snapshot?.ai_role as string | undefined) || "patient",
-      emotionalDriver: (snapshot?.emotional_driver as string | undefined) || "",
+      patientRole: snapshot?.ai_role || "patient",
+      emotionalDriver: snapshot?.emotional_driver || "",
       deescalationTechnique: technique,
       escalationState: state ? {
         level: state.level,

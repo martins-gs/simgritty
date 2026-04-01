@@ -49,6 +49,8 @@ export function EducatorNotes({
         updated_at: new Date().toISOString(),
       });
       setContent("");
+    } else {
+      toast.error("Failed to save note");
     }
     setSubmitting(false);
   }

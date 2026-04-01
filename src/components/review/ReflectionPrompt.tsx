@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 interface ReflectionPromptProps {
@@ -32,7 +33,7 @@ export function ReflectionPrompt({ sessionId }: ReflectionPromptProps) {
   async function handleSubmit() {
     setSubmitting(true);
     try {
-      await fetch(`/api/sessions/${sessionId}/reflection`, {
+      const res = await fetch(`/api/sessions/${sessionId}/reflection`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -40,9 +41,13 @@ export function ReflectionPrompt({ sessionId }: ReflectionPromptProps) {
           free_text: freeText || null,
         }),
       });
-      setSubmitted(true);
+      if (res.ok) {
+        setSubmitted(true);
+      } else {
+        toast.error("Failed to save reflection. You can try again.");
+      }
     } catch {
-      // Silently fail — reflection is non-critical
+      toast.error("Failed to save reflection. You can try again.");
     } finally {
       setSubmitting(false);
     }

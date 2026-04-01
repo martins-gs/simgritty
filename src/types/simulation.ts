@@ -51,7 +51,15 @@ export interface SimulationSession {
   final_escalation_level: number | null;
   peak_escalation_level: number | null;
   recording_path: string | null;
+  recording_started_at?: string | null;
   created_at: string;
+  scenario_templates?: {
+    title?: string;
+    setting?: string;
+    ai_role?: string;
+    trainee_role?: string;
+    difficulty?: string;
+  } | null;
 }
 
 export interface TranscriptTurn {

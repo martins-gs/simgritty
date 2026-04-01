@@ -186,6 +186,9 @@ src/
 │   │   └── structuredVoice.ts    # LLM-generated voice profiles + clinician turns
 │   ├── voice/
 │   │   └── renderVoiceProfile.ts # Voice profile → prompt text formatters
+│   ├── validation/
+│   │   ├── schemas.ts            # Zod schemas for all API input/output + DB row parsing
+│   │   └── http.ts               # parseRequestJson() — validate request.json() against a Zod schema
 │   ├── supabase/
 │   │   ├── server.ts             # Server-side Supabase client
 │   │   ├── client.ts             # Browser-side Supabase client
@@ -231,6 +234,33 @@ src/
 | POST | `/api/sessions/[id]/reflection` | Save trainee self-reflection (tags + free text) |
 | GET | `/api/sessions/recent` | User's recent sessions |
 | PUT | `/api/org-settings` | Update organisation governance |
+
+## Error Handling & Validation
+
+### Runtime Validation
+
+All API route inputs are validated at the boundary using Zod schemas via `parseRequestJson()` (`src/lib/validation/http.ts`). If the request body fails validation, a 400 response is returned with structured error details before any business logic runs.
+
+Database query results consumed on the client (review page, simulation page) are parsed through typed Zod schemas (`src/lib/validation/schemas.ts`) rather than raw `as Type` casts. Malformed or missing fields fall back to safe defaults instead of crashing.
+
+### User Feedback
+
+All user-facing operations surface errors via `sonner` toasts:
+- Scenario creation, duplication, archival, and deletion
+- Session creation, forking, and deletion
+- Transcript reflection and educator note submission
+- Dashboard and scenario list loading
+- Settings save
+
+API routes that perform cascade deletes (scenario deletion, session deletion) check each child-record delete and return 500 on partial failure rather than silently continuing. OpenAI API errors always return structured 502 responses.
+
+### Escalation Ceiling Enforcement
+
+The org-level `max_escalation_ceiling` (Settings page) acts as a hard cap across the organisation. The per-scenario `max_ceiling` (Escalation Rules) is the scenario author's intended limit. At runtime, the effective ceiling is `Math.min(scenario, org)`. The scenario editor slider is capped to the org ceiling, and the simulation page fetches the org setting at init rather than using a hardcoded fallback.
+
+### Auth Token Refresh
+
+The Next.js middleware runs Supabase `updateSession` on **all routes** including `/api/*`, so auth tokens are refreshed before every request. This prevents 401 errors during long-lived simulations where access tokens expire.
 
 ## Escalation Engine
 

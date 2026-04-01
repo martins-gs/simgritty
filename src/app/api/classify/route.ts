@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getOpenAIErrorMessage, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
+import { getOpenAIErrorMessage } from "@/lib/openai/client";
 import {
   classifyClinicianUtterance,
   classifyPatientResponse,
   classifyUtterance,
-  type ClassifierContext,
-  type ClassifierMode,
 } from "@/lib/engine/classifierPipeline";
+import { parseRequestJson } from "@/lib/validation/http";
+import { classifyRequestBodySchema } from "@/lib/validation/schemas";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -19,15 +19,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "OpenAI API key not configured" }, { status: 500 });
   }
 
-  const { utterance, context, mode } = await request.json() as {
-    utterance?: string;
-    context?: ClassifierContext;
-    mode?: ClassifierMode;
-  };
+  const parsed = await parseRequestJson(request, classifyRequestBodySchema);
+  if (!parsed.success) return parsed.response;
 
-  if (!utterance || !context) {
-    return NextResponse.json({ error: "utterance and context required" }, { status: 400 });
-  }
+  const { utterance, context, mode } = parsed.data;
 
   let result;
   try {
@@ -38,16 +33,13 @@ export async function POST(request: Request) {
         : await classifyUtterance(utterance, context, apiKey);
   } catch (error) {
     console.error("Classification route error:", error);
-    if (shouldFailLoudOnOpenAIError()) {
-      return NextResponse.json(
-        {
-          error: "Classification failed",
-          detail: getOpenAIErrorMessage(error),
-        },
-        { status: 502 }
-      );
-    }
-    throw error;
+    return NextResponse.json(
+      {
+        error: "Classification failed",
+        detail: getOpenAIErrorMessage(error),
+      },
+      { status: 502 }
+    );
   }
 
   return NextResponse.json(result);

@@ -21,9 +21,18 @@ export async function DELETE(
   }
 
   // Delete child records first (cascade should handle it, but be explicit)
-  await supabase.from("educator_notes").delete().eq("session_id", id);
-  await supabase.from("simulation_state_events").delete().eq("session_id", id);
-  await supabase.from("transcript_turns").delete().eq("session_id", id);
+  const { error: notesErr } = await supabase.from("educator_notes").delete().eq("session_id", id);
+  if (notesErr) {
+    return NextResponse.json({ error: `Failed to delete notes: ${notesErr.message}` }, { status: 500 });
+  }
+  const { error: eventsErr } = await supabase.from("simulation_state_events").delete().eq("session_id", id);
+  if (eventsErr) {
+    return NextResponse.json({ error: `Failed to delete events: ${eventsErr.message}` }, { status: 500 });
+  }
+  const { error: turnsErr } = await supabase.from("transcript_turns").delete().eq("session_id", id);
+  if (turnsErr) {
+    return NextResponse.json({ error: `Failed to delete turns: ${turnsErr.message}` }, { status: 500 });
+  }
   const { error } = await supabase.from("simulation_sessions").delete().eq("id", id);
 
   if (error) {

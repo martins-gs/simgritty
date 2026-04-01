@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Play } from "lucide-react";
+import { toast } from "sonner";
 
 interface ScenarioData {
   id: string;
@@ -27,11 +28,16 @@ export default function BriefingPage() {
   const [scenario, setScenario] = useState<ScenarioData | null>(null);
   const [consented, setConsented] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     fetch(`/api/scenarios/${id}`)
-      .then((r) => r.json())
-      .then(setScenario);
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to load scenario");
+        return r.json();
+      })
+      .then(setScenario)
+      .catch(() => setLoadError(true));
   }, [id]);
 
   async function handleStart() {
@@ -44,12 +50,21 @@ export default function BriefingPage() {
     });
 
     if (!res.ok) {
+      toast.error("Failed to start simulation. Please try again.");
       setStarting(false);
       return;
     }
 
     const { id: sessionId } = await res.json();
     router.push(`/simulation/${sessionId}`);
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-muted-foreground">
+        Failed to load scenario. Please go back and try again.
+      </div>
+    );
   }
 
   if (!scenario) {

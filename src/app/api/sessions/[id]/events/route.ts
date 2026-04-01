@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { parseRequestJson } from "@/lib/validation/http";
+import { sessionEventRequestBodySchema } from "@/lib/validation/schemas";
 
 const CLINICIAN_AUDIO_FALLBACK_EVENT_TYPE = "classification_result";
 
@@ -43,7 +45,10 @@ export async function POST(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await request.json();
+  const parsed = await parseRequestJson(request, sessionEventRequestBodySchema);
+  if (!parsed.success) return parsed.response;
+
+  const body = parsed.data;
   const baseInsert = {
     session_id: id,
     event_index: body.event_index,

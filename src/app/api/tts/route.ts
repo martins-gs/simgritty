@@ -3,9 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import {
   buildClinicianVoiceInstructionsFromProfile,
   buildClinicianVoiceInstructions,
-  type ClinicianVoiceContext,
 } from "@/lib/engine/clinicianVoiceBuilder";
-import type { StructuredVoiceProfile } from "@/types/voice";
+import { parseRequestJson } from "@/lib/validation/http";
+import { ttsRequestBodySchema } from "@/lib/validation/schemas";
 
 const TTS_MODEL = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
 const CLINICIAN_TTS_MODEL = process.env.OPENAI_TTS_CLINICIAN_MODEL || "gpt-4o-mini-tts";
@@ -13,14 +13,6 @@ const CLINICIAN_TTS_FALLBACK_MODEL = process.env.OPENAI_TTS_CLINICIAN_FALLBACK_M
 const DEFAULT_TTS_VOICE = process.env.OPENAI_TTS_DEFAULT_VOICE || "cedar";
 const CLINICIAN_TTS_VOICE = process.env.OPENAI_TTS_CLINICIAN_VOICE || "cedar";
 const DEFAULT_TTS_INSTRUCTIONS = "Speak in a natural British English accent. Warm, clear, and human. Avoid flat cadence and avoid sounding scripted.";
-
-interface TtsRequestBody {
-  text?: string;
-  voice?: string;
-  style?: "default" | "clinician";
-  context?: ClinicianVoiceContext;
-  voiceProfile?: StructuredVoiceProfile;
-}
 
 async function requestSpeech(options: {
   apiKey: string;
@@ -54,8 +46,10 @@ export async function POST(request: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "OpenAI API key not configured" }, { status: 500 });
 
-  const { text, voice, style, context, voiceProfile } = await request.json() as TtsRequestBody;
-  if (!text) return NextResponse.json({ error: "text required" }, { status: 400 });
+  const parsed = await parseRequestJson(request, ttsRequestBodySchema);
+  if (!parsed.success) return parsed.response;
+
+  const { text, voice, style, context, voiceProfile } = parsed.data;
 
   const instructions = style === "clinician"
     ? voiceProfile

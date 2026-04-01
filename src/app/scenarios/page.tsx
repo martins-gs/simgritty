@@ -38,9 +38,15 @@ export default function ScenariosPage() {
 
   useEffect(() => {
     async function load() {
-      const res = await fetch("/api/scenarios");
-      if (res.ok) setScenarios(await res.json());
-      setLoading(false);
+      try {
+        const res = await fetch("/api/scenarios");
+        if (res.ok) setScenarios(await res.json());
+        else toast.error("Failed to load scenarios");
+      } catch {
+        toast.error("Failed to load scenarios");
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, []);
@@ -53,7 +59,10 @@ export default function ScenariosPage() {
 
   async function handleDuplicate(id: string) {
     const res = await fetch(`/api/scenarios/${id}`);
-    if (!res.ok) return;
+    if (!res.ok) {
+      toast.error("Failed to load scenario for duplication");
+      return;
+    }
     const data = await res.json();
     const traits = Array.isArray(data.scenario_traits) ? data.scenario_traits[0] : data.scenario_traits;
     const voice = Array.isArray(data.scenario_voice_config) ? data.scenario_voice_config[0] : data.scenario_voice_config;
@@ -85,17 +94,23 @@ export default function ScenariosPage() {
       const { id: newId } = await createRes.json();
       toast.success("Duplicated");
       router.push(`/scenarios/${newId}`);
+    } else {
+      toast.error("Failed to duplicate scenario");
     }
   }
 
   async function handleArchive(id: string) {
-    await fetch(`/api/scenarios/${id}`, {
+    const res = await fetch(`/api/scenarios/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "archived" }),
     });
-    setScenarios((prev) => prev.filter((s) => s.id !== id));
-    toast.success("Archived");
+    if (res.ok) {
+      setScenarios((prev) => prev.filter((s) => s.id !== id));
+      toast.success("Archived");
+    } else {
+      toast.error("Failed to archive scenario");
+    }
   }
 
   const tabs = [

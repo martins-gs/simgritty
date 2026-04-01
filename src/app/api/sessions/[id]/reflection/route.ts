@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { parseRequestJson } from "@/lib/validation/http";
+import { reflectionRequestBodySchema } from "@/lib/validation/schemas";
 
 const VALID_TAGS = ["frustrated", "anxious", "confident", "drained", "fine"];
 
@@ -12,7 +14,10 @@ export async function POST(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await request.json();
+  const parsed = await parseRequestJson(request, reflectionRequestBodySchema);
+  if (!parsed.success) return parsed.response;
+
+  const body = parsed.data;
   const tags: string[] = Array.isArray(body.tags)
     ? body.tags.filter((t: string) => VALID_TAGS.includes(t))
     : [];

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { parseRequestJson } from "@/lib/validation/http";
+import { endSessionRequestBodySchema } from "@/lib/validation/schemas";
 
 export async function POST(
   request: Request,
@@ -10,8 +12,10 @@ export async function POST(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await request.json();
-  const { exit_type, final_escalation_level, peak_escalation_level } = body;
+  const parsed = await parseRequestJson(request, endSessionRequestBodySchema);
+  if (!parsed.success) return parsed.response;
+
+  const { exit_type, final_escalation_level, peak_escalation_level } = parsed.data;
 
   const { error } = await supabase
     .from("simulation_sessions")
