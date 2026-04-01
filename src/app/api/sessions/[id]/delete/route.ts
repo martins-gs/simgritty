@@ -10,6 +10,16 @@ export async function DELETE(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // Verify ownership
+  const { data: session } = await supabase
+    .from("simulation_sessions")
+    .select("trainee_id")
+    .eq("id", id)
+    .single();
+  if (!session || session.trainee_id !== user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   // Delete child records first (cascade should handle it, but be explicit)
   await supabase.from("educator_notes").delete().eq("session_id", id);
   await supabase.from("simulation_state_events").delete().eq("session_id", id);

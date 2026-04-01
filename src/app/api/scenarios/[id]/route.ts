@@ -20,7 +20,18 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json(scenario);
+  // Attach creator display name
+  let creator_name: string | null = null;
+  if (scenario.created_by) {
+    const { data: creator } = await supabase
+      .from("user_profiles")
+      .select("display_name")
+      .eq("id", scenario.created_by)
+      .single();
+    creator_name = creator?.display_name ?? null;
+  }
+
+  return NextResponse.json({ ...scenario, creator_name });
 }
 
 export async function PUT(
@@ -129,6 +140,16 @@ export async function DELETE(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Verify ownership
+  const { data: scenario } = await supabase
+    .from("scenario_templates")
+    .select("created_by")
+    .eq("id", id)
+    .single();
+  if (!scenario || scenario.created_by !== user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   // Delete related sessions and their child records first
   const { data: sessions } = await supabase

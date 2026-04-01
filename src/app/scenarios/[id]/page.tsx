@@ -14,6 +14,7 @@ export default function EditScenarioPage() {
   const loadScenario = useScenarioStore((s) => s.loadScenario);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<string>("draft");
+  const [creatorName, setCreatorName] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -33,6 +34,7 @@ export default function EditScenarioPage() {
         : data.escalation_rules;
 
       setStatus(data.status);
+      if (data.creator_name) setCreatorName(data.creator_name);
       // Flatten milestones from the API response
       const milestones = Array.isArray(data.scenario_milestones)
         ? data.scenario_milestones
@@ -119,15 +121,23 @@ export default function EditScenarioPage() {
   return (
     <AppShell>
       <div className="space-y-5">
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-[12px] text-amber-800">
+          Full RBAC permissions functionality will be implemented in next version. Current permissions are to enable management to view all features of the app.
+        </div>
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-lg font-semibold">Edit Scenario</h1>
-            <Badge
-              variant={status === "published" ? "default" : "secondary"}
-              className="text-[10px]"
-            >
-              {status}
-            </Badge>
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-lg font-semibold">Edit Scenario</h1>
+              <Badge
+                variant={status === "published" ? "default" : "secondary"}
+                className="text-[10px]"
+              >
+                {status}
+              </Badge>
+            </div>
+            {creatorName && (
+              <p className="mt-0.5 text-[12px] text-muted-foreground">Created by {creatorName}</p>
+            )}
           </div>
           <Link
             href={`/scenarios/${id}/briefing`}

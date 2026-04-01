@@ -118,7 +118,7 @@ export const useScenarioStore = create<ScenarioFormState>((set) => ({
 
   addMilestone: () =>
     set((state) => {
-      if (state.milestones.length >= 5) return state;
+      if (state.milestones.length >= 10) return state;
       return { milestones: [...state.milestones, { description: "", classifier_hint: "" }] };
     }),
 

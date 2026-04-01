@@ -31,7 +31,7 @@ const scenarioSchema = z.object({
   support_threshold: z.number().int().min(1).max(10).nullable().default(null),
   critical_threshold: z.number().int().min(1).max(10).nullable().default(null),
   scoring_weights: scoringWeightsSchema.nullable().default(null),
-  milestones: z.array(milestoneSchema).max(5).default([]),
+  milestones: z.array(milestoneSchema).max(10).default([]),
   traits: z.object({
     hostility: z.number().min(0).max(10),
     frustration: z.number().min(0).max(10),

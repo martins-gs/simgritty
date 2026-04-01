@@ -12,15 +12,18 @@ import { Plus, Play, Trash2 } from "lucide-react";
 interface ScenarioItem {
   id: string;
   title: string;
+  setting: string;
   difficulty: string;
   status: string;
   archetype_tag: string | null;
+  created_by: string;
   created_at: string;
 }
 
 interface SessionItem {
   id: string;
   scenario_id: string;
+  trainee_id: string;
   status: string;
   exit_type: string | null;
   final_escalation_level: number | null;
@@ -28,11 +31,14 @@ interface SessionItem {
   started_at: string | null;
   ended_at: string | null;
   scenario_templates: { title: string } | null;
+  trainee_name: string | null;
 }
 
 export default function DashboardPage() {
   const [scenarios, setScenarios] = useState<ScenarioItem[]>([]);
   const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<SessionItem | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -41,12 +47,18 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function load() {
-      const [scenRes, sessRes] = await Promise.all([
+      const [scenRes, sessRes, profileRes] = await Promise.all([
         fetch("/api/scenarios"),
         fetch("/api/sessions/recent"),
+        fetch("/api/profile"),
       ]);
       if (scenRes.ok) setScenarios((await scenRes.json()).slice(0, 6));
       if (sessRes.ok) setSessions(await sessRes.json());
+      if (profileRes.ok) {
+        const profile = await profileRes.json();
+        if (profile.display_name) setUserName(profile.display_name);
+        if (profile.id) setUserId(profile.id);
+      }
       setLoading(false);
     }
     load();
@@ -88,7 +100,9 @@ export default function DashboardPage() {
     <AppShell>
       <div className="space-y-8">
         <div>
-          <h1 className="text-lg font-semibold">Dashboard</h1>
+          <h1 className="text-lg font-semibold">
+            {userName ? `Welcome, ${userName}` : "Dashboard"}
+          </h1>
         </div>
 
         {/* Quick start */}
@@ -117,7 +131,7 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* Recent scenarios */}
+        {/* Scenarios */}
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-[13px] font-medium uppercase tracking-wide text-muted-foreground">Scenarios</h2>
@@ -135,23 +149,28 @@ export default function DashboardPage() {
               </Link>
             </div>
           ) : (
-            <div className="divide-y divide-border/60 rounded-lg border border-border/60 bg-card">
+            <div className="flex flex-wrap gap-3">
               {scenarios.map((s) => (
-                <div key={s.id} className="flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-accent/40">
-                  <Link href={`/scenarios/${s.id}`} className="flex-1 flex items-center gap-3 min-w-0">
-                    <span className="truncate text-[13px] font-medium">{s.title}</span>
-                    <Badge variant={s.status === "published" ? "default" : "secondary"} className="text-[10px] shrink-0">{s.status}</Badge>
+                <div key={s.id} className="group relative w-[220px] rounded-xl border border-border/60 bg-card p-4 transition-colors hover:border-primary/30 hover:bg-accent/40">
+                  <Link href={`/scenarios/${s.id}`} className="block">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <Badge variant={s.status === "published" ? "default" : "secondary"} className="text-[10px]">{s.status}</Badge>
+                      <span className="text-[11px] text-muted-foreground capitalize">{s.difficulty}</span>
+                    </div>
+                    <p className="text-[13px] font-medium leading-snug">{s.title}</p>
+                    {s.setting && (
+                      <p className="mt-1 text-[11px] text-muted-foreground leading-snug">{s.setting}</p>
+                    )}
                   </Link>
-                  <div className="flex items-center gap-2 shrink-0 ml-3">
-                    <span className="text-[11px] text-muted-foreground capitalize">{s.difficulty}</span>
+                  {userId && s.created_by === userId && (
                     <button
-                      onClick={(e) => { e.preventDefault(); setDeleteScenarioTarget(s); }}
-                      className="ml-1 flex h-6 w-6 items-center justify-center rounded text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                      onClick={() => setDeleteScenarioTarget(s)}
+                      className="absolute top-3 right-3 flex h-6 w-6 items-center justify-center rounded text-slate-400 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-50 hover:text-red-500"
                       aria-label="Delete scenario"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
-                  </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -168,9 +187,12 @@ export default function DashboardPage() {
               {sessions.map((s) => (
                 <div key={s.id} className="flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-accent/40">
                   <Link href={`/review/${s.id}`} className="flex-1 min-w-0">
-                    <span className="truncate text-[13px] font-medium">
+                    <p className="truncate text-[13px] font-medium">
                       {s.scenario_templates?.title ?? "Untitled"}
-                    </span>
+                    </p>
+                    {s.trainee_name && (
+                      <p className="text-[11px] text-muted-foreground">{s.trainee_name}</p>
+                    )}
                   </Link>
                   <div className="flex items-center gap-2 shrink-0 ml-3">
                     {s.peak_escalation_level != null && (
@@ -182,13 +204,15 @@ export default function DashboardPage() {
                     >
                       {s.exit_type === "instant_exit" ? "exited" : s.status}
                     </Badge>
-                    <button
-                      onClick={(e) => { e.preventDefault(); setDeleteTarget(s); }}
-                      className="ml-1 flex h-6 w-6 items-center justify-center rounded text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                      aria-label="Delete session"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {userId && s.trainee_id === userId && (
+                      <button
+                        onClick={(e) => { e.preventDefault(); setDeleteTarget(s); }}
+                        className="ml-1 flex h-6 w-6 items-center justify-center rounded text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                        aria-label="Delete session"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

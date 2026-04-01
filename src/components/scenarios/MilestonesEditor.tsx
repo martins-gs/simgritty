@@ -28,7 +28,7 @@ export function MilestonesEditor({
   onUpdate,
   onRemove,
 }: MilestonesEditorProps) {
-  const canAdd = milestones.length < 5;
+  const canAdd = milestones.length < 10;
 
   return (
     <div className="space-y-4">
@@ -97,7 +97,7 @@ export function MilestonesEditor({
         size="sm"
         onClick={onAdd}
         disabled={!canAdd}
-        title={!canAdd ? "Maximum 5 milestones per scenario. Fewer milestones with strong classifier hints produce more reliable scores than many milestones with weak hints." : undefined}
+        title={!canAdd ? "Maximum 10 milestones per scenario. Fewer milestones with strong classifier hints produce more reliable scores than many milestones with weak hints." : undefined}
       >
         <Plus className="mr-1.5 h-3.5 w-3.5" />
         Add milestone

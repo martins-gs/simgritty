@@ -20,6 +20,7 @@ import {
   FileText,
   Trophy,
   Video,
+  Layers,
 } from "lucide-react";
 import { getUser } from "@/lib/supabase/server";
 import { HeroTextRotator } from "@/components/landing/HeroTextRotator";
@@ -633,8 +634,9 @@ export default async function LandingPage() {
             <p className="mx-auto mt-6 max-w-xl text-[15px] leading-relaxed text-muted-foreground sm:text-base">
               Realistic voice simulations that let healthcare professionals,
               care workers, and social workers rehearse difficult conversations
-              with AI patients, relatives, and staff who adapt to every word
-              you say — on any device with a browser and microphone.
+              with patients, relatives, and staff, using AI speech models that
+              adapt to every word you say — on any device with a browser and
+              microphone.
             </p>
             <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
               <CtaButtons user={user} />
@@ -657,7 +659,8 @@ export default async function LandingPage() {
               Extended reality headsets are expensive to procure, difficult to
               deploy at scale, and costly to maintain. Every headset needs
               charging, cleaning, software updates, and technical support —
-              and your training capacity is limited by how many units you own.
+              and your training capacity is limited by how many units you own
+              as well as the time and costs of developing immersive content.
             </p>
             <p className="mt-3 text-[14px] leading-relaxed text-muted-foreground">
               PROLOG runs on the devices your staff already carry. A mobile
@@ -687,7 +690,7 @@ export default async function LandingPage() {
                     ["Deployment", "Share a link", "Provision, configure, distribute"],
                     ["Ongoing maintenance", "None", "Charging, cleaning, repairs, updates"],
                     ["Scalability", "Unlimited — scales with your cohort", "Limited by inventory"],
-                    ["Engagement model", "Natural voice conversation", "Virtual environment navigation"],
+                    ["Engagement model", "Natural voice conversation", "Fixed multiple choice options"],
                   ] as const).map(([label, sg, xr]) => (
                     <tr key={label} className="bg-card">
                       <td className="px-4 py-2 font-medium text-muted-foreground">{label}</td>
@@ -710,9 +713,10 @@ export default async function LandingPage() {
               Safe, realistic practice for high-stakes conversations
             </h2>
             <p className="mt-3 text-[14px] leading-relaxed text-muted-foreground">
-              De-escalation is a skill learned through repetition, not theory.
-              PROLOG gives healthcare staff, care workers, and social workers
-              a space to practise with AI patients, relatives, and colleagues
+              Handling difficult conversations and building skills like
+              de-escalation takes practice, not just theory. PROLOG gives
+              healthcare staff, care workers, and social workers a safe space
+              to practise with AI-powered patients, relatives, and colleagues
               who respond dynamically to tone, technique, and timing — without
               risk to real people.
             </p>
@@ -766,6 +770,17 @@ export default async function LandingPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-xl border border-border/60 bg-background p-5">
               <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                <BookOpen className="h-4.5 w-4.5 text-primary" />
+              </div>
+              <h3 className="text-[14px] font-semibold">Scenario Builder</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                Educators create custom scenarios with 15 personality dials,
+                configurable voice settings, bias categories, escalation rules,
+                and clinical milestones — or start from archetype presets.
+              </p>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-background p-5">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
                 <Mic className="h-4.5 w-4.5 text-primary" />
               </div>
               <h3 className="text-[14px] font-semibold">Real-Time Voice Simulation</h3>
@@ -773,17 +788,6 @@ export default async function LandingPage() {
                 Speak naturally with AI patients, relatives, and staff through your
                 microphone. Voice tone, pacing, and emotional intensity all
                 shift dynamically as the conversation evolves.
-              </p>
-            </div>
-            <div className="rounded-xl border border-border/60 bg-background p-5">
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-                <Activity className="h-4.5 w-4.5 text-primary" />
-              </div>
-              <h3 className="text-[14px] font-semibold">Dynamic Escalation Engine</h3>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-                A 10-level state machine tracks escalation, trust, anger, and
-                frustration. Your communication technique directly influences
-                whether the situation improves or worsens.
               </p>
             </div>
             <div className="rounded-xl border border-border/60 bg-background p-5">
@@ -810,17 +814,6 @@ export default async function LandingPage() {
             </div>
             <div className="rounded-xl border border-border/60 bg-background p-5">
               <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-                <BookOpen className="h-4.5 w-4.5 text-primary" />
-              </div>
-              <h3 className="text-[14px] font-semibold">Scenario Builder</h3>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-                Educators create custom scenarios with 15 personality dials,
-                configurable voice settings, bias categories, escalation rules,
-                and clinical milestones — or start from archetype presets.
-              </p>
-            </div>
-            <div className="rounded-xl border border-border/60 bg-background p-5">
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
                 <ShieldCheck className="h-4.5 w-4.5 text-primary" />
               </div>
               <h3 className="text-[14px] font-semibold">Governance Controls</h3>
@@ -828,6 +821,17 @@ export default async function LandingPage() {
                 Organisation admins set escalation ceilings, session time
                 limits, content policies, and consent gates to keep training
                 safe and appropriate.
+              </p>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-background p-5">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                <Activity className="h-4.5 w-4.5 text-primary" />
+              </div>
+              <h3 className="text-[14px] font-semibold">Dynamic Escalation Engine</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                A 10-level state machine tracks escalation, trust, anger, and
+                frustration. Your communication technique directly influences
+                whether the situation improves or worsens.
               </p>
             </div>
           </div>
@@ -1057,6 +1061,17 @@ export default async function LandingPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-xl border border-border/60 bg-card p-5">
               <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                <Layers className="h-4.5 w-4.5 text-primary" />
+              </div>
+              <h3 className="text-[14px] font-semibold">Additional Scenario Domains</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                Update the scenario modelling and scoring method to support any
+                conversation type — extending PROLOG beyond de-escalation into
+                broader communication skills training.
+              </p>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-card p-5">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
                 <Camera className="h-4.5 w-4.5 text-primary" />
               </div>
               <h3 className="text-[14px] font-semibold">Trainee Video & Body Language Feedback</h3>
@@ -1064,17 +1079,6 @@ export default async function LandingPage() {
                 Capture video or snapshots of the trainee during the session
                 and provide AI-generated feedback on facial expression and
                 body language while they are listening and speaking.
-              </p>
-            </div>
-            <div className="rounded-xl border border-border/60 bg-card p-5">
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-                <SlidersHorizontal className="h-4.5 w-4.5 text-primary" />
-              </div>
-              <h3 className="text-[14px] font-semibold">Granular Microaggression Controls</h3>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-                Give educators fine-grained control over the specific types of
-                microaggression exhibited by the AI patient, relative, or
-                staff member during a scenario.
               </p>
             </div>
             <div className="rounded-xl border border-border/60 bg-card p-5">
@@ -1124,7 +1128,7 @@ export default async function LandingPage() {
                 and context for improvement.
               </p>
             </div>
-            <div className="rounded-xl border border-border/60 bg-card p-5 sm:col-span-2">
+            <div className="rounded-xl border border-border/60 bg-card p-5">
               <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
                 <Video className="h-4.5 w-4.5 text-primary" />
               </div>
@@ -1133,6 +1137,17 @@ export default async function LandingPage() {
                 Present small AI-generated video clips or images as a way of
                 immersing the trainee in the scenario — adding visual context
                 to the voice-first experience.
+              </p>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-card p-5">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                <SlidersHorizontal className="h-4.5 w-4.5 text-primary" />
+              </div>
+              <h3 className="text-[14px] font-semibold">Granular Microaggression Controls</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                Give educators fine-grained control over the specific types of
+                microaggression exhibited by the AI patient, relative, or
+                staff member during a scenario.
               </p>
             </div>
           </div>
@@ -1162,7 +1177,7 @@ export default async function LandingPage() {
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-6 sm:px-6">
           <ProLogWordmark className="text-[13px]" subtitle iconSize={20} />
           <p className="text-[12px] text-muted-foreground">
-            For Health &amp; Care Workers
+            Built for NHS Scotland and HSCP staff
           </p>
         </div>
       </footer>

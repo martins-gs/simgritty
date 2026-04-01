@@ -36,6 +36,9 @@ export default function SettingsPage() {
   return (
     <AppShell>
       <div className="space-y-5">
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-[12px] text-amber-800">
+          Full RBAC permissions functionality will be implemented in next version. Current permissions are to enable management to view all features of the app.
+        </div>
         <div>
           <h1 className="text-lg font-semibold">Settings</h1>
           <p className="text-[13px] text-muted-foreground">

@@ -62,7 +62,7 @@ Scenarios are authored through the App Router scenario pages and stored across:
 - `scenario_traits`
 - `scenario_voice_config`
 - `escalation_rules`
-- `scenario_milestones` (optional, 0-5 per scenario — each has a description and classifier hint)
+- `scenario_milestones` (optional, 0-10 per scenario — each has a description and classifier hint)
 
 When a session is created, the scenario is frozen into `simulation_sessions.scenario_snapshot`, so session playback and forking are based on the original session state rather than the latest template edits.
 
@@ -253,3 +253,31 @@ On the review page, `GET /api/sessions/:id/audio` returns a time-limited signed 
 - **Patient/AI turns**: seek to the previous trainee turn's `started_at` minus a 3-second buffer, because the AI begins responding before the trainee's transcript event arrives.
 
 Forking is session-based rather than template-based: a new session can be created from an earlier session and turn index, reusing the frozen scenario snapshot and the saved turn/state history. Fork metadata tracks `parent_session_id`, `forked_from_session_id`, `forked_from_turn_index`, `fork_label`, and `branch_depth`.
+
+## 9. Access Control
+
+Three user roles exist: **admin**, **educator**, and **trainee**, stored on `user_profiles.role`.
+
+Current enforcement:
+
+- **Scenario creation** (`POST /api/scenarios`): restricted to admin and educator roles.
+- **Org settings modification** (`PUT /api/org-settings`): restricted to admin role.
+- **Session deletion** (`DELETE /api/sessions/:id/delete`): restricted to the session's `trainee_id` (owner only).
+- **Scenario deletion** (`DELETE /api/scenarios/:id`): restricted to the scenario's `created_by` (owner only).
+- **Session start** (`POST /api/sessions/:id/start`): restricted to the session's `trainee_id`.
+
+The dashboard hides delete buttons for items the current user does not own. The scenario edit page and settings page display a notice that full RBAC will be implemented in the next version.
+
+Read access to sessions, transcripts, events, educator notes, audio, and scenarios is currently open to all authenticated users. This is intentional for the current phase to allow management visibility across the platform. Row-level security policies are planned for a future release.
+
+### User Identity
+
+`user_profiles` stores `display_name` and `email` (added via migration, backfilled from `auth.users`, and kept in sync by the `handle_new_user` trigger). The dashboard displays the user's name as a greeting, session lists show the trainee's display name (falling back to email), and the scenario edit page shows the creator's name. A lightweight profile API (`GET /api/profile`) returns the current user's profile for client-side identity checks.
+
+## 10. Dashboard
+
+The dashboard (`src/app/dashboard/page.tsx`) has three sections:
+
+- **Start a simulation**: quick-launch cards for published scenarios, linking directly to the briefing page.
+- **Scenarios**: compact fixed-width cards (220px) showing status badge, difficulty, clinical setting, and title. Only the creator sees the delete button.
+- **Recent sessions**: list of the 6 most recent sessions across all users, showing scenario title, trainee name, peak escalation level, exit status, and a delete button (owner only).
