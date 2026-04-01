@@ -28,7 +28,8 @@ export function AudioPlayButton({
       if (endTimerRef.current) clearTimeout(endTimerRef.current);
       if (audioRef.current) {
         audioRef.current.pause();
-        audioRef.current.src = "";
+        audioRef.current.removeAttribute("src");
+        audioRef.current.load();
         audioRef.current = null;
       }
     };
@@ -45,27 +46,59 @@ export function AudioPlayButton({
         return;
       }
 
-      if (!audioRef.current) {
-        audioRef.current = new Audio(audioUrl);
-        audioRef.current.addEventListener("ended", () => setPlaying(false));
-        audioRef.current.addEventListener("error", () => setPlaying(false));
+      // Dispose previous instance so we get a clean load + seek every time.
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.removeAttribute("src");
+        audioRef.current.load();
       }
 
-      const audio = audioRef.current;
-      audio.currentTime = Math.max(0, startOffset);
-      audio.play().then(() => {
-        setPlaying(true);
-        // Schedule stop at end offset
-        const duration = Math.max(0, endOffset - startOffset);
-        if (duration > 0 && Number.isFinite(duration)) {
-          endTimerRef.current = setTimeout(() => {
-            audio.pause();
-            setPlaying(false);
-          }, duration * 1000);
-        }
-      }).catch(() => {
-        setPlaying(false);
-      });
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      audio.addEventListener("ended", () => setPlaying(false));
+      audio.addEventListener("error", () => setPlaying(false));
+
+      function beginPlay() {
+        // Guard: user may have clicked pause or a new play before ready
+        if (audioRef.current !== audio) return;
+
+        audio.play().then(() => {
+          if (audioRef.current !== audio) return;
+          setPlaying(true);
+          const duration = Math.max(0, endOffset - startOffset);
+          if (duration > 0 && Number.isFinite(duration)) {
+            endTimerRef.current = setTimeout(() => {
+              audio.pause();
+              setPlaying(false);
+            }, duration * 1000);
+          }
+        }).catch(() => {
+          setPlaying(false);
+        });
+      }
+
+      audio.addEventListener(
+        "loadedmetadata",
+        () => {
+          if (audioRef.current !== audio) return;
+          const target = Math.max(0, startOffset);
+          if (target > 0.05) {
+            // Seek to target, then play once the seek is confirmed complete.
+            // Using seeked (not canplay) avoids a race where canplay fires
+            // for position 0 before the seek finishes.
+            audio.currentTime = target;
+            audio.addEventListener("seeked", beginPlay, { once: true });
+          } else {
+            // No meaningful seek — wait for enough data then play.
+            audio.addEventListener("canplay", beginPlay, { once: true });
+          }
+        },
+        { once: true }
+      );
+
+      // Kick off loading
+      audio.load();
     },
     [audioUrl, startOffset, endOffset, playing]
   );

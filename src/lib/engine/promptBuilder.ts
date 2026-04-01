@@ -477,6 +477,41 @@ function getEscalationBehaviour(level: number): string {
   return behaviours[level] || behaviours[5];
 }
 
+// Explicit vocal-register directive placed at the very end of the prompt
+// (maximum recency influence) to override conversational inertia.
+// Descriptive voice-affect labels ("Fragile, strained…") guide emotional
+// colour, but the speech model also needs hard prosody constraints
+// ("Do NOT shout") to actually shift volume/pace between turns.
+function buildVocalRegister(config: PromptConfig): string {
+  const level = config.currentState.level;
+
+  if (level <= 2) {
+    return `IMPORTANT — VOCAL REGISTER:
+Speak at a CALM, QUIET, normal conversational volume. Your voice is soft and measured.
+Do NOT raise your voice, shout, or sound aggressive.
+If your earlier turns were louder or more intense, you have now noticeably softened — the listener should hear the difference immediately.`;
+  }
+  if (level <= 4) {
+    return `IMPORTANT — VOCAL REGISTER:
+Your voice carries an edge — tight, clipped, strained — but is NOT raised to shouting.
+You are tense and frustrated but still in control of your volume.
+Do NOT shout. Do NOT speak at high volume. Keep the intensity contained in your tone, not your volume.`;
+  }
+  if (level <= 6) {
+    return `IMPORTANT — VOCAL REGISTER:
+Your voice is RAISED and FORCEFUL. Speaking noticeably louder than normal.
+There is real heat and urgency in your delivery. You are not calmly composed.`;
+  }
+  if (level <= 8) {
+    return `IMPORTANT — VOCAL REGISTER:
+You are SHOUTING or near-shouting. Voice is LOUD, aggressive, forceful.
+Raw emotion is breaking through. Delivery is intense and confrontational.`;
+  }
+  return `IMPORTANT — VOCAL REGISTER:
+Your voice is at MAXIMUM intensity. Screaming, wailing, or barely coherent.
+Complete loss of vocal control. Overwhelming emotion in every sound.`;
+}
+
 export function buildPrompt(config: PromptConfig): string {
   return [
     buildSystemLayer(config),
@@ -486,5 +521,7 @@ export function buildPrompt(config: PromptConfig): string {
     buildMemoryLayer(config),
     "",
     buildVoiceLayer(config),
+    "",
+    buildVocalRegister(config),
   ].join("\n");
 }

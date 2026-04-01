@@ -42,7 +42,7 @@ function escColor(level: number) {
 const CLINICIAN_REALTIME_VOICE = "cedar";
 const CLINICIAN_REALTIME_HANDOFF_DELAY_MS = 25;
 const CLINICIAN_REALTIME_PARTIAL_TAIL_GUARD_MS = 2500;
-const BOT_TURN_POST_PATIENT_DELAY_MS = 50;
+const BOT_TURN_POST_PATIENT_DELAY_MS = 600;
 const BOT_RESPONSE_CANCEL_SETTLE_MS = 40;
 const BOT_PATIENT_AUDIO_CLEAR_WAIT_MS = 250;
 const PATIENT_TURN_COMPLETION_TIMEOUT_MS = 4000;
@@ -293,6 +293,7 @@ export default function SimulationPage() {
           onAiTranscript: handleAiTranscriptDone,
           onAiTranscriptDelta: handleAiDelta,
           onAiPlaybackComplete: handleAiPlaybackComplete,
+          onAiPlaybackSafetyTimeout: handleAiPlaybackSafetyTimeout,
           onError: (err) => console.error("Realtime error:", err),
         });
         if (cancelled) { disconnect(); return; }
@@ -744,11 +745,14 @@ export default function SimulationPage() {
       patientVoiceProfileRef.current = voiceProfile;
     }
 
+    // When the fetch fails, pass null rather than the stale ref — the
+    // state-driven voice construction in buildVoiceLayer always matches
+    // the current escalation level, avoiding tone/state mismatches.
     return buildPatientInstructions(
       snapshot,
       currentState,
       recentTurns,
-      voiceProfile ?? patientVoiceProfileRef.current
+      voiceProfile
     );
   }
 
@@ -996,12 +1000,21 @@ export default function SimulationPage() {
       });
 
       const recentTurnsForPrompt = getRecentPromptTurns();
+
+      // When escalation level changed, the stored voice profile is stale — its
+      // tone/pacing/delivery descriptions still reflect the *previous* level.
+      // Passing null forces buildVoiceLayer to fall back to the state-driven
+      // voice construction, which correctly scales with the new level.  The
+      // refined voice profile (fetched async below) will replace it shortly.
+      const levelChanged = newState.level !== prevState.level;
+      const voiceForImmediate = levelChanged ? null : patientVoiceProfileRef.current;
+
       prefetchNextBotTurn({
         signal: botAbortRef.current?.signal,
         snapshot,
         state: newState,
         recentTurns: recentTurnsForPrompt,
-        patientVoiceProfile: patientVoiceProfileRef.current,
+        patientVoiceProfile: voiceForImmediate,
         seed: requestId,
         reason: "fast_after_patient",
       });
@@ -1010,7 +1023,7 @@ export default function SimulationPage() {
         snapshot,
         newState,
         recentTurnsForPrompt,
-        patientVoiceProfileRef.current
+        voiceForImmediate
       );
       patientPromptRef.current = immediateInstructions;
       updateSession(immediateInstructions);
@@ -1112,6 +1125,15 @@ export default function SimulationPage() {
     aiSpeakingRef.current = false;
     setCurrentAiText("");
     setIsSpeaking(false);
+  }
+
+  // Safety-timeout variant: update UI + ungate mic for the human trainee,
+  // but leave aiSpeakingRef true so the bot-clinician flow doesn't
+  // interrupt patient audio that may still be playing from the WebRTC buffer.
+  function handleAiPlaybackSafetyTimeout() {
+    setCurrentAiText("");
+    setIsSpeaking(false);
+    // aiSpeakingRef.current intentionally NOT set to false
   }
 
   const handleTraineeTranscript = useCallback(async (text: string) => {
@@ -1365,7 +1387,14 @@ export default function SimulationPage() {
       const voiceProfile = await voiceProfilePromise;
       if (isStale()) return null;
 
-      if (voiceProfile) {
+      // The voice profile was fetched with the pre-classification state.
+      // If the level changed, that profile's tone/delivery is stale — fall
+      // back to state-driven voice construction which always matches the
+      // current level.
+      const levelChanged = newState.level !== prevState.level;
+      const effectiveProfile = levelChanged ? null : (voiceProfile ?? patientVoiceProfileRef.current);
+
+      if (voiceProfile && !levelChanged) {
         patientVoiceProfileRef.current = voiceProfile;
       }
 
@@ -1373,7 +1402,7 @@ export default function SimulationPage() {
         snapshot,
         newState,
         recentPromptTurns,
-        voiceProfile ?? patientVoiceProfileRef.current
+        effectiveProfile
       );
       if (newInstructions && !isStale()) {
         console.info("[Bot Prep] Patient response profile prepared from clinician text and voice profile");
@@ -1673,6 +1702,7 @@ export default function SimulationPage() {
   function waitForPatientResponse(abort: AbortController): Promise<void> {
     return new Promise((resolve) => {
       let sawPatientSpeaking = false;
+      let speakingStartedAt = 0;
       const check = setInterval(() => {
         if (abort.signal.aborted || !botActiveRef.current) {
           clearInterval(check);
@@ -1681,7 +1711,14 @@ export default function SimulationPage() {
         }
 
         if (aiSpeakingRef.current) {
+          if (!sawPatientSpeaking) speakingStartedAt = Date.now();
           sawPatientSpeaking = true;
+          // Safety: if the buffer-stopped event never arrives, don't poll
+          // forever — force-clear after a generous timeout.
+          if (Date.now() - speakingStartedAt > 15_000) {
+            console.warn("[Bot] Patient speaking safety timeout (15s) — force-clearing aiSpeakingRef");
+            aiSpeakingRef.current = false;
+          }
           return;
         }
 

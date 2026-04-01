@@ -10,6 +10,12 @@ interface RealtimeSessionConfig {
   onAiTranscript: (text: string) => void;
   onAiTranscriptDelta: (delta: string) => void;
   onAiPlaybackComplete: () => void;
+  // Called by the safety timer when the buffer-stopped event hasn't arrived
+  // after response.done.  This should update the UI and ungate the mic
+  // (so the trainee can speak) but NOT mark the AI as "no longer speaking"
+  // for programmatic turn-taking, because audio may still be playing from
+  // the WebRTC buffer.
+  onAiPlaybackSafetyTimeout?: () => void;
   onError: (error: string) => void;
 }
 
@@ -38,6 +44,9 @@ export function useRealtimeSession() {
   const micGatedRef = useRef(false);
   const micForcedOffRef = useRef(false);
   const unmutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Safety timer: force-clear speaking state if the buffer-stopped event
+  // never arrives after the response completes.
+  const playbackSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Deduplication
   const lastTraineeTextRef = useRef("");
   const lastTraineeTimeRef = useRef(0);
@@ -177,9 +186,17 @@ export function useRealtimeSession() {
         break;
       }
 
-      case "output_audio_buffer.stopped": {
+      // Handle both legacy and current event names for buffer stop.
+      // The Realtime API has used both "output_audio_buffer.stopped" and
+      // "output_audio_buffer.speech_stopped" across model versions.
+      case "output_audio_buffer.stopped":
+      case "output_audio_buffer.speech_stopped": {
         const responseId = msg.response_id as string | undefined;
         if (responseId && responseId !== activeResponseIdRef.current) break;
+        if (playbackSafetyTimerRef.current) {
+          clearTimeout(playbackSafetyTimerRef.current);
+          playbackSafetyTimerRef.current = null;
+        }
         config.onAiPlaybackComplete();
         if (responseId === activeResponseIdRef.current) {
           activeResponseIdRef.current = null;
@@ -190,6 +207,10 @@ export function useRealtimeSession() {
       }
 
       case "output_audio_buffer.cleared": {
+        if (playbackSafetyTimerRef.current) {
+          clearTimeout(playbackSafetyTimerRef.current);
+          playbackSafetyTimerRef.current = null;
+        }
         config.onAiPlaybackComplete();
         activeResponseIdRef.current = null;
         ungateMic();
@@ -203,11 +224,46 @@ export function useRealtimeSession() {
           response.status !== "completed" &&
           (!response.id || response.id === activeResponseIdRef.current)
         ) {
+          if (playbackSafetyTimerRef.current) {
+            clearTimeout(playbackSafetyTimerRef.current);
+            playbackSafetyTimerRef.current = null;
+          }
           config.onAiPlaybackComplete();
           if (response.id === activeResponseIdRef.current) {
             activeResponseIdRef.current = null;
           }
           ungateMic();
+        } else if (response?.status === "completed") {
+          // Normal completion — audio may still be playing from the buffer.
+          // Start a safety timer: if the buffer-stopped event doesn't arrive
+          // within a reasonable window, force-clear the speaking state so
+          // the trainee isn't left waiting in silence.
+          if (playbackSafetyTimerRef.current) {
+            clearTimeout(playbackSafetyTimerRef.current);
+          }
+          const completedResponseId = response.id;
+          playbackSafetyTimerRef.current = setTimeout(() => {
+            playbackSafetyTimerRef.current = null;
+            // Only act if we're still waiting on this exact response.
+            // If activeResponseIdRef was already cleared (by a buffer-stopped
+            // event that arrived before response.done), skip — it's handled.
+            if (activeResponseIdRef.current === completedResponseId) {
+              console.warn("[Realtime] Safety timeout: buffer-stopped event not received after response.done");
+              // Use the safety-timeout callback if provided.  This lets the
+              // simulation page update the UI and ungate the mic (so a human
+              // trainee can speak) without flipping aiSpeakingRef — which
+              // would cause the bot-clinician flow to interrupt still-playing
+              // patient audio.  The actual buffer-stopped event will set
+              // aiSpeakingRef when playback truly ends.
+              if (config.onAiPlaybackSafetyTimeout) {
+                config.onAiPlaybackSafetyTimeout();
+              } else {
+                config.onAiPlaybackComplete();
+                activeResponseIdRef.current = null;
+              }
+              ungateMic();
+            }
+          }, 2000);
         }
         break;
       }
@@ -448,6 +504,10 @@ export function useRealtimeSession() {
     if (unmutTimerRef.current) {
       clearTimeout(unmutTimerRef.current);
       unmutTimerRef.current = null;
+    }
+    if (playbackSafetyTimerRef.current) {
+      clearTimeout(playbackSafetyTimerRef.current);
+      playbackSafetyTimerRef.current = null;
     }
 
     teardownConnectionResources(
