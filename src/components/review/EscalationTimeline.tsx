@@ -123,13 +123,13 @@ function CustomTooltip({
       </p>
 
       {data.technique && (
-        <p className="text-[11px] text-slate-600 mt-1.5">
+        <p className="text-[12px] text-slate-600 mt-1.5">
           <span className="font-medium">Technique:</span> {data.technique}
         </p>
       )}
 
       {data.effectiveness !== null && (
-        <p className="text-[11px] mt-0.5">
+        <p className="text-[12px] mt-0.5">
           <span className="font-medium text-slate-600">Effectiveness:</span>{" "}
           <span
             className="font-bold"
@@ -144,13 +144,13 @@ function CustomTooltip({
       )}
 
       {data.reasoning && (
-        <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed italic">
+        <p className="text-[12px] text-slate-500 mt-1.5 leading-relaxed italic">
           {data.reasoning}
         </p>
       )}
 
       {(data.trust !== null || data.listening !== null) && (
-        <div className="mt-2 pt-2 border-t border-slate-100 flex gap-4 text-[10px]">
+        <div className="mt-2 pt-2 border-t border-slate-100 flex gap-4 text-[11px]">
           {data.trust !== null && (
             <span className="text-blue-500 font-medium">Trust: {data.trust}/10</span>
           )}

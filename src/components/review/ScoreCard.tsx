@@ -63,7 +63,7 @@ function ScoreBar({
           style={{ width: `${ratio * 100}%` }}
         />
       </div>
-      <p className="text-[10px] text-slate-400 hidden sm:block">{description}</p>
+      <p className="text-[11px] text-slate-400 hidden sm:block">{description}</p>
     </div>
   );
 }
@@ -120,7 +120,7 @@ export function ScoreCard({ score, preliminary }: ScoreCardProps) {
           </div>
           <div className="min-w-0">
             <p className="text-[13px] font-semibold text-slate-900">Performance Score</p>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{score.summary}</p>
+            <p className="mt-0.5 text-[12px] leading-relaxed text-slate-500">{score.summary}</p>
             {preliminary && (
               <p className="mt-1 text-[10px] text-amber-600 font-medium">
                 Short session — scores are preliminary.
@@ -131,7 +131,7 @@ export function ScoreCard({ score, preliminary }: ScoreCardProps) {
 
         {/* Mobile summary text */}
         <div className="sm:hidden px-4 py-3">
-          <p className="text-[12px] leading-relaxed text-slate-500">{score.summary}</p>
+          <p className="text-[13px] leading-relaxed text-slate-500">{score.summary}</p>
           {preliminary && (
             <p className="mt-1 text-[10px] text-amber-600 font-medium">
               Short session — scores are preliminary.

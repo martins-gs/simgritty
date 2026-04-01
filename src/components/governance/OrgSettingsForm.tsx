@@ -78,7 +78,7 @@ export function OrgSettingsForm({ settings: initial, isAdmin }: OrgSettingsFormP
               step={1}
               onValueChange={(v) => setSettings((s) => ({ ...s, max_escalation_ceiling: Array.isArray(v) ? v[0] : v }))}
             />
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-[12px] text-muted-foreground">
               No scenario can exceed this level
             </p>
           </div>
@@ -113,7 +113,7 @@ export function OrgSettingsForm({ settings: initial, isAdmin }: OrgSettingsFormP
             onChange={(e) => setSettings((s) => ({ ...s, max_session_duration_minutes: parseInt(e.target.value) || 30 }))}
             className="w-28 h-9"
           />
-          <p className="text-[11px] text-muted-foreground">Sessions will auto-end after this duration</p>
+          <p className="text-[12px] text-muted-foreground">Sessions will auto-end after this duration</p>
         </div>
       </section>
 

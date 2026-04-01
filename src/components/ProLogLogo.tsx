@@ -48,9 +48,9 @@ export function ProLogWordmark({ className, subtitle, iconSize = 20 }: ProLogWor
     <span className={`inline-flex flex-col ${className ?? ""}`}>
       <span className="inline-flex items-center" style={{ gap: "0.35em" }}>
         {iconSize > 0 && <ProLogIcon size={iconSize} />}
-        <span style={{ letterSpacing: "0.12em" }}>
-          <span style={{ color: "#003087" }} className="font-bold">PRO</span>
-          <span style={{ color: "#007f3b" }} className="font-bold">LOG</span>
+        <span style={{ letterSpacing: "0.12em", fontFamily: "var(--font-logo)", fontWeight: 200 }}>
+          <span style={{ color: "#003087" }}>PRO</span>
+          <span style={{ color: "#007f3b" }}>LOG</span>
         </span>
       </span>
       {subtitle && (
@@ -58,7 +58,7 @@ export function ProLogWordmark({ className, subtitle, iconSize = 20 }: ProLogWor
           className="font-medium uppercase text-muted-foreground"
           style={{ fontSize: "7px", letterSpacing: "0.12em" }}
         >
-          Building conversational confidence
+          Conversational confidence
         </span>
       )}
     </span>

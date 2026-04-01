@@ -97,7 +97,7 @@ export function KeyMoments({ moments, turns }: KeyMomentsProps) {
                   &ldquo;{turn.content}&rdquo;
                 </p>
               )}
-              <p className="mt-1 text-[11px] text-slate-500">
+              <p className="mt-1 text-[12px] text-slate-500">
                 {describeEvidence(moment)}
               </p>
             </div>

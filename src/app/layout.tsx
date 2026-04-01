@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Nunito_Sans, JetBrains_Mono, Lexend_Deca } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SupabaseLockGuard } from "@/components/SupabaseLockGuard";
 import "./globals.css";
 
-const inter = Inter({
+const nunitoSans = Nunito_Sans({
   variable: "--font-sans",
   subsets: ["latin"],
   display: "swap",
@@ -14,6 +14,13 @@ const inter = Inter({
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
+  display: "swap",
+});
+
+const lexendDeca = Lexend_Deca({
+  variable: "--font-logo",
+  subsets: ["latin"],
+  weight: "200",
   display: "swap",
 });
 
@@ -30,7 +37,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${jetbrainsMono.variable} h-full`}
+      className={`${nunitoSans.variable} ${jetbrainsMono.variable} ${lexendDeca.variable} h-full`}
     >
       <body className="min-h-full flex flex-col antialiased">
         <SupabaseLockGuard />

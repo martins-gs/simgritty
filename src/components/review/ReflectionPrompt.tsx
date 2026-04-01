@@ -62,7 +62,7 @@ export function ReflectionPrompt({ sessionId }: ReflectionPromptProps) {
         <p className="text-sm font-medium text-slate-900">
           Encounters like this can be draining, even in simulation. How did this one feel?
         </p>
-        <p className="mt-1 text-[11px] text-slate-400">
+        <p className="mt-1 text-[12px] text-slate-400">
           This is not scored and is not part of your performance record.
         </p>
       </div>

@@ -50,13 +50,13 @@ export function HeroTextRotator() {
           flex-direction: column;
         }
         .hero-rotator-strip.rolling {
-          animation: hero-spring 700ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+          animation: hero-spring 1200ms cubic-bezier(0.25, 1, 0.5, 1) forwards;
         }
         @keyframes hero-spring {
           0%   { transform: translateY(0); }
-          50%  { transform: translateY(-54%); }
-          72%  { transform: translateY(-48.5%); }
-          88%  { transform: translateY(-50.8%); }
+          40%  { transform: translateY(-53%); }
+          62%  { transform: translateY(-49%); }
+          78%  { transform: translateY(-50.6%); }
           100% { transform: translateY(-50%); }
         }
         .hero-rotator-item {
