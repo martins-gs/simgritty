@@ -154,7 +154,10 @@ export default function DashboardPage() {
                 <div key={s.id} className="group relative w-[220px] rounded-xl border border-border/60 bg-card p-4 shadow-sm transition-colors hover:border-primary/30 hover:shadow-md">
                   <Link href={`/scenarios/${s.id}`} className="block">
                     <div className="flex items-center gap-2 mb-1.5">
-                      <Badge variant={s.status === "published" ? "default" : "secondary"} className="text-[10px]">{s.status}</Badge>
+                      <Badge
+                        variant="secondary"
+                        className={`text-[10px] ${s.status === "published" ? "bg-teal-50 text-teal-700 border border-teal-200" : ""}`}
+                      >{s.status}</Badge>
                       <span className="text-[11px] text-muted-foreground capitalize">{s.difficulty}</span>
                     </div>
                     <p className="text-[13px] font-medium leading-snug">{s.title}</p>
@@ -199,8 +202,14 @@ export default function DashboardPage() {
                       <span className="text-[11px] text-muted-foreground">Peak {s.peak_escalation_level}</span>
                     )}
                     <Badge
-                      variant={s.status === "completed" ? "default" : s.status === "aborted" ? "destructive" : "secondary"}
-                      className="text-[10px]"
+                      variant="secondary"
+                      className={`text-[10px] ${
+                        s.status === "completed"
+                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                          : s.status === "aborted"
+                            ? "bg-red-50 text-red-700 border border-red-200"
+                            : ""
+                      }`}
                     >
                       {s.exit_type === "instant_exit" ? "exited" : s.status}
                     </Badge>

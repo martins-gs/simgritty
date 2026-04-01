@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Nunito_Sans, JetBrains_Mono, Lexend_Deca } from "next/font/google";
+import { Nunito_Sans, JetBrains_Mono, Host_Grotesk } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SupabaseLockGuard } from "@/components/SupabaseLockGuard";
@@ -17,10 +17,10 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
-const lexendDeca = Lexend_Deca({
+const hostGrotesk = Host_Grotesk({
   variable: "--font-logo",
   subsets: ["latin"],
-  weight: "200",
+  weight: "700",
   display: "swap",
 });
 
@@ -37,7 +37,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${nunitoSans.variable} ${jetbrainsMono.variable} ${lexendDeca.variable} h-full`}
+      className={`${nunitoSans.variable} ${jetbrainsMono.variable} ${hostGrotesk.variable} h-full`}
     >
       <body className="min-h-full flex flex-col antialiased">
         <SupabaseLockGuard />

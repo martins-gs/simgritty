@@ -24,11 +24,10 @@ import { HeroTextRotator } from "@/components/landing/HeroTextRotator";
 import { ProLogWordmark } from "@/components/ProLogLogo";
 
 /** Inline PROLOG text in logo font + colours, inherits surrounding size. */
-function P() {
+function P({ light }: { light?: boolean } = {}) {
   return (
-    <span style={{ fontFamily: "var(--font-logo)", fontWeight: 200, letterSpacing: "0.08em" }}>
-      <span style={{ color: "#003087" }}>PRO</span>
-      <span style={{ color: "#007f3b" }}>LOG</span>
+    <span style={{ fontFamily: "var(--font-logo)", fontWeight: 700, letterSpacing: "0.08em", color: light ? "#7ec8c8" : "#0d2d3a" }}>
+      prolog
     </span>
   );
 }
@@ -326,15 +325,15 @@ export default async function LandingPage() {
       </section>
 
       {/* ── Why PROLOG ───────────────────────────────────────── */}
-      <section className="border-t border-border/60">
+      <section style={{ backgroundColor: "#0d2d3a" }}>
         <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
           <div className="mx-auto max-w-2xl text-center">
-            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
+            <h2 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
               Safe, realistic practice for high-stakes conversations
             </h2>
-            <p className="mt-3 text-[14px] leading-relaxed text-muted-foreground">
+            <p className="mt-3 text-[14px] leading-relaxed text-slate-300">
               Handling difficult conversations and building skills like
-              de-escalation takes practice, not just theory. <P /> gives
+              de-escalation takes practice, not just theory. <P light /> gives
               healthcare staff, care workers, and social workers a safe space
               to practise with AI-powered patients, relatives, and colleagues
               who respond dynamically to tone, technique, and timing — without
@@ -343,31 +342,31 @@ export default async function LandingPage() {
           </div>
           <div className="mt-12 grid gap-6 sm:grid-cols-3">
             <div className="text-center">
-              <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10">
-                <ShieldCheck className="h-5 w-5 text-emerald-600" />
+              <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/20">
+                <ShieldCheck className="h-5 w-5 text-emerald-400" />
               </div>
-              <h3 className="text-[14px] font-semibold">Zero-Risk Environment</h3>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+              <h3 className="text-[14px] font-semibold text-white">Zero-Risk Environment</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-slate-400">
                 Make mistakes, try new approaches, and build confidence without
                 consequences for patients, relatives, or colleagues.
               </p>
             </div>
             <div className="text-center">
-              <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10">
-                <MessageSquare className="h-5 w-5 text-amber-600" />
+              <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/20">
+                <MessageSquare className="h-5 w-5 text-amber-400" />
               </div>
-              <h3 className="text-[14px] font-semibold">Real Conversation, Not Scripts</h3>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+              <h3 className="text-[14px] font-semibold text-white">Real Conversation, Not Scripts</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-slate-400">
                 AI characters respond to what you actually say. Every session
                 unfolds differently based on your choices.
               </p>
             </div>
             <div className="text-center">
-              <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-                <RefreshCw className="h-5 w-5 text-blue-600" />
+              <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/20">
+                <RefreshCw className="h-5 w-5 text-blue-400" />
               </div>
-              <h3 className="text-[14px] font-semibold">Practise and Repeat</h3>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+              <h3 className="text-[14px] font-semibold text-white">Practise and Repeat</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-slate-400">
                 Replay sessions from any point, fork the conversation to try a
                 different technique, and track improvement over time.
               </p>
@@ -560,13 +559,13 @@ export default async function LandingPage() {
       </section>
 
       {/* ── Who It's For ────────────────────────────────────────── */}
-      <section className="border-t border-border/60 bg-card">
+      <section style={{ backgroundColor: "#0d2d3a" }}>
         <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
           <div className="mb-12 text-center">
-            <p className="mb-2 text-[13px] font-medium uppercase tracking-wide text-primary">
+            <p className="mb-2 text-[13px] font-medium uppercase tracking-wide text-emerald-400">
               Built For Health, Care &amp; Social Work
             </p>
-            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
+            <h2 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
               Designed for the people who need it most
             </h2>
           </div>
@@ -579,9 +578,9 @@ export default async function LandingPage() {
               { role: "GP Receptionists", desc: "Rehearse front-desk encounters with frustrated or demanding patients and relatives." },
               { role: "Educators & Trainers", desc: "Create targeted scenarios, observe sessions, and provide turn-level feedback and notes." },
             ].map((item) => (
-              <div key={item.role} className="rounded-xl border border-border/60 bg-background p-4">
-                <h3 className="text-[14px] font-semibold">{item.role}</h3>
-                <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+              <div key={item.role} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <h3 className="text-[14px] font-semibold text-white">{item.role}</h3>
+                <p className="mt-1.5 text-[13px] leading-relaxed text-slate-400">
                   {item.desc}
                 </p>
               </div>

@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAppStore } from "@/store/appStore";
+import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { Home, LayoutDashboard, BookOpen, Settings } from "lucide-react";
+import { Home, LayoutDashboard, BookOpen, Settings, LogOut } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "Home", icon: Home, exact: true },
@@ -16,6 +17,14 @@ const navItems = [
 export function TopBar() {
   const userProfile = useAppStore((s) => s.userProfile);
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleSignOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/auth/login");
+    router.refresh();
+  }
 
   return (
     <header className="flex h-12 items-center justify-between border-b border-border/60 px-4 sm:px-5">
@@ -57,6 +66,13 @@ export function TopBar() {
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground capitalize">
             {userProfile.role}
           </span>
+          <button
+            onClick={handleSignOut}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
+            aria-label="Sign out"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
     </header>

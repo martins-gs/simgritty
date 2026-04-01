@@ -227,7 +227,7 @@ The review page (`src/app/review/[sessionId]/page.tsx`) loads session, transcrip
 
 Both the simulation page and the review page are designed to work on mobile phones as well as desktops:
 
-- **AppShell**: the sidebar nav (`w-56`) is hidden below the `md` breakpoint. The TopBar renders compact icon-based navigation links on mobile instead.
+- **AppShell**: the sidebar nav (`w-56`) is hidden below the `md` breakpoint. The TopBar renders compact icon-based navigation links and a sign-out button on mobile instead.
 - **Simulation page**: uses a tab bar (Simulation / Transcript / Scenario) below `lg`, switching to the three-panel layout on larger screens.
 - **Review page**: ScoreCard stacks vertically on mobile (label + ring inline, summary below). Summary cards use a 2-column grid on mobile, 3 on `sm`, 5 on `lg`. The escalation timeline chart height reduces from `h-80` to `h-56` on mobile. Transcript/Event Log/Notes use `60vh` height on mobile instead of a fixed 500px. The "Restart From Turn" button goes full-width below the card title on mobile.
 
@@ -284,4 +284,8 @@ The dashboard (`src/app/dashboard/page.tsx`) has three sections:
 
 ## 11. Landing Page
 
-The landing page (`src/app/page.tsx`) uses real session screenshots (`/public/screenshots/`) for the escalation timeline and transcript demos rather than synthetic mock components. Inline "PROLOG" text throughout the page renders in the Lexend Deca logo font with two-tone blue/green colouring via a `<P />` helper component. The configuration demo section still uses interactive mock sliders.
+The landing page (`src/app/page.tsx`) uses real session screenshots (`/public/screenshots/`) for the escalation timeline and transcript demos rather than synthetic mock components. Inline "prolog" text throughout the page renders in the Host Grotesk Bold logo font in dark teal (`#0d2d3a`) via a `<P />` helper component, with a lighter variant (`#7ec8c8`) for use on dark backgrounds. Two sections ("Why prolog" and "Who It's For") use a dark teal background for visual contrast. The configuration demo section still uses interactive mock sliders.
+
+### Branding
+
+The logo uses Host Grotesk Bold (700) in lowercase "prolog" with dark teal colouring (`#0d2d3a`). The speech bubble icon uses the same dark teal with a white medical cross. Nunito Sans is the base UI font. Dashboard status badges use semantic colours (teal for published, emerald for completed, red for aborted) distinct from the primary blue used for CTA buttons.
