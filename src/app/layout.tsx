@@ -18,8 +18,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SimGritty",
-  description: "Clinical de-escalation training through realistic voice simulations",
+  title: "PROLOG — For Health & Care Workers",
+  description: "AI-powered clinical de-escalation training through realistic voice simulations",
 };
 
 export default function RootLayout({

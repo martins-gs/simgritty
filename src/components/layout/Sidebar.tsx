@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
+  Home,
   LayoutDashboard,
   BookOpen,
   Settings,
@@ -11,8 +12,10 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import { ProLogWordmark } from "@/components/ProLogLogo";
 
 const navItems = [
+  { href: "/", label: "Home", icon: Home, exact: true },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/scenarios", label: "Scenarios", icon: BookOpen },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -32,18 +35,16 @@ export function Sidebar() {
   return (
     <aside className="hidden md:flex h-screen w-56 shrink-0 flex-col border-r border-border/60 bg-sidebar">
       <div className="flex h-12 items-center px-5">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <div className="h-6 w-6 rounded bg-primary flex items-center justify-center">
-            <span className="text-[11px] font-bold text-primary-foreground leading-none">S</span>
-          </div>
-          <span className="text-[15px] font-semibold tracking-tight text-foreground">SimGritty</span>
+        <Link href="/" className="flex items-center">
+          <ProLogWordmark className="text-[15px]" subtitle iconSize={24} />
         </Link>
       </div>
       <nav className="flex-1 px-3 pt-2">
         <div className="space-y-0.5">
           {navItems.map((item) => {
-            const isActive =
-              pathname === item.href || pathname.startsWith(item.href + "/");
+            const isActive = item.exact
+              ? pathname === item.href
+              : pathname === item.href || pathname.startsWith(item.href + "/");
             return (
               <Link
                 key={item.href}

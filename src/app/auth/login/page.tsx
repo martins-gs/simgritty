@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProLogIcon, ProLogWordmark } from "@/components/ProLogLogo";
+
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -39,12 +41,12 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-            <span className="text-lg font-bold text-primary-foreground leading-none">S</span>
+          <div className="mx-auto mb-3">
+            <ProLogIcon size={44} />
           </div>
-          <h1 className="text-xl font-semibold tracking-tight">Sign in to SimGritty</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Sign in to <ProLogWordmark iconSize={0} /></h1>
           <p className="mt-1 text-[13px] text-muted-foreground">
-            Clinical de-escalation training
+            For Health &amp; Care Workers
           </p>
         </div>
         <form onSubmit={handleLogin} className="space-y-3">

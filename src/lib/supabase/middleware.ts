@@ -26,10 +26,12 @@ export async function updateSession(request: NextRequest) {
   );
 
   // Do not run getUser on auth pages to avoid cookie bloat
-  const publicPaths = ["/auth/login", "/auth/signup", "/auth/callback"];
-  const isPublicPath = publicPaths.some((path) =>
-    request.nextUrl.pathname.startsWith(path)
-  );
+  const publicPaths = ["/", "/auth/login", "/auth/signup", "/auth/callback"];
+  const isPublicPath =
+    request.nextUrl.pathname === "/" ||
+    publicPaths.some(
+      (path) => path !== "/" && request.nextUrl.pathname.startsWith(path)
+    );
 
   if (isPublicPath) {
     return supabaseResponse;

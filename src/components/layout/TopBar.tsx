@@ -4,9 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAppStore } from "@/store/appStore";
 import { cn } from "@/lib/utils";
-import { LayoutDashboard, BookOpen, Settings } from "lucide-react";
+import { Home, LayoutDashboard, BookOpen, Settings } from "lucide-react";
 
 const navItems = [
+  { href: "/", label: "Home", icon: Home, exact: true },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/scenarios", label: "Scenarios", icon: BookOpen },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -21,7 +22,9 @@ export function TopBar() {
       {/* Mobile nav — visible below md (where sidebar is hidden) */}
       <nav className="flex md:hidden items-center gap-1">
         {navItems.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+          const isActive = item.exact
+            ? pathname === item.href
+            : pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.href}
