@@ -132,8 +132,8 @@ export default function DashboardPage() {
         )}
 
         {/* Scenarios */}
-        <section>
-          <div className="mb-3 flex items-center justify-between">
+        <section className="rounded-xl bg-muted/40 border border-border/40 p-5">
+          <div className="mb-4 flex items-center justify-between">
             <h2 className="text-[13px] font-medium uppercase tracking-wide text-muted-foreground">Scenarios</h2>
             <Link href="/scenarios/new" className="flex items-center gap-1.5 text-[13px] font-medium text-primary hover:underline">
               <Plus className="h-3.5 w-3.5" />New
@@ -142,7 +142,7 @@ export default function DashboardPage() {
           {loading ? (
             <p className="py-8 text-center text-[13px] text-muted-foreground">Loading...</p>
           ) : scenarios.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border/80 py-10 text-center">
+            <div className="rounded-lg border border-dashed border-border/80 bg-card py-10 text-center">
               <p className="text-[13px] text-muted-foreground">No scenarios yet</p>
               <Link href="/scenarios/new" className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-primary hover:underline">
                 <Plus className="h-3.5 w-3.5" />Create your first scenario
@@ -151,7 +151,7 @@ export default function DashboardPage() {
           ) : (
             <div className="flex flex-wrap gap-3">
               {scenarios.map((s) => (
-                <div key={s.id} className="group relative w-[220px] rounded-xl border border-border/60 bg-card p-4 transition-colors hover:border-primary/30 hover:bg-accent/40">
+                <div key={s.id} className="group relative w-[220px] rounded-xl border border-border/60 bg-card p-4 shadow-sm transition-colors hover:border-primary/30 hover:shadow-md">
                   <Link href={`/scenarios/${s.id}`} className="block">
                     <div className="flex items-center gap-2 mb-1.5">
                       <Badge variant={s.status === "published" ? "default" : "secondary"} className="text-[10px]">{s.status}</Badge>

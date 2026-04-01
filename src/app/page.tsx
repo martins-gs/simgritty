@@ -10,9 +10,6 @@ import {
   RefreshCw,
   ArrowRight,
   CheckCircle2,
-  Play,
-  GitFork,
-  Volume2,
   SlidersHorizontal,
   Camera,
   Users,
@@ -25,6 +22,16 @@ import {
 import { getUser } from "@/lib/supabase/server";
 import { HeroTextRotator } from "@/components/landing/HeroTextRotator";
 import { ProLogWordmark } from "@/components/ProLogLogo";
+
+/** Inline PROLOG text in logo font + colours, inherits surrounding size. */
+function P() {
+  return (
+    <span style={{ fontFamily: "var(--font-logo)", fontWeight: 200, letterSpacing: "0.08em" }}>
+      <span style={{ color: "#003087" }}>PRO</span>
+      <span style={{ color: "#007f3b" }}>LOG</span>
+    </span>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /*  Shared CTA helper                                                  */
@@ -65,409 +72,22 @@ function CtaButtons({ user }: { user: unknown }) {
 /*  Static mock: escalation timeline (matches real EscalationTimeline)  */
 /* ------------------------------------------------------------------ */
 
-function EscalationTimelineDemo() {
-  // Simulated data: [time-seconds, escalation-level, trust, event-type]
-  const data: [number, number, number, string][] = [
-    [0, 3, 5, "session_started"],
-    [35, 3, 5, "classification_result"],
-    [68, 4, 5, "escalation_change"],
-    [110, 5, 4, "escalation_change"],
-    [155, 6, 3, "escalation_change"],
-    [200, 7, 3, "escalation_change"],
-    [250, 7, 3, "classification_result"],
-    [290, 8, 2, "escalation_change"],
-    [340, 7, 3, "de_escalation_change"],
-    [395, 6, 3, "de_escalation_change"],
-    [440, 5, 4, "de_escalation_change"],
-    [490, 5, 4, "classification_result"],
-    [535, 4, 5, "de_escalation_change"],
-    [580, 4, 5, "classification_result"],
-    [625, 3, 6, "de_escalation_change"],
-    [665, 3, 6, "classification_result"],
-    [700, 2, 7, "de_escalation_change"],
-    [720, 2, 7, "session_ended"],
-  ];
-
-  const maxTime = 720;
-  const ceiling = 8;
-  const w = 680;
-  const h = 280;
-  const pad = { top: 10, bottom: 26, left: 32, right: 56 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
-
-  function toX(t: number) { return pad.left + (t / maxTime) * plotW; }
-  function toY(level: number) { return pad.top + plotH - (level / 10) * plotH; }
-
-  // Zone bands: [yBottom, yTop, color]
-  const zones: [number, number, string][] = [
-    [0, 2.5, "#10b981"],
-    [2.5, 4.5, "#f59e0b"],
-    [4.5, 6.5, "#f97316"],
-    [6.5, 8.5, "#ef4444"],
-    [8.5, 10, "#991b1b"],
-  ];
-
-  const zoneLabels: [number, string, string][] = [
-    [1.5, "Calm", "#10b981"],
-    [3.5, "Guarded", "#f59e0b"],
-    [5.5, "Hostile", "#f97316"],
-    [7.5, "Abusive", "#ef4444"],
-    [9.5, "Crisis", "#991b1b"],
-  ];
-
-  // Step-after path for escalation
-  function stepAfterPath(pts: [number, number, number, string][], idx: 1 | 2) {
-    let d = "";
-    for (let i = 0; i < pts.length; i++) {
-      const x = toX(pts[i][0]);
-      const y = toY(pts[i][idx]);
-      if (i === 0) { d += `M${x.toFixed(1)},${y.toFixed(1)}`; }
-      else {
-        const prevY = toY(pts[i - 1][idx]);
-        d += ` L${x.toFixed(1)},${prevY.toFixed(1)} L${x.toFixed(1)},${y.toFixed(1)}`;
-      }
-    }
-    return d;
-  }
-
-  const escLine = stepAfterPath(data, 1);
-  const trustLine = stepAfterPath(data, 2);
-
-  // Area fill: step-after path closed to bottom
-  const lastPt = data[data.length - 1];
-  const escArea = escLine
-    + ` L${toX(lastPt[0]).toFixed(1)},${toY(0).toFixed(1)}`
-    + ` L${toX(data[0][0]).toFixed(1)},${toY(0).toFixed(1)} Z`;
-
-  function dotColor(type: string) {
-    if (type === "escalation_change") return "#ef4444";
-    if (type === "de_escalation_change") return "#10b981";
-    if (type === "ceiling_reached") return "#991b1b";
-    if (type === "session_started" || type === "session_ended") return "#6366f1";
-    return "#94a3b8";
-  }
-
-  function dotR(type: string) {
-    if (type === "ceiling_reached") return 6;
-    if (type.includes("escalation")) return 4.5;
-    if (type.startsWith("session")) return 3.5;
-    return 3;
-  }
-
-  // Format time as M:SS
-  function fmt(s: number) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
-
-  // Summary stats
-  const peak = Math.max(...data.map((d) => d[1]));
-  const final = data[data.length - 1][1];
-  const escCount = data.filter((d) => d[3] === "escalation_change").length;
-  const deescCount = data.filter((d) => d[3] === "de_escalation_change").length;
-
+function SessionScreenshots() {
   return (
-    <div className="space-y-3">
-      {/* Summary chips */}
-      <div className="flex flex-wrap gap-2">
-        <span className="rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-[11px]">
-          <span className="text-muted-foreground">Peak </span>
-          <span className="font-semibold text-red-600">{peak}</span>
-        </span>
-        <span className="rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-[11px]">
-          <span className="text-muted-foreground">Final </span>
-          <span className="font-semibold text-emerald-600">{final}</span>
-        </span>
-        <span className="rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-[11px]">
-          <span className="text-muted-foreground">Escalations </span>
-          <span className="font-semibold text-red-600">{escCount}</span>
-        </span>
-        <span className="rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-[11px]">
-          <span className="text-muted-foreground">De-escalations </span>
-          <span className="font-semibold text-emerald-600">{deescCount}</span>
-        </span>
-        <span className="rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5 text-[11px]">
-          <span className="text-muted-foreground">Duration </span>
-          <span className="font-semibold">{fmt(maxTime)}</span>
-        </span>
+    <div className="space-y-6">
+      <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
+        <img
+          src="/screenshots/escalation-timeline.png"
+          alt="Escalation timeline from a real PROLOG session showing escalation level and trust over time"
+          className="w-full"
+        />
       </div>
-
-      {/* Chart */}
-      <div className="overflow-x-auto rounded-xl border border-border/60 bg-card">
-        <div className="min-w-[480px] p-3 sm:p-4">
-          <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="xMidYMid meet">
-            <defs>
-              <linearGradient id="esc-fill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#ef4444" stopOpacity="0.3" />
-                <stop offset="40%" stopColor="#f59e0b" stopOpacity="0.15" />
-                <stop offset="100%" stopColor="#10b981" stopOpacity="0.05" />
-              </linearGradient>
-              <linearGradient id="trust-fill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.15" />
-                <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
-              </linearGradient>
-            </defs>
-
-            {/* Zone background bands */}
-            {zones.map(([lo, hi, color]) => (
-              <rect
-                key={lo}
-                x={pad.left}
-                y={toY(hi)}
-                width={plotW}
-                height={toY(lo) - toY(hi)}
-                fill={color}
-                fillOpacity="0.04"
-              />
-            ))}
-
-            {/* Grid lines (horizontal, dashed) */}
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((l) => (
-              <line
-                key={l}
-                x1={pad.left}
-                x2={pad.left + plotW}
-                y1={toY(l)}
-                y2={toY(l)}
-                stroke="#e2e8f0"
-                strokeDasharray="3 6"
-              />
-            ))}
-
-            {/* Y-axis labels */}
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((l) => (
-              <text
-                key={l}
-                x={pad.left - 8}
-                y={toY(l) + 3.5}
-                textAnchor="end"
-                fill="#94a3b8"
-                fontSize="11"
-              >
-                {l}
-              </text>
-            ))}
-
-            {/* X-axis labels */}
-            {[0, 180, 360, 540, 720].map((s) => (
-              <text
-                key={s}
-                x={toX(s)}
-                y={h - 6}
-                textAnchor="middle"
-                fill="#94a3b8"
-                fontSize="11"
-              >
-                {fmt(s)}
-              </text>
-            ))}
-
-            {/* X-axis line */}
-            <line x1={pad.left} x2={pad.left + plotW} y1={toY(0)} y2={toY(0)} stroke="#e2e8f0" />
-
-            {/* Ceiling reference line */}
-            <line
-              x1={pad.left}
-              x2={pad.left + plotW}
-              y1={toY(ceiling)}
-              y2={toY(ceiling)}
-              stroke="#ef4444"
-              strokeDasharray="6 4"
-              strokeWidth="1.5"
-            />
-            <text
-              x={pad.left + plotW + 4}
-              y={toY(ceiling) + 3.5}
-              fill="#ef4444"
-              fontSize="9"
-              fontWeight="600"
-            >
-              Ceiling {ceiling}
-            </text>
-
-            {/* Zone labels (right side) */}
-            {zoneLabels.map(([y, label, color]) => (
-              <text
-                key={label}
-                x={pad.left + plotW + 4}
-                y={toY(y) + 3}
-                fill={color}
-                fontSize="9"
-                fontWeight="500"
-              >
-                {label}
-              </text>
-            ))}
-
-            {/* Trust area fill */}
-            {(() => {
-              const tArea = trustLine
-                + ` L${toX(lastPt[0]).toFixed(1)},${toY(0).toFixed(1)}`
-                + ` L${toX(data[0][0]).toFixed(1)},${toY(0).toFixed(1)} Z`;
-              return <path d={tArea} fill="url(#trust-fill)" />;
-            })()}
-
-            {/* Trust line (dashed) */}
-            <path
-              d={trustLine}
-              fill="none"
-              stroke="#3b82f6"
-              strokeWidth="1.5"
-              strokeDasharray="4 3"
-            />
-
-            {/* Escalation area fill */}
-            <path d={escArea} fill="url(#esc-fill)" />
-
-            {/* Escalation line (step-after, solid) */}
-            <path d={escLine} fill="none" stroke="#334155" strokeWidth="2.5" />
-
-            {/* Event dots */}
-            {data.map((pt, i) => {
-              const cx = toX(pt[0]);
-              const cy = toY(pt[1]);
-              const color = dotColor(pt[3]);
-              const r = dotR(pt[3]);
-              return (
-                <g key={i}>
-                  {/* Halo */}
-                  <circle cx={cx} cy={cy} r={r + 3} fill={color} fillOpacity="0.15" />
-                  {/* Dot */}
-                  <circle cx={cx} cy={cy} r={r} fill="white" stroke={color} strokeWidth="2.5" />
-                  {/* Direction arrow */}
-                  {pt[3] === "escalation_change" && (
-                    <polygon
-                      points={`${cx},${cy + r + 3} ${cx - 3},${cy + r + 8} ${cx + 3},${cy + r + 8}`}
-                      fill="#ef4444"
-                      opacity="0.6"
-                    />
-                  )}
-                  {pt[3] === "de_escalation_change" && (
-                    <polygon
-                      points={`${cx},${cy + r + 8} ${cx - 3},${cy + r + 3} ${cx + 3},${cy + r + 3}`}
-                      fill="#10b981"
-                      opacity="0.6"
-                    />
-                  )}
-                </g>
-              );
-            })}
-          </svg>
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-        <span className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5">
-          <svg width="20" height="4" className="shrink-0"><line x1="0" y1="2" x2="20" y2="2" stroke="#334155" strokeWidth="2.5" /></svg>
-          Escalation level
-        </span>
-        <span className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5">
-          <svg width="20" height="4" className="shrink-0"><line x1="0" y1="2" x2="20" y2="2" stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="4 3" /></svg>
-          Trust
-        </span>
-        <span className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5">
-          <svg width="12" height="12" className="shrink-0"><circle cx="6" cy="6" r="5" fill="white" stroke="#ef4444" strokeWidth="2" /></svg>
-          Escalation event
-        </span>
-        <span className="inline-flex items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-1.5">
-          <svg width="12" height="12" className="shrink-0"><circle cx="6" cy="6" r="5" fill="white" stroke="#10b981" strokeWidth="2" /></svg>
-          De-escalation event
-        </span>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Static mock: transcript with playback & fork                       */
-/* ------------------------------------------------------------------ */
-
-function TranscriptDemo() {
-  const turns = [
-    {
-      speaker: "Patient",
-      badge: "bg-muted text-muted-foreground",
-      text: "I've been waiting three hours and nobody has told me anything. This is completely unacceptable!",
-      esc: { dir: "up", label: "Level 5 \u2192 6" },
-    },
-    {
-      speaker: "Trainee",
-      badge: "bg-primary/10 text-primary",
-      text: "I can hear how frustrated you are, and I'm sorry about the wait. Let me find out what's happening with your mother's results right now.",
-      technique: "Acknowledgement + commitment",
-      esc: { dir: "down", label: "Level 6 \u2192 5" },
-    },
-    {
-      speaker: "Patient",
-      badge: "bg-muted text-muted-foreground",
-      text: "You'd better, because if someone doesn't come and speak to me in the next five minutes I'm making a formal complaint.",
-      esc: { dir: "neutral", label: "Level 5" },
-    },
-    {
-      speaker: "Trainee",
-      badge: "bg-primary/10 text-primary",
-      text: "That's absolutely your right. I want to make sure you have the information you need. I'm going to check the system now and come straight back to you.",
-      technique: "Validation + concrete action",
-      esc: { dir: "down", label: "Level 5 \u2192 4" },
-    },
-  ];
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
-      <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5 sm:px-5">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          Example Transcript
-        </p>
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <Volume2 className="h-3 w-3" />
-          Full audio available
-        </div>
-      </div>
-      <div className="divide-y divide-border/40">
-        {turns.map((t, i) => (
-          <div key={i} className="flex gap-3 px-4 py-3 sm:px-5">
-            <div className="pt-0.5">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-                <Play className="h-3 w-3" />
-              </div>
-            </div>
-            <div className="min-w-0 flex-1 space-y-1">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${t.badge}`}>
-                  {t.speaker}
-                </span>
-                {t.technique && (
-                  <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-                    {t.technique}
-                  </span>
-                )}
-                <span
-                  className={`ml-auto text-[11px] font-medium ${
-                    t.esc.dir === "up"
-                      ? "text-destructive"
-                      : t.esc.dir === "down"
-                        ? "text-emerald-600"
-                        : "text-muted-foreground"
-                  }`}
-                >
-                  {t.esc.dir === "up" ? "\u2191" : t.esc.dir === "down" ? "\u2193" : "="}{" "}
-                  {t.esc.label}
-                </span>
-              </div>
-              <p className="text-[13px] leading-relaxed text-foreground/90">
-                {t.text}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="flex items-center justify-between border-t border-border/60 bg-muted/30 px-4 py-2.5 sm:px-5">
-        <p className="text-[12px] text-muted-foreground">
-          Click any turn to play back the original audio recording
-        </p>
-        <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-card px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
-          <GitFork className="h-3 w-3" />
-          Restart from turn
-        </div>
+      <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
+        <img
+          src="/screenshots/transcript.png"
+          alt="Transcript from a real PROLOG session showing patient, trainee, and AI clinician turns with classification tags"
+          className="w-full"
+        />
       </div>
     </div>
   );
@@ -663,7 +283,7 @@ export default async function LandingPage() {
               as well as the time and costs of developing immersive content.
             </p>
             <p className="mt-3 text-[14px] leading-relaxed text-muted-foreground">
-              PROLOG runs on the devices your staff already carry. A mobile
+              <P /> runs on the devices your staff already carry. A mobile
               phone, tablet, or laptop with a browser and microphone is all it
               takes. This makes it significantly cheaper to produce, deploy,
               and maintain — while delivering a more meaningful level of
@@ -678,7 +298,7 @@ export default async function LandingPage() {
                 <thead>
                   <tr className="border-b border-border/60 bg-muted/30">
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground" />
-                    <th className="px-4 py-2.5 text-left font-semibold">PROLOG</th>
+                    <th className="px-4 py-2.5 text-left font-semibold"><P /></th>
                     <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">XR Headsets</th>
                   </tr>
                 </thead>
@@ -714,7 +334,7 @@ export default async function LandingPage() {
             </h2>
             <p className="mt-3 text-[14px] leading-relaxed text-muted-foreground">
               Handling difficult conversations and building skills like
-              de-escalation takes practice, not just theory. PROLOG gives
+              de-escalation takes practice, not just theory. <P /> gives
               healthcare staff, care workers, and social workers a safe space
               to practise with AI-powered patients, relatives, and colleagues
               who respond dynamically to tone, technique, and timing — without
@@ -854,10 +474,7 @@ export default async function LandingPage() {
               the option to fork and restart from any point.
             </p>
           </div>
-          <div className="space-y-6">
-            <EscalationTimelineDemo />
-            <TranscriptDemo />
-          </div>
+          <SessionScreenshots />
         </div>
       </section>
 
@@ -997,7 +614,7 @@ export default async function LandingPage() {
                 A training tool, not a replacement for formal assessment
               </p>
               <p className="mt-1.5 text-[13px] leading-relaxed text-amber-800">
-                AI scoring is probabilistic by nature. PROLOG is designed
+                AI scoring is probabilistic by nature. <P /> is designed
                 to help trainees build adaptable muscle memory for difficult
                 conversations — preparation for an OSCE or similar structured
                 assessment, not a substitute for one. Think of it as a
@@ -1066,7 +683,7 @@ export default async function LandingPage() {
               <h3 className="text-[14px] font-semibold">Additional Scenario Domains</h3>
               <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
                 Update the scenario modelling and scoring method to support any
-                conversation type — extending PROLOG beyond de-escalation into
+                conversation type — extending <P /> beyond de-escalation into
                 broader communication skills training.
               </p>
             </div>
@@ -1162,7 +779,7 @@ export default async function LandingPage() {
               Ready to start training?
             </h2>
             <p className="mt-3 text-[14px] text-muted-foreground">
-              PROLOG is provided free of charge as an in-house training
+              <P /> is provided free of charge as an in-house training
               tool. Create an account in seconds and start practising.
             </p>
             <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">

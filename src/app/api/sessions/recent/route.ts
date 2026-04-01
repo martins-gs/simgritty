@@ -29,10 +29,19 @@ export async function GET() {
     }
   }
 
-  const enriched = (sessions ?? []).map((s) => ({
-    ...s,
-    trainee_name: nameMap[s.trainee_id]?.display_name ?? nameMap[s.trainee_id]?.email ?? null,
-  }));
+  const enriched = (sessions ?? []).map((s) => {
+    const profile = nameMap[s.trainee_id];
+    const displayName = profile?.display_name ?? null;
+    const email = profile?.email ?? null;
+    // Show "Display Name (email)" when both exist, otherwise whichever is available
+    let trainee_name: string | null = null;
+    if (displayName && email) {
+      trainee_name = `${displayName} (${email})`;
+    } else {
+      trainee_name = email ?? displayName;
+    }
+    return { ...s, trainee_name };
+  });
 
   return NextResponse.json(enriched);
 }

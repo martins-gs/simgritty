@@ -272,12 +272,16 @@ Read access to sessions, transcripts, events, educator notes, audio, and scenari
 
 ### User Identity
 
-`user_profiles` stores `display_name` and `email` (added via migration, backfilled from `auth.users`, and kept in sync by the `handle_new_user` trigger). The dashboard displays the user's name as a greeting, session lists show the trainee's display name (falling back to email), and the scenario edit page shows the creator's name. A lightweight profile API (`GET /api/profile`) returns the current user's profile for client-side identity checks.
+`user_profiles` stores `display_name` and `email` (added via migration, backfilled from `auth.users`, and kept in sync by the `handle_new_user` trigger). The dashboard displays the user's name as a greeting, session lists show the trainee's full identity as "Display Name (email)", and the scenario edit page shows the creator's name. A lightweight profile API (`GET /api/profile`) returns the current user's profile for client-side identity checks.
 
 ## 10. Dashboard
 
 The dashboard (`src/app/dashboard/page.tsx`) has three sections:
 
 - **Start a simulation**: quick-launch cards for published scenarios, linking directly to the briefing page.
-- **Scenarios**: compact fixed-width cards (220px) showing status badge, difficulty, clinical setting, and title. Only the creator sees the delete button.
-- **Recent sessions**: list of the 6 most recent sessions across all users, showing scenario title, trainee name, peak escalation level, exit status, and a delete button (owner only).
+- **Scenarios**: visually distinct tinted panel (`bg-muted/40`) containing compact fixed-width cards (220px) with white backgrounds and shadow lift on hover. Cards show status badge, difficulty, clinical setting, and title. Only the creator sees the delete button.
+- **Recent sessions**: list of the 6 most recent sessions across all users, showing scenario title, trainee name and email, peak escalation level, exit status, and a delete button (owner only).
+
+## 11. Landing Page
+
+The landing page (`src/app/page.tsx`) uses real session screenshots (`/public/screenshots/`) for the escalation timeline and transcript demos rather than synthetic mock components. Inline "PROLOG" text throughout the page renders in the Lexend Deca logo font with two-tone blue/green colouring via a `<P />` helper component. The configuration demo section still uses interactive mock sliders.
