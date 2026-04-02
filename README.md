@@ -162,6 +162,7 @@ src/
 │   └── api/                      # API routes (see below)
 │
 ├── components/
+│   ├── landing/                  # HeroTextRotator, EcosystemDiagram, IsometricDiagram
 │   ├── layout/                   # AppShell, Sidebar (hidden on mobile), TopBar (includes mobile nav)
 │   ├── simulation/               # Waveform, LiveTranscript, EscalationMeter, ConsentGate
 │   ├── scenarios/                # ScenarioForm, TraitDialPanel, VoiceConfigPanel, ArchetypeSelector, ScoringConfigPanel, MilestonesEditor
@@ -171,7 +172,8 @@ src/
 │
 ├── hooks/
 │   ├── useRealtimeSession.ts     # WebRTC peer connection, VAD, mic gating, transcripts
-│   └── useRealtimeVoiceRenderer.ts # Independent WebRTC for clinician bot voice
+│   ├── useRealtimeVoiceRenderer.ts # Independent WebRTC for clinician bot voice
+│   └── useSessionRecorder.ts     # MediaRecorder on merged mic + remote streams
 │
 ├── lib/
 │   ├── engine/
@@ -232,7 +234,9 @@ src/
 | POST | `/api/sessions/[id]/fork` | Fork session from a specific turn |
 | GET/POST | `/api/sessions/[id]/educator-notes` | Get / create educator notes |
 | POST | `/api/sessions/[id]/reflection` | Save trainee self-reflection (tags + free text) |
+| GET/POST | `/api/sessions/[id]/audio` | Get signed playback URL / upload session recording |
 | GET | `/api/sessions/recent` | User's recent sessions |
+| GET | `/api/profile` | Current user's profile (display name, email, role) |
 | PUT | `/api/org-settings` | Update organisation governance |
 
 ## Error Handling & Validation

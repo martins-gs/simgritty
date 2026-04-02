@@ -256,7 +256,7 @@ export const ttsRequestBodySchema = z.object({
   voice: z.string().optional(),
   style: z.enum(["default", "clinician"]).optional(),
   context: clinicianVoiceContextSchema.optional(),
-  voiceProfile: structuredVoiceProfileSchema.optional(),
+  voiceProfile: structuredVoiceProfileSchema.nullable().optional(),
 });
 
 export const realtimeSessionRequestBodySchema = z.object({

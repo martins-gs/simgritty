@@ -36,7 +36,7 @@ export function Sidebar() {
     <aside className="hidden md:flex h-screen w-56 shrink-0 flex-col border-r border-border/60 bg-sidebar">
       <div className="flex h-12 items-center px-5">
         <Link href="/" className="flex items-center">
-          <ProLogWordmark className="text-[15px]" subtitle iconSize={24} />
+          <ProLogWordmark className="text-[17px]" iconSize={26} />
         </Link>
       </div>
       <nav className="flex-1 px-3 pt-2">

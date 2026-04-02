@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 import { getUser } from "@/lib/supabase/server";
 import { HeroTextRotator } from "@/components/landing/HeroTextRotator";
+import { EcosystemDiagram } from "@/components/landing/EcosystemDiagram";
+import { IsometricDiagram } from "@/components/landing/IsometricDiagram";
 import { ProLogWordmark } from "@/components/ProLogLogo";
 
 /** Inline PROLOG text in logo font + colours, inherits surrounding size. */
@@ -205,7 +207,7 @@ export default async function LandingPage() {
       <header className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur-sm">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
           <Link href="/" className="flex items-center">
-            <ProLogWordmark className="text-[15px]" subtitle iconSize={26} />
+            <ProLogWordmark className="text-[17px]" iconSize={28} />
           </Link>
           <div className="flex items-center gap-2">
             {user ? (
@@ -251,7 +253,7 @@ export default async function LandingPage() {
               <HeroTextRotator />
             </h1>
             <p className="mx-auto mt-6 max-w-xl text-[15px] leading-relaxed text-muted-foreground sm:text-base">
-              Realistic voice simulations that let healthcare professionals,
+              Realistic voice simulations that let NHS staff,
               care workers, and social workers rehearse difficult conversations
               with patients, relatives, and staff, using AI speech models that
               adapt to every word you say — on any device with a browser and
@@ -372,6 +374,46 @@ export default async function LandingPage() {
               </p>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ── Ecosystem Diagram ──────────────────────────────────── */}
+      <section className="border-t border-white/10" style={{ backgroundColor: "#0d2d3a" }}>
+        <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
+          <div className="mb-10 text-center">
+            <p className="mb-2 text-[13px] font-medium uppercase tracking-wide text-teal-400">
+              Platform Architecture
+            </p>
+            <h2 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
+              Five components, one integrated training ecosystem
+            </h2>
+            <p className="mx-auto mt-3 max-w-xl text-[14px] leading-relaxed text-slate-300">
+              Every session brings together scenario design, real-time voice
+              simulation, automated assessment, trainee feedback, and
+              organisational governance &mdash; each working in concert.
+            </p>
+          </div>
+          <EcosystemDiagram />
+        </div>
+      </section>
+
+      {/* ── Isometric Diagram (Option B) ──────────────────────── */}
+      <section className="border-t border-border/60 bg-background">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
+          <div className="mb-6 text-center">
+            <p className="mb-2 text-[13px] font-medium uppercase tracking-wide text-primary">
+              Platform Architecture — Option B
+            </p>
+            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              Five components, one integrated training ecosystem
+            </h2>
+            <p className="mx-auto mt-3 max-w-xl text-[14px] leading-relaxed text-muted-foreground">
+              Every session brings together scenario design, real-time voice
+              simulation, automated assessment, trainee feedback, and
+              organisational governance &mdash; each working in concert.
+            </p>
+          </div>
+          <IsometricDiagram />
         </div>
       </section>
 
@@ -791,7 +833,7 @@ export default async function LandingPage() {
       {/* ── Footer ──────────────────────────────────────────────── */}
       <footer className="border-t border-border/60">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-6 sm:px-6">
-          <ProLogWordmark className="text-[13px]" subtitle iconSize={20} />
+          <ProLogWordmark className="text-[14px]" iconSize={22} />
           <p className="text-[12px] text-muted-foreground">
             Built for NHS Scotland and HSCP staff
           </p>
