@@ -169,6 +169,11 @@ export function ScoreCard({ score, preliminary }: ScoreCardProps) {
           description="Appropriately used or declined the AI clinician's help"
         />
       </div>
+      <div className="border-t border-slate-100 px-4 py-2.5 sm:px-5">
+        <p className="text-[11px] text-slate-400">
+          Percentages in brackets show this scenario&apos;s weighting for each dimension.
+        </p>
+      </div>
     </div>
   );
 }

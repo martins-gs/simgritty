@@ -167,4 +167,5 @@ export interface SessionReflection {
   tags: string[];
   free_text: string | null;
   created_at: string;
+  updated_at?: string | null;
 }

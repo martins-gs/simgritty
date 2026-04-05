@@ -62,7 +62,7 @@ function teardownRendererResources(
 }
 
 export function useRealtimeVoiceRenderer() {
-  const RESPONSE_DONE_NO_AUDIO_GRACE_MS = 500;
+  const RESPONSE_DONE_NO_AUDIO_GRACE_MS = 1200;
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -171,12 +171,20 @@ export function useRealtimeVoiceRenderer() {
 
       const nextAudioEl = document.createElement("audio");
       nextAudioEl.autoplay = true;
+      nextAudioEl.setAttribute("playsinline", "true");
       audioEl = nextAudioEl;
       audioElRef.current = nextAudioEl;
 
       nextPc.ontrack = (event) => {
         if (disconnectedRef.current) return;
         nextAudioEl.srcObject = event.streams[0];
+        const markAudioStarted = () => {
+          if (pendingSpeechRef.current) {
+            pendingSpeechRef.current.sawAudioStarted = true;
+          }
+        };
+        nextAudioEl.onplay = markAudioStarted;
+        nextAudioEl.onplaying = markAudioStarted;
       };
 
       const nextDc = nextPc.createDataChannel("oai-events");
@@ -314,10 +322,9 @@ export function useRealtimeVoiceRenderer() {
                   pendingSpeechRef.current &&
                   (!pendingSpeechRef.current.responseId || pendingSpeechRef.current.responseId === response?.id)
                 ) {
-                  console.info(
-                    `[Clinician Audio] path=realtime event=response.done fallback_complete response_id=${response?.id || "unknown"} delay_ms=${fallbackMs}`
-                  );
-                  clearPendingSpeech("completed");
+                  failPendingSpeech(`response.done:no_audio delay_ms=${fallbackMs}`, () => {
+                    config.onError("Clinician realtime response completed without audio");
+                  });
                 }
               }, fallbackMs);
               return;

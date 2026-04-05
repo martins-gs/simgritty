@@ -1,6 +1,6 @@
-# SimGritty
+# PROLOG
 
-Real-time voice-based de-escalation training simulator for clinical communication skills. Trainees practice managing difficult conversations with AI-driven simulated patients that respond dynamically to tone, technique, and emotional delivery.
+Real-time voice simulation platform for NHS clinical communication training. Trainees practice de-escalating difficult conversations with AI-driven simulated patients that respond dynamically to tone, technique, and emotional delivery. Educators author scenarios, governance admins set org-wide guardrails, and an assessment engine scores every session across composure, de-escalation effectiveness, clinical task maintenance, and appropriate support-seeking.
 
 Built with Next.js 16, OpenAI Realtime API (WebRTC), and Supabase.
 
@@ -99,7 +99,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Database Setup
 
-SimGritty uses Supabase Postgres. Apply migrations from `supabase/migrations/` or create the following tables:
+PROLOG uses Supabase Postgres. Apply migrations from `supabase/migrations/` or create the following tables:
 
 ### Tables
 
@@ -331,15 +331,15 @@ Post-session performance is scored 0-100 across four dimensions, each scored 0-1
 | Dimension | Measures | How |
 |-----------|----------|-----|
 | Composure | Maintained steady, professional tone under pressure | Start at 100, subtract penalties for detected markers (defensive language, dismissiveness, hostility mirroring, sarcasm) |
-| De-escalation | Effectiveness of de-escalation attempts | 40% attempt rate + 60% success rate, measured against escalation state change |
+| De-escalation | Effectiveness of de-escalation attempts | 40% attempt rate + 60% success rate, measured against patient state change without clinician takeover intervening first |
 | Clinical Task | Continued to address the clinical need (optional) | Ratio of completed milestones to total defined milestones |
-| Support Seeking | Appropriately used or declined the AI clinician | Baseline 70, +15 for appropriate requests, -15 for premature requests |
+| Support Seeking | Appropriately used or declined the AI clinician | Baseline 70, +15 for appropriate takeover requests, -15 for premature takeover requests |
 
 **Overall score** is a weighted average. Weights are defined per scenario (default: equal across active dimensions). When clinical milestones are not defined, that dimension is excluded and weights are renormalized.
 
 **Qualitative labels**: Strong (80-100), Developing (60-79), Needs practice (0-59)
 
-**Session validity gate**: sessions under 6 turns are not scored. Sessions of 6-12 turns show scores with a "preliminary" caveat.
+**Session validity gate**: sessions under 6 trainee turns are not scored. Sessions of 6-12 trainee turns show scores with a "preliminary" caveat.
 
 **Score evidence**: every point earned or lost links to a specific transcript turn and classifier output. The review page shows "key moments" (2-3 highest-impact events) and a technique suggestion based on the weakest dimension.
 

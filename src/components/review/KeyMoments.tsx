@@ -26,6 +26,12 @@ const EVIDENCE_DESCRIPTIONS: Record<string, (data: Record<string, unknown>) => s
   de_escalation_attempt: (data) => {
     const technique = data.technique as string | undefined;
     const effective = data.effective as boolean;
+    const clinicianIntervened = data.clinicianIntervened as boolean | undefined;
+    if (clinicianIntervened) {
+      return technique
+        ? `${technique.replace(/_/g, " ")} — not credited because the AI clinician intervened before the next patient response`
+        : "Not credited because the AI clinician intervened before the next patient response";
+    }
     if (technique) {
       return `${technique.replace(/_/g, " ")} — ${effective ? "effective" : "not effective"}`;
     }

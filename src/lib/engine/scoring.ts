@@ -48,13 +48,19 @@ export interface ScoringInput {
 // Constants
 // ---------------------------------------------------------------------------
 
-const MIN_TURNS_FOR_SCORING = 6;
-const PRELIMINARY_TURN_THRESHOLD = 12;
+const MIN_TRAINEE_TURNS_FOR_SCORING = 6;
+const PRELIMINARY_TRAINEE_TURN_THRESHOLD = 12;
 const SUPPORT_SEEKING_BASELINE = 70;
 const SUPPORT_SEEKING_APPROPRIATE_BONUS = 15;
 const SUPPORT_SEEKING_PREMATURE_PENALTY = 15;
 const SUPPORT_SEEKING_CRITICAL_PENALTY_PER_TURN = 10;
 const CRITICAL_GRACE_TURNS = 3;
+
+interface SupportEpisode {
+  startTurnIndex: number;
+  endTurnIndex: number;
+  escalationLevel: number;
+}
 
 // ---------------------------------------------------------------------------
 // Qualitative label
@@ -160,9 +166,17 @@ function computeDeEscalation(
 
     // Measure effectiveness: did escalation decrease after this attempt?
     const levelBefore = findLevelBeforeTurn(turn.turn_index, allTurns);
-    const levelAfterNext = findLevelAfterNextPatientTurn(turn.turn_index, allTurns);
+    const { levelAfterNextPatientTurn, clinicianIntervened } = findNextPatientOutcomeAfterTurn(
+      turn.turn_index,
+      allTurns
+    );
+    const effective =
+      !clinicianIntervened &&
+      levelBefore != null &&
+      levelAfterNextPatientTurn != null &&
+      levelAfterNextPatientTurn < levelBefore;
 
-    if (levelBefore != null && levelAfterNext != null && levelAfterNext < levelBefore) {
+    if (effective) {
       effectiveAttempts++;
       evidence.push({
         dimension: "de_escalation",
@@ -172,7 +186,8 @@ function computeDeEscalation(
           technique: cr.de_escalation_technique,
           effective: true,
           levelBefore,
-          levelAfter: levelAfterNext,
+          levelAfter: levelAfterNextPatientTurn,
+          clinicianIntervened,
         },
         scoreImpact: 0, // Calculated in aggregate
       });
@@ -185,7 +200,8 @@ function computeDeEscalation(
           technique: cr.de_escalation_technique,
           effective: false,
           levelBefore,
-          levelAfter: levelAfterNext,
+          levelAfter: levelAfterNextPatientTurn,
+          clinicianIntervened,
         },
         scoreImpact: 0,
       });
@@ -215,17 +231,110 @@ function findLevelBeforeTurn(
 }
 
 /** Find the escalation level after the next patient turn following this trainee turn. */
-function findLevelAfterNextPatientTurn(
+function findNextPatientOutcomeAfterTurn(
   turnIndex: number,
   allTurns: TranscriptTurn[]
-): number | null {
-  // Look for the next "ai" (patient) turn after this turn
+): { levelAfterNextPatientTurn: number | null; clinicianIntervened: boolean } {
+  let clinicianIntervened = false;
+
+  // Look for the next patient turn after this turn and track whether the AI
+  // clinician intervened before that reply. If the clinician steps in first,
+  // any recovery should not be credited to the trainee's last attempt.
   for (const turn of allTurns) {
-    if (turn.turn_index > turnIndex && turn.speaker === "ai" && turn.state_after) {
-      return turn.state_after.level;
+    if (turn.turn_index <= turnIndex) continue;
+    if (turn.speaker === "system") {
+      clinicianIntervened = true;
+      continue;
+    }
+    if (turn.speaker === "ai" && turn.state_after) {
+      return {
+        levelAfterNextPatientTurn: turn.state_after.level,
+        clinicianIntervened,
+      };
     }
   }
+  return { levelAfterNextPatientTurn: null, clinicianIntervened };
+}
+
+function findPreviousNonAiSpeaker(
+  turnIndex: number,
+  allTurns: TranscriptTurn[]
+): TranscriptTurn["speaker"] | null {
+  for (let i = allTurns.length - 1; i >= 0; i--) {
+    const turn = allTurns[i];
+    if (turn.turn_index >= turnIndex) continue;
+    if (turn.speaker === "ai") continue;
+    return turn.speaker;
+  }
   return null;
+}
+
+function collectSupportEpisodes(
+  turns: TranscriptTurn[],
+  events: SimulationStateEvent[]
+): SupportEpisode[] {
+  const sortedTurns = [...turns].sort((a, b) => a.turn_index - b.turn_index);
+  const episodes: SupportEpisode[] = [];
+  let activeEpisode: Omit<SupportEpisode, "endTurnIndex"> | null = null;
+  let lastSeenTurnIndex = -1;
+
+  for (const turn of sortedTurns) {
+    if (turn.speaker === "trainee" && activeEpisode) {
+      episodes.push({ ...activeEpisode, endTurnIndex: lastSeenTurnIndex });
+      activeEpisode = null;
+    }
+
+    if (turn.speaker === "system") {
+      const previousNonAiSpeaker = findPreviousNonAiSpeaker(turn.turn_index, sortedTurns);
+      const isEpisodeStart = previousNonAiSpeaker == null || previousNonAiSpeaker === "trainee";
+      if (isEpisodeStart) {
+        const escalationLevel = findLevelBeforeTurn(turn.turn_index, sortedTurns);
+        if (escalationLevel != null) {
+          activeEpisode = {
+            startTurnIndex: turn.turn_index,
+            escalationLevel,
+          };
+        }
+      }
+    }
+
+    lastSeenTurnIndex = turn.turn_index;
+  }
+
+  if (activeEpisode) {
+    episodes.push({ ...activeEpisode, endTurnIndex: lastSeenTurnIndex });
+  }
+
+  if (episodes.length > 0) {
+    return episodes;
+  }
+
+  const fallbackEpisodes = new Map<number, SupportEpisode>();
+  for (const event of events) {
+    if (event.event_type !== "clinician_audio") continue;
+    const payload = parseClinicianAudioPayload(event.payload);
+    if (!payload) continue;
+
+    const escalationLevel = event.escalation_before ?? event.escalation_after;
+    if (escalationLevel == null) continue;
+
+    fallbackEpisodes.set(payload.turn_index, {
+      startTurnIndex: payload.turn_index,
+      endTurnIndex: payload.turn_index,
+      escalationLevel,
+    });
+  }
+
+  return [...fallbackEpisodes.values()].sort((a, b) => a.startTurnIndex - b.startTurnIndex);
+}
+
+function isTurnCoveredBySupportEpisode(
+  turnIndex: number,
+  episodes: SupportEpisode[]
+): boolean {
+  return episodes.some((episode) => (
+    turnIndex >= episode.startTurnIndex && turnIndex <= episode.endTurnIndex
+  ));
 }
 
 // ---------------------------------------------------------------------------
@@ -280,49 +389,19 @@ function computeSupportSeeking(
   if (supportThreshold == null) return SUPPORT_SEEKING_BASELINE;
 
   let score = SUPPORT_SEEKING_BASELINE;
+  const supportEpisodes = collectSupportEpisodes(turns, events);
 
-  // Find bot clinician invocations — "system" speaker turns are clinician turns
-  const botInvocations: { turnIndex: number; escalationLevel: number }[] = [];
-  for (const turn of turns) {
-    if (turn.speaker === "system") {
-      // Find the escalation level at the time of invocation
-      const level = findLevelBeforeTurn(turn.turn_index, turns);
-      if (level != null) {
-        botInvocations.push({ turnIndex: turn.turn_index, escalationLevel: level });
-      }
-    }
-  }
-
-  // Also check clinician_audio events for bot invocations
-  for (const event of events) {
-    if (event.event_type === "clinician_audio") {
-      const payload = parseClinicianAudioPayload(event.payload);
-      if (payload) {
-        // Only add if not already tracked via turns
-        const alreadyTracked = botInvocations.some(
-          (b) => b.turnIndex === payload.turn_index
-        );
-        if (!alreadyTracked) {
-          const level = event.escalation_before ?? event.escalation_after;
-          if (level != null) {
-            botInvocations.push({ turnIndex: payload.turn_index, escalationLevel: level });
-          }
-        }
-      }
-    }
-  }
-
-  // Score each invocation
-  for (const invocation of botInvocations) {
-    if (invocation.escalationLevel < supportThreshold) {
+  // Score each help-seeking episode once, at takeover start.
+  for (const episode of supportEpisodes) {
+    if (episode.escalationLevel < supportThreshold) {
       // Premature
       score -= SUPPORT_SEEKING_PREMATURE_PENALTY;
       evidence.push({
         dimension: "support_seeking",
-        turnIndex: invocation.turnIndex,
+        turnIndex: episode.startTurnIndex,
         evidenceType: "support_invoked",
         evidenceData: {
-          escalationLevel: invocation.escalationLevel,
+          escalationLevel: episode.escalationLevel,
           threshold: supportThreshold,
           appropriate: false,
         },
@@ -333,10 +412,10 @@ function computeSupportSeeking(
       score += SUPPORT_SEEKING_APPROPRIATE_BONUS;
       evidence.push({
         dimension: "support_seeking",
-        turnIndex: invocation.turnIndex,
+        turnIndex: episode.startTurnIndex,
         evidenceType: "support_invoked",
         evidenceData: {
-          escalationLevel: invocation.escalationLevel,
+          escalationLevel: episode.escalationLevel,
           threshold: supportThreshold,
           appropriate: true,
         },
@@ -348,16 +427,13 @@ function computeSupportSeeking(
   // Penalty for sustained critical escalation without help-seeking
   if (criticalThreshold != null) {
     let consecutiveCritical = 0;
-    let lastBotTurnIndex = -1;
-
-    for (const invocation of botInvocations) {
-      if (invocation.turnIndex > lastBotTurnIndex) {
-        lastBotTurnIndex = invocation.turnIndex;
-      }
-    }
 
     for (const turn of turns) {
-      if (turn.turn_index <= lastBotTurnIndex) continue;
+      if (isTurnCoveredBySupportEpisode(turn.turn_index, supportEpisodes)) {
+        consecutiveCritical = 0;
+        continue;
+      }
+
       const level = turn.state_after?.level;
       if (level != null && level >= criticalThreshold) {
         consecutiveCritical++;
@@ -433,10 +509,12 @@ function getSummary(
 // ---------------------------------------------------------------------------
 
 export function computeScore(input: ScoringInput): ScoreBreakdown {
-  const { session, turns, events, milestones, weights, supportThreshold, criticalThreshold } = input;
+  const { turns, events, milestones, weights, supportThreshold, criticalThreshold } = input;
 
-  const turnCount = turns.length;
-  const sessionValid = turnCount >= MIN_TURNS_FOR_SCORING;
+  const allTurns = [...turns].sort((a, b) => a.turn_index - b.turn_index);
+  const traineeTurns = allTurns.filter((t) => t.speaker === "trainee");
+  const turnCount = traineeTurns.length;
+  const sessionValid = turnCount >= MIN_TRAINEE_TURNS_FOR_SCORING;
   const hasMilestones = milestones.length > 0;
 
   // Resolve weights
@@ -455,16 +533,12 @@ export function computeScore(input: ScoringInput): ScoreBreakdown {
       weightsUsed,
       sessionValid: false,
       turnCount,
-      summary: "This session ended before enough interaction occurred to generate a score.",
+      summary: "This session ended before enough trainee interaction occurred to generate a score.",
       evidence: [],
     };
   }
 
   const evidence: ScoreEvidence[] = [];
-
-  // All turns (all speakers) needed for level lookups
-  const allTurns = [...turns].sort((a, b) => a.turn_index - b.turn_index);
-  const traineeTurns = allTurns.filter((t) => t.speaker === "trainee");
 
   // Compute each dimension
   const composure = computeComposure(traineeTurns, evidence);
@@ -505,9 +579,12 @@ export function computeScore(input: ScoringInput): ScoreBreakdown {
 // Helpers for review page
 // ---------------------------------------------------------------------------
 
-/** Whether the session is in the "preliminary" range (6-12 turns). */
+/** Whether the session is in the "preliminary" range (6-12 trainee turns). */
 export function isSessionPreliminary(turnCount: number): boolean {
-  return turnCount >= MIN_TURNS_FOR_SCORING && turnCount <= PRELIMINARY_TURN_THRESHOLD;
+  return (
+    turnCount >= MIN_TRAINEE_TURNS_FOR_SCORING &&
+    turnCount <= PRELIMINARY_TRAINEE_TURN_THRESHOLD
+  );
 }
 
 /** Pick the 2-3 highest-impact evidence items for "key moments" display. */

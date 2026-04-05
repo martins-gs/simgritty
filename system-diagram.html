@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Training Platform - System Diagram</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1600px;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+            filter: drop-shadow(0 4px 20px rgba(0, 0, 0, 0.06));
+        }
+
+        /* Module styles */
+        .module {
+            transition: transform 0.3s ease;
+        }
+
+        .module:hover {
+            transform: translateY(-2px);
+        }
+
+        .module-box {
+            fill: white;
+            stroke: #e0e0e0;
+            stroke-width: 1.5;
+        }
+
+        .module-accent {
+            opacity: 0.08;
+        }
+
+        .accent-blue { fill: #4a90e2; }
+        .accent-green { fill: #7ed321; }
+        .accent-purple { fill: #9b59b6; }
+        .accent-coral { fill: #ff6b6b; }
+        .accent-teal { fill: #1abc9c; }
+
+        /* Core system styling */
+        .core-module .module-box {
+            stroke: #7ed321;
+            stroke-width: 2;
+        }
+
+        .core-glow {
+            fill: #7ed321;
+            opacity: 0.05;
+            animation: pulse 4s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.05; transform: scale(1); }
+            50% { opacity: 0.12; transform: scale(1.02); }
+        }
+
+        /* Connection lines */
+        .connection {
+            fill: none;
+            stroke: #cbd5e0;
+            stroke-width: 1.5;
+            stroke-linecap: round;
+            opacity: 0;
+            animation: fadeIn 0.8s ease-out forwards;
+        }
+
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+
+        .connection-active {
+            stroke: #7ed321;
+            stroke-width: 2;
+        }
+
+        /* Flow particles */
+        .flow-particle {
+            fill: #7ed321;
+            opacity: 0;
+        }
+
+        @keyframes flowParticle {
+            0% { opacity: 0; }
+            10% { opacity: 0.8; }
+            90% { opacity: 0.8; }
+            100% { opacity: 0; }
+        }
+
+        /* Text styling */
+        .label {
+            font-size: 14px;
+            font-weight: 600;
+            fill: #2d3748;
+            letter-spacing: 0.3px;
+        }
+
+        .label-small {
+            font-size: 10px;
+            font-weight: 500;
+            fill: #718096;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .connection-label {
+            font-size: 9px;
+            font-weight: 500;
+            fill: #a0aec0;
+            letter-spacing: 0.3px;
+        }
+
+        /* Decorative elements */
+        .deco-cube {
+            fill: none;
+            stroke: #e0e0e0;
+            stroke-width: 1;
+            opacity: 0.3;
+            animation: float 8s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .deco-particle {
+            fill: #7ed321;
+            opacity: 0.2;
+            animation: floatParticle 6s ease-in-out infinite;
+        }
+
+        @keyframes floatParticle {
+            0%, 100% { transform: translate(0, 0); opacity: 0.2; }
+            50% { transform: translate(5px, -8px); opacity: 0.4; }
+        }
+
+        /* Stagger animations */
+        .anim-delay-1 { animation-delay: 0.2s; }
+        .anim-delay-2 { animation-delay: 0.4s; }
+        .anim-delay-3 { animation-delay: 0.6s; }
+        .anim-delay-4 { animation-delay: 0.8s; }
+        .anim-delay-5 { animation-delay: 1s; }
+        .anim-delay-6 { animation-delay: 1.2s; }
+
+        /* Icon styles */
+        .icon {
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <svg viewBox="0 0 1400 900" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <!-- Gradient definitions -->
+                <linearGradient id="moduleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#f8f9fa;stop-opacity:1" />
+                </linearGradient>
+                
+                <!-- Isometric transform patterns -->
+                <pattern id="dots" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+                    <circle cx="2" cy="2" r="1" fill="#e0e0e0" opacity="0.3"/>
+                </pattern>
+            </defs>
+
+            <!-- Background decorative elements -->
+            <g class="decorative-layer" opacity="0.4">
+                <!-- Floating cubes -->
+                <path class="deco-cube" d="M 100 150 l 20 -12 l 20 12 l -20 12 z M 100 150 l 0 24 l 20 12 l 0 -24 z M 140 150 l 0 24 l -20 12 l 0 -24 z" style="animation-delay: 0s;"/>
+                <path class="deco-cube" d="M 1250 200 l 15 -9 l 15 9 l -15 9 z M 1250 200 l 0 18 l 15 9 l 0 -18 z M 1280 200 l 0 18 l -15 9 l 0 -18 z" style="animation-delay: 2s;"/>
+                <path class="deco-cube" d="M 200 700 l 18 -11 l 18 11 l -18 11 z M 200 700 l 0 22 l 18 11 l 0 -22 z M 236 700 l 0 22 l -18 11 l 0 -22 z" style="animation-delay: 4s;"/>
+                
+                <!-- Floating particles -->
+                <circle class="deco-particle" cx="150" cy="400" r="3" style="animation-delay: 0s;"/>
+                <circle class="deco-particle" cx="1200" cy="600" r="2.5" style="animation-delay: 1.5s;"/>
+                <circle class="deco-particle" cx="700" cy="150" r="2" style="animation-delay: 3s;"/>
+                <circle class="deco-particle" cx="400" cy="750" r="3" style="animation-delay: 2.5s;"/>
+                <circle class="deco-particle" cx="1100" cy="350" r="2" style="animation-delay: 4s;"/>
+            </g>
+
+            <!-- Connection lines layer -->
+            <g class="connections-layer">
+                <!-- Educator to outputs -->
+                <path class="connection anim-delay-1" d="M 180 200 Q 280 220 350 280" id="conn1"/>
+                <path class="connection anim-delay-1" d="M 180 240 Q 230 300 280 380" id="conn2"/>
+                <path class="connection anim-delay-1" d="M 180 280 Q 200 340 220 440" id="conn3"/>
+                <path class="connection anim-delay-1" d="M 180 260 Q 250 420 320 550" id="conn4"/>
+                
+                <!-- Author inputs to Core System -->
+                <path class="connection connection-active anim-delay-2" d="M 460 300 Q 550 320 620 380" id="conn5"/>
+                <path class="connection connection-active anim-delay-2" d="M 360 410 Q 520 420 620 430" id="conn6"/>
+                <path class="connection connection-active anim-delay-2" d="M 300 470 Q 500 480 620 490" id="conn7"/>
+                <path class="connection connection-active anim-delay-2" d="M 410 580 Q 550 560 650 520" id="conn8"/>
+                
+                <!-- Core system interconnections -->
+                <path class="connection connection-active anim-delay-3" d="M 760 400 Q 780 440 760 480" id="conn9"/>
+                <path class="connection connection-active anim-delay-3" d="M 840 410 Q 900 430 940 480" id="conn10"/>
+                <path class="connection connection-active anim-delay-3" d="M 700 500 Q 750 540 840 560" id="conn11"/>
+                <path class="connection connection-active anim-delay-3" d="M 940 540 Q 920 580 880 620" id="conn12"/>
+                
+                <!-- Trainee connections -->
+                <path class="connection connection-active anim-delay-4" d="M 580 680 Q 620 630 680 560" id="conn13"/>
+                <path class="connection anim-delay-5" d="M 620 700 Q 850 700 1020 680" id="conn14"/>
+                
+                <!-- Assessment to output -->
+                <path class="connection connection-active anim-delay-5" d="M 990 620 Q 1040 650 1080 670" id="conn15"/>
+            </g>
+
+            <!-- Connection labels -->
+            <g class="connection-labels">
+                <text class="connection-label" x="300" y="260">authors</text>
+                <text class="connection-label" x="220" y="360">provides</text>
+                <text class="connection-label" x="190" y="410">sets</text>
+                <text class="connection-label" x="260" y="525">defines</text>
+                
+                <text class="connection-label" x="520" y="310">shapes</text>
+                <text class="connection-label" x="470" y="415">grounds</text>
+                <text class="connection-label" x="430" y="475">constrains</text>
+                <text class="connection-label" x="510" y="570">guides</text>
+                
+                <text class="connection-label" x="770" y="440">updates</text>
+                <text class="connection-label" x="880" y="445">drives</text>
+                <text class="connection-label" x="760" y="530">provides evidence to</text>
+                <text class="connection-label" x="910" y="600">informs</text>
+                
+                <text class="connection-label" x="610" y="640">converses with</text>
+                <text class="connection-label" x="800" y="695">reviews</text>
+                <text class="connection-label" x="1020" y="645">generates</text>
+            </g>
+
+            <!-- Flow particles on connections -->
+            <g class="particles-layer">
+                <circle class="flow-particle" cx="0" cy="0" r="2.5">
+                    <animateMotion dur="3s" repeatCount="indefinite" path="M 180 200 Q 280 220 350 280">
+                        <animate attributeName="opacity" values="0;0.8;0.8;0" dur="3s" repeatCount="indefinite"/>
+                    </animateMotion>
+                </circle>
+                <circle class="flow-particle" cx="0" cy="0" r="2.5">
+                    <animateMotion dur="3.5s" repeatCount="indefinite" begin="0.5s" path="M 460 300 Q 550 320 620 380">
+                        <animate attributeName="opacity" values="0;0.8;0.8;0" dur="3.5s" repeatCount="indefinite" begin="0.5s"/>
+                    </animateMotion>
+                </circle>
+                <circle class="flow-particle" cx="0" cy="0" r="2.5">
+                    <animateMotion dur="2.8s" repeatCount="indefinite" begin="1s" path="M 360 410 Q 520 420 620 430">
+                        <animate attributeName="opacity" values="0;0.8;0.8;0" dur="2.8s" repeatCount="indefinite" begin="1s"/>
+                    </animateMotion>
+                </circle>
+                <circle class="flow-particle" cx="0" cy="0" r="2.5">
+                    <animateMotion dur="2.5s" repeatCount="indefinite" begin="1.5s" path="M 580 680 Q 620 630 680 560">
+                        <animate attributeName="opacity" values="0;0.8;0.8;0" dur="2.5s" repeatCount="indefinite" begin="1.5s"/>
+                    </animateMotion>
+                </circle>
+                <circle class="flow-particle" cx="0" cy="0" r="2.5">
+                    <animateMotion dur="4s" repeatCount="indefinite" begin="2s" path="M 990 620 Q 1040 650 1080 670">
+                        <animate attributeName="opacity" values="0;0.8;0.8;0" dur="4s" repeatCount="indefinite" begin="2s"/>
+                    </animateMotion>
+                </circle>
+            </g>
+
+            <!-- Modules layer -->
+            <g class="modules-layer">
+                
+                <!-- Left side: Authoring layer -->
+                
+                <!-- Educator -->
+                <g class="module" transform="translate(80, 180)">
+                    <rect class="module-box" width="100" height="120" rx="8" fill="url(#moduleGrad)"/>
+                    <rect class="module-accent accent-coral" x="5" y="5" width="90" height="30" rx="4"/>
+                    <circle cx="50" cy="50" r="18" fill="none" stroke="#ff6b6b" stroke-width="2"/>
+                    <path d="M 50 44 L 50 56 M 38 50 L 50 44 M 62 50 L 50 44" stroke="#ff6b6b" stroke-width="2" fill="none" stroke-linecap="round"/>
+                    <text class="label" x="50" y="88" text-anchor="middle">Educator</text>
+                </g>
+
+                <!-- Scenario -->
+                <g class="module" transform="translate(350, 260)">
+                    <rect class="module-box" width="110" height="70" rx="6" fill="url(#moduleGrad)"/>
+                    <rect class="module-accent accent-blue" x="5" y="5" width="100" height="20" rx="3"/>
+                    <text class="label" x="55" y="45" text-anchor="middle">Scenario</text>
+                </g>
+
+                <!-- Domain Knowledge -->
+                <g class="module" transform="translate(250, 370)">
+                    <rect class="module-box" width="110" height="70" rx="6" fill="url(#moduleGrad)"/>
+                    <rect class="module-accent accent-teal" x="5" y="5" width="100" height="20" rx="3"/>
+                    <path d="M 40 35 L 50 35 L 50 45 L 40 45 Z M 60 35 L 70 35 L 70 45 L 60 45 Z" fill="#1abc9c" opacity="0.3"/>
+                    <text class="label" x="55" y="60" text-anchor="middle">Domain</text>
+                    <text class="label-small" x="55" y="68" text-anchor="middle">Knowledge</text>
+                </g>
+
+                <!-- Safety Constraints -->
+                <g class="module" transform="translate(160, 430)">
+                    <rect class="module-box" width="110" height="70" rx="6" fill="url(#moduleGrad)"/>
+                    <rect class="module-accent accent-purple" x="5" y="5" width="100" height="20" rx="3"/>
+                    <circle cx="45" cy="38" r="8" fill="none" stroke="#9b59b6" stroke-width="2"/>
+                    <path d="M 45 32 L 45 38 M 42 38 L 45 42 L 48 38" stroke="#9b59b6" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+                    <text class="label" x="55" y="58" text-anchor="middle">Safety</text>
+                    <text class="label-small" x="55" y="66" text-anchor="middle">Constraints</text>
+                </g>
+
+                <!-- Scoring Rubric -->
+                <g class="module" transform="translate(300, 540)">
+                    <rect class="module-box" width="110" height="70" rx="6" fill="url(#moduleGrad)"/>
+                    <rect class="module-accent accent-coral" x="5" y="5" width="100" height="20" rx="3"/>
+                    <rect x="35" y="32" width="6" height="6" fill="#ff6b6b" opacity="0.4" rx="1"/>
+                    <rect x="45" y="32" width="6" height="6" fill="#ff6b6b" opacity="0.4" rx="1"/>
+                    <rect x="55" y="32" width="6" height="6" fill="#ff6b6b" opacity="0.4" rx="1"/>
+                    <rect x="65" y="32" width="6" height="6" fill="#ff6b6b" opacity="0.4" rx="1"/>
+                    <text class="label" x="55" y="55" text-anchor="middle">Scoring</text>
+                    <text class="label-small" x="55" y="63" text-anchor="middle">Rubric</text>
+                </g>
+
+                <!-- Center: Core Runtime System -->
+                
+                <!-- Core glow effect -->
+                <ellipse class="core-glow" cx="820" cy="480" rx="280" ry="160"/>
+
+                <!-- AI Counterpart -->
+                <g class="module core-module" transform="translate(650, 360)">
+                    <rect class="module-box" width="140" height="90" rx="8" fill="url(#moduleGrad)"/>
+                    <rect class="module-accent accent-green" x="5" y="5" width="130" height="25" rx="4"/>
+                    <circle cx="70" cy="50" r="16" fill="none" stroke="#7ed321" stroke-width="2.5"/>
+                    <circle cx="64" cy="47" r="2" fill="#7ed321"/>
+                    <circle cx="76" cy="47" r="2" fill="#7ed321"/>
+                    <path d="M 62 56 Q 70 60 78 56" stroke="#7ed321" stroke-width="2" fill="none" stroke-linecap="round"/>
+                    <text class="label" x="70" y="80" text-anchor="middle">AI Counterpart</text>
+                </g>
+
+                <!-- Behavioural Model -->
+                <g class="module core-module" transform="translate(880, 460)">
+                    <rect class="module-box" width="140" height="90" rx="8" fill="url(#moduleGrad)"/>
+                    <rect class="module-accent accent-green" x="5" y="5" width="130" height="25" rx="4"/>
+                    <path d="M 50 40 Q 70 35 90 40 Q 85 50 70 55 Q 55 50 50 40 Z" fill="none" stroke="#7ed321" stroke-width="2"/>
+                    <circle cx="60" cy="43" r="2" fill="#7ed321"/>
+                    <circle cx="70" cy="41" r="2" fill="#7ed321"/>
+                    <circle cx="80" cy="43" r="2" fill="#7ed321"/>
+                    <text class="label" x="70" y="75" text-anchor="middle">Behavioural</text>
+                    <text class="label-small" x="70" y="83" text-anchor="middle">Model</text>
+                </g>
+
+                <!-- Assessment Engine -->
+                <g class="module core-module" transform="translate(820, 590)">
+                    <rect class="module-box" width="140" height="90" rx="8" fill="url(#moduleGrad)"/>
+                    <rect class="module-accent accent-green" x="5" y="5" width="130" height="25" rx="4"/>
+                    <rect x="50" y="40" width="12" height="16" fill="none" stroke="#7ed321" stroke-width="2" rx="2"/>
+                    <rect x="68" y="40" width="12" height="16" fill="none" stroke="#7ed321" stroke-width="2" rx="2"/>
+                    <path d="M 48 58 L 82 58" stroke="#7ed321" stroke-width="2" stroke-linecap="round"/>
+                    <text class="label" x="70" y="76" text-anchor="middle">Assessment</text>
+                    <text class="label-small" x="70" y="84" text-anchor="middle">Engine</text>
+                </g>
+
+                <!-- Trainee -->
+                <g class="module" transform="translate(500, 660)">
+                    <rect class="module-box" width="120" height="80" rx="8" fill="url(#moduleGrad)"/>
+                    <rect class="module-accent accent-blue" x="5" y="5" width="110" height="23" rx="4"/>
+                    <circle cx="60" cy="45" r="14" fill="none" stroke="#4a90e2" stroke-width="2"/>
+                    <path d="M 52 45 L 58 45 M 62 45 L 68 45" stroke="#4a90e2" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M 60 50 L 60 42" stroke="#4a90e2" stroke-width="2" stroke-linecap="round"/>
+                    <text class="label" x="60" y="70" text-anchor="middle">Trainee</text>
+                </g>
+
+                <!-- Right side: Output layer -->
+                
+                <!-- Review & Feedback -->
+                <g class="module" transform="translate(1080, 650)">
+                    <rect class="module-box" width="140" height="90" rx="8" fill="url(#moduleGrad)"/>
+                    <rect class="module-accent accent-teal" x="5" y="5" width="130" height="25" rx="4"/>
+                    <rect x="45" y="40" width="50" height="4" fill="#1abc9c" opacity="0.3" rx="2"/>
+                    <rect x="45" y="48" width="40" height="4" fill="#1abc9c" opacity="0.3" rx="2"/>
+                    <rect x="45" y="56" width="45" height="4" fill="#1abc9c" opacity="0.3" rx="2"/>
+                    <text class="label" x="70" y="75" text-anchor="middle">Review &</text>
+                    <text class="label-small" x="70" y="83" text-anchor="middle">Feedback</text>
+                </g>
+
+            </g>
+
+            <!-- System labels -->
+            <g class="system-labels">
+                <text class="label-small" x="180" y="150" text-anchor="middle" fill="#718096">AUTHORING</text>
+                <text class="label-small" x="820" y="330" text-anchor="middle" fill="#7ed321">LIVE RUNTIME CORE</text>
+                <text class="label-small" x="1150" y="630" text-anchor="middle" fill="#718096">OUTPUT</text>
+            </g>
+
+        </svg>
+    </div>
+</body>
+</html>

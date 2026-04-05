@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import {
   AreaChart,
   Area,
@@ -7,7 +8,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
   ReferenceLine,
   ReferenceArea,
   Dot,
@@ -168,7 +168,37 @@ export function EscalationTimeline({
   maxCeiling,
   sessionStartedAt,
 }: EscalationTimelineProps) {
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const [chartSize, setChartSize] = useState<{ width: number; height: number } | null>(null);
   const startTime = new Date(sessionStartedAt).getTime();
+
+  useEffect(() => {
+    const container = chartContainerRef.current;
+    if (!container) return;
+
+    const updateSize = () => {
+      const width = Math.floor(container.clientWidth);
+      const height = Math.floor(container.clientHeight);
+      if (width < 1 || height < 1) return;
+
+      setChartSize((prev) => (
+        prev?.width === width && prev.height === height
+          ? prev
+          : { width, height }
+      ));
+    };
+
+    updateSize();
+
+    const observer = new ResizeObserver(() => {
+      updateSize();
+    });
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   const data: ChartPoint[] = events
     .filter((e) => e.escalation_after !== null)
@@ -256,9 +286,18 @@ export function EscalationTimeline({
       </div>
 
       {/* Chart */}
-      <div className="h-56 sm:h-80 w-full" style={{ minWidth: 0, minHeight: 0 }}>
-        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-          <AreaChart data={data} margin={{ top: 8, right: 52, bottom: 6, left: 4 }}>
+      <div
+        ref={chartContainerRef}
+        className="h-56 w-full sm:h-80"
+        style={{ minWidth: 1, minHeight: 1 }}
+      >
+        {chartSize ? (
+          <AreaChart
+            width={chartSize.width}
+            height={chartSize.height}
+            data={data}
+            margin={{ top: 8, right: 52, bottom: 6, left: 4 }}
+          >
             <defs>
               <linearGradient id="escalationGradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#ef4444" stopOpacity={0.3} />
@@ -411,7 +450,9 @@ export function EscalationTimeline({
               }}
             />
           </AreaChart>
-        </ResponsiveContainer>
+        ) : (
+          <div className="h-full w-full animate-pulse rounded-xl bg-slate-100/70" />
+        )}
       </div>
 
       {/* Legend */}

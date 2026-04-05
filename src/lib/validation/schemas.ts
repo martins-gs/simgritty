@@ -14,6 +14,7 @@ import type {
   ClassifierResult,
   ClinicianAudioPayload,
   EducatorNote,
+  SessionReflection,
   SimulationSession,
   SimulationStateEvent,
   TranscriptTurn,
@@ -405,6 +406,16 @@ export const educatorNoteSchema: z.ZodType<EducatorNote> = z.object({
   updated_at: z.string(),
 });
 
+export const sessionReflectionSchema: z.ZodType<SessionReflection> = z.object({
+  id: z.string(),
+  session_id: z.string(),
+  user_id: z.string(),
+  tags: z.array(z.string()).default([]),
+  free_text: nullableStringSchema,
+  created_at: z.string(),
+  updated_at: nullableStringSchema.optional(),
+});
+
 const clinicianAudioPayloadParseSchema = z.object({
   source: z.literal("bot_clinician").default("bot_clinician"),
   turn_index: z.number().int().nonnegative(),
@@ -485,6 +496,11 @@ export function parseSimulationEvents(data: unknown): SimulationStateEvent[] {
 
 export function parseEducatorNotes(data: unknown): EducatorNote[] {
   return parseArray(data, educatorNoteSchema);
+}
+
+export function parseSessionReflection(data: unknown): SessionReflection | null {
+  const parsed = sessionReflectionSchema.safeParse(data);
+  return parsed.success ? parsed.data : null;
 }
 
 export function parseClassifierResult(data: unknown): ClassifierResult | null {

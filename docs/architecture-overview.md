@@ -1,4 +1,4 @@
-# SimGritty Architecture Overview
+# PROLOG Architecture Overview
 
 This document reflects the architecture currently implemented in the codebase, not an older prompt or model mix.
 
@@ -170,15 +170,15 @@ All persistence calls from the simulation page (`persistTranscriptTurn`, `update
 `src/lib/engine/scoring.ts` computes a post-session performance breakdown across four dimensions, each scored 0–100:
 
 - **Composure**: starts at 100, subtracts penalties when composure markers are detected (defensive language, dismissive responses, hostility mirroring, sarcasm). Multiple markers on one turn incur a 1.5× penalty.
-- **De-escalation**: measures the rate and effectiveness of de-escalation attempts. Score = attempt_rate × 0.4 + success_rate × 0.6. Effectiveness is measured by whether escalation level dropped after the attempt. Only turns where the patient is actively escalated count.
+- **De-escalation**: measures the rate and effectiveness of de-escalation attempts. Score = attempt_rate × 0.4 + success_rate × 0.6. Effectiveness is measured by whether escalation level dropped on the next patient reply, provided the AI clinician did not intervene first. Only turns where the patient is actively escalated count.
 - **Clinical Task Maintenance** (optional): ratio of completed milestones to total milestones defined for the scenario. Excluded entirely if no milestones are defined. Milestones are tracked silently during the session (not shown to the trainee) and appear on the review page as natural clinical evidence rather than checklist items.
-- **Support Seeking**: starts at a baseline of 70. Each bot clinician invocation at or above the scenario's support threshold adds +15; below the threshold subtracts -15. Sustained critical escalation without help-seeking incurs additional penalties.
+- **Support Seeking**: starts at a baseline of 70. Each clinician takeover episode at or above the scenario's support threshold adds +15; below the threshold subtracts -15. Sustained critical escalation without help-seeking incurs additional penalties.
 
 The overall score is a weighted average using scenario-defined weights (or equal defaults). When clinical task is excluded, weights are renormalized across the remaining three dimensions.
 
 **Qualitative labels**: Strong (80–100), Developing (60–79), Needs practice (0–59).
 
-**Session validity gate**: sessions under 6 turns show no score. Sessions of 6–12 turns display scores with a "preliminary" caveat.
+**Session validity gate**: sessions under 6 trainee turns show no score. Sessions of 6–12 trainee turns display scores with a "preliminary" caveat.
 
 **Evidence tracking**: every scoring event (marker detected, attempt made, milestone completed, support invoked) is recorded with its turn index and score impact. The review page shows the 2–3 highest-impact moments and a technique suggestion based on the weakest dimension.
 
@@ -233,7 +233,7 @@ Both the simulation page and the review page are designed to work on mobile phon
 
 The review page displays:
 
-- **ScoreCard**: qualitative label badge (Strong / Developing / Needs practice), overall circular progress, and four dimension bars (0–100) with weight percentages. A session validity gate blocks scoring for sessions under 6 turns.
+- **ScoreCard**: qualitative label badge (Strong / Developing / Needs practice), overall circular progress, and four dimension bars (0–100) with weight percentages. A session validity gate blocks scoring for sessions under 6 trainee turns.
 - **Escalation timeline**: always visible on the main screen (no longer in a tab), showing escalation level and trust over time with event markers.
 - **Key moments**: 2–3 highest-impact scoring events with transcript excerpts and context.
 - **Technique suggestion**: one "Next time, try" recommendation based on the weakest scoring dimension.

@@ -59,7 +59,7 @@ const CLINICIAN_REALTIME_PARTIAL_TAIL_GUARD_MS = 2500;
 const BOT_TURN_POST_PATIENT_DELAY_MS = 600;
 const BOT_RESPONSE_CANCEL_SETTLE_MS = 40;
 const BOT_PATIENT_AUDIO_CLEAR_WAIT_MS = 250;
-const PATIENT_TURN_COMPLETION_TIMEOUT_MS = 4000;
+const PATIENT_TURN_COMPLETION_TIMEOUT_MS = 7000;
 
 interface PreparedBotTurn {
   text: string;
@@ -118,6 +118,12 @@ interface SessionEventInput {
   listening_after?: number | null;
   payload?: Record<string, unknown>;
 }
+
+const FALLBACK_BOT_TURN: PreparedBotTurn = {
+  text: "I can see this is a difficult situation. Let me help.",
+  technique: "general de-escalation",
+  voiceProfile: null,
+};
 
 export default function SimulationPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -609,7 +615,8 @@ export default function SimulationPage() {
     });
     const timeout = setTimeout(() => {
       console.warn(
-        `[Bot] Patient turn completion timeout after ${PATIENT_TURN_COMPLETION_TIMEOUT_MS}ms`
+        `[Bot] Patient turn completion timeout after ${PATIENT_TURN_COMPLETION_TIMEOUT_MS}ms ` +
+          `(pending_reply_update=${pendingPatientReplyUpdateRef.current ? "yes" : "no"})`
       );
       resolvePendingPatientTurnCompletion();
     }, PATIENT_TURN_COMPLETION_TIMEOUT_MS);
@@ -836,13 +843,13 @@ export default function SimulationPage() {
         `[Bot] Failed to generate clinician turn request_id=${requestId} status=${res.status}`,
         errorText
       );
-      return null;
+      return FALLBACK_BOT_TURN;
     }
 
     const payload = await res.json().catch(() => null) as Partial<PreparedBotTurn> | null;
     if (!payload || typeof payload.text !== "string" || payload.text.trim().length === 0) {
       console.error(`[Bot] Invalid clinician turn payload request_id=${requestId}`, payload);
-      return null;
+      return FALLBACK_BOT_TURN;
     }
 
     const preparedTurn: PreparedBotTurn = {

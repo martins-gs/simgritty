@@ -40,6 +40,7 @@ export function useRealtimeSession() {
   const connectAttemptRef = useRef(0);
   const disconnectedRef = useRef(false);
   const activeResponseIdRef = useRef<string | null>(null);
+  const activeResponseTranscriptDoneRef = useRef(false);
   // Mic gating: mute mic while AI speaks to prevent echo feedback loop
   const micGatedRef = useRef(false);
   const micForcedOffRef = useRef(false);
@@ -47,6 +48,7 @@ export function useRealtimeSession() {
   // Safety timer: force-clear speaking state if the buffer-stopped event
   // never arrives after the response completes.
   const playbackSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const consecutivePlaybackSafetyTimeoutsRef = useRef(0);
   // Deduplication
   const lastTraineeTextRef = useRef("");
   const lastTraineeTimeRef = useRef(0);
@@ -137,6 +139,7 @@ export function useRealtimeSession() {
         const response = msg.response as { id?: string } | undefined;
         if (response?.id) {
           activeResponseIdRef.current = response.id;
+          activeResponseTranscriptDoneRef.current = false;
           // AI is about to speak — mute the mic to prevent echo loop
           gateMic();
         }
@@ -181,6 +184,7 @@ export function useRealtimeSession() {
       case "response.audio_transcript.done": {
         const responseId = msg.response_id as string | undefined;
         if (responseId && responseId !== activeResponseIdRef.current) break;
+        activeResponseTranscriptDoneRef.current = true;
         const transcript = (msg.transcript as string)?.trim();
         if (transcript) config.onAiTranscript(transcript);
         break;
@@ -197,9 +201,11 @@ export function useRealtimeSession() {
           clearTimeout(playbackSafetyTimerRef.current);
           playbackSafetyTimerRef.current = null;
         }
+        consecutivePlaybackSafetyTimeoutsRef.current = 0;
         config.onAiPlaybackComplete();
         if (responseId === activeResponseIdRef.current) {
           activeResponseIdRef.current = null;
+          activeResponseTranscriptDoneRef.current = false;
         }
         // AI finished speaking — re-enable mic after grace period
         ungateMic();
@@ -211,8 +217,10 @@ export function useRealtimeSession() {
           clearTimeout(playbackSafetyTimerRef.current);
           playbackSafetyTimerRef.current = null;
         }
+        consecutivePlaybackSafetyTimeoutsRef.current = 0;
         config.onAiPlaybackComplete();
         activeResponseIdRef.current = null;
+        activeResponseTranscriptDoneRef.current = false;
         ungateMic();
         break;
       }
@@ -228,9 +236,11 @@ export function useRealtimeSession() {
             clearTimeout(playbackSafetyTimerRef.current);
             playbackSafetyTimerRef.current = null;
           }
+          consecutivePlaybackSafetyTimeoutsRef.current = 0;
           config.onAiPlaybackComplete();
           if (response.id === activeResponseIdRef.current) {
             activeResponseIdRef.current = null;
+            activeResponseTranscriptDoneRef.current = false;
           }
           ungateMic();
         } else if (response?.status === "completed") {
@@ -248,7 +258,19 @@ export function useRealtimeSession() {
             // If activeResponseIdRef was already cleared (by a buffer-stopped
             // event that arrived before response.done), skip — it's handled.
             if (activeResponseIdRef.current === completedResponseId) {
-              console.warn("[Realtime] Safety timeout: buffer-stopped event not received after response.done");
+              const transcriptDone = activeResponseTranscriptDoneRef.current;
+              const consecutiveMisses = consecutivePlaybackSafetyTimeoutsRef.current + 1;
+              consecutivePlaybackSafetyTimeoutsRef.current = consecutiveMisses;
+              const logMessage =
+                `[Realtime] Safety timeout: buffer-stopped event not received after response.done ` +
+                `(response_id=${completedResponseId ?? "unknown"}, ` +
+                `transcript_done=${transcriptDone ? "yes" : "no"}, ` +
+                `consecutive_misses=${consecutiveMisses})`;
+              if (consecutiveMisses >= 2) {
+                console.warn(logMessage);
+              } else {
+                console.info(logMessage);
+              }
               // Use the safety-timeout callback if provided.  This lets the
               // simulation page update the UI and ungate the mic (so a human
               // trainee can speak) without flipping aiSpeakingRef — which
@@ -298,6 +320,8 @@ export function useRealtimeSession() {
     connectAttemptRef.current = attemptId;
     disconnectedRef.current = false;
     activeResponseIdRef.current = null;
+    activeResponseTranscriptDoneRef.current = false;
+    consecutivePlaybackSafetyTimeoutsRef.current = 0;
     setConnectionStatus("connecting");
 
     let pc: RTCPeerConnection | null = null;
@@ -522,6 +546,8 @@ export function useRealtimeSession() {
     localStreamRef.current = null;
 
     activeResponseIdRef.current = null;
+    activeResponseTranscriptDoneRef.current = false;
+    consecutivePlaybackSafetyTimeoutsRef.current = 0;
     micGatedRef.current = false;
     micForcedOffRef.current = false;
     lastTraineeTextRef.current = "";

@@ -21,8 +21,9 @@ import {
 } from "lucide-react";
 import { getUser } from "@/lib/supabase/server";
 import { HeroTextRotator } from "@/components/landing/HeroTextRotator";
-import { EcosystemDiagram } from "@/components/landing/EcosystemDiagram";
 import { IsometricDiagram } from "@/components/landing/IsometricDiagram";
+import { IsometricDiagramV2 } from "@/components/landing/IsometricDiagramV2";
+import { IsometricDiagramV3 } from "@/components/landing/IsometricDiagramV3";
 import { ProLogWordmark } from "@/components/ProLogLogo";
 
 /** Inline PROLOG text in logo font + colours, inherits surrounding size. */
@@ -377,43 +378,24 @@ export default async function LandingPage() {
         </div>
       </section>
 
-      {/* ── Ecosystem Diagram ──────────────────────────────────── */}
-      <section className="border-t border-white/10" style={{ backgroundColor: "#0d2d3a" }}>
-        <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
-          <div className="mb-10 text-center">
-            <p className="mb-2 text-[13px] font-medium uppercase tracking-wide text-teal-400">
-              Platform Architecture
-            </p>
-            <h2 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
-              Five components, one integrated training ecosystem
-            </h2>
-            <p className="mx-auto mt-3 max-w-xl text-[14px] leading-relaxed text-slate-300">
-              Every session brings together scenario design, real-time voice
-              simulation, automated assessment, trainee feedback, and
-              organisational governance &mdash; each working in concert.
-            </p>
-          </div>
-          <EcosystemDiagram />
-        </div>
-      </section>
-
-      {/* ── Isometric Diagram (Option B) ──────────────────────── */}
+      {/* ── Isometric Diagram ──────────────────────────────── */}
       <section className="border-t border-border/60 bg-background">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
           <div className="mb-6 text-center">
             <p className="mb-2 text-[13px] font-medium uppercase tracking-wide text-primary">
-              Platform Architecture — Option B
+              System Architecture
             </p>
             <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
-              Five components, one integrated training ecosystem
+              Complete training system from authoring to review
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-[14px] leading-relaxed text-muted-foreground">
-              Every session brings together scenario design, real-time voice
-              simulation, automated assessment, trainee feedback, and
-              organisational governance &mdash; each working in concert.
+              Educators author scenarios with domain knowledge, safety constraints, and scoring rubrics.
+              Trainees interact with the live runtime core where the AI counterpart, behavioural model,
+              and assessment engine work together during every conversation.
+              Review and feedback outputs complete the learning cycle.
             </p>
           </div>
-          <IsometricDiagram />
+          <IsometricDiagramV3 />
         </div>
       </section>
 
