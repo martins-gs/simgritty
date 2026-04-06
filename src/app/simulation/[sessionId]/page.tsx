@@ -1857,7 +1857,7 @@ export default function SimulationPage() {
 
   if (!scenarioLoaded) {
     return (
-      <div className="flex h-screen items-center justify-center bg-white">
+      <div className="flex h-[calc(100vh-36px)] items-center justify-center bg-white">
         <div className="text-center">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-600" />
           <p className="mt-4 text-[13px] text-slate-500">Connecting to simulation...</p>
@@ -1867,7 +1867,7 @@ export default function SimulationPage() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-white text-slate-900">
+    <div className="flex h-[calc(100vh-36px)] flex-col bg-white text-slate-900">
       {/* Header */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-slate-100 px-4 sm:px-5">
         <div className="flex items-center gap-3 min-w-0">

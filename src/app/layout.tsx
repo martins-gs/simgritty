@@ -41,6 +41,12 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col antialiased">
         <SupabaseLockGuard />
+        {/* ── Test-purposes notice ── */}
+        <div className="sticky top-0 z-50 flex items-center justify-center gap-2 border-b border-amber-300 bg-amber-400 px-4 py-2 text-center">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-amber-950">
+            ⚠&nbsp;&nbsp;This site is for test purposes only&nbsp;&nbsp;—&nbsp;&nbsp;do not enter real patient data or sensitive clinical information
+          </span>
+        </div>
         <TooltipProvider>
           {children}
         </TooltipProvider>

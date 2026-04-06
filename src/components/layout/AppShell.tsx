@@ -31,7 +31,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [setUserProfile]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-[calc(100vh-36px)] overflow-hidden bg-background">
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar />
