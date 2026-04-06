@@ -256,6 +256,20 @@ Forking is session-based rather than template-based: a new session can be create
 
 ## 9. Access Control
 
+### Authentication
+
+PROLOG uses **email OTP (magic link)** via Supabase Auth. Access is restricted to `@nhs.scot` email addresses — the login page validates the domain client-side before calling Supabase, so non-NHS.scot addresses never reach the auth service. The OTP flow:
+
+1. `POST supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: '/auth/confirm' } })`
+2. Supabase emails a magic link; the user clicks it
+3. `GET /auth/confirm` receives either a PKCE `?code=` (browser-initiated PKCE flow) or `?token_hash=&type=` (token hash flow) and exchanges it for a session, then redirects to `/dashboard`
+
+The `HEAD /auth/confirm` handler returns 200 without consuming the token, preventing email clients from pre-fetching and invalidating the link.
+
+There is no self-service password-based signup. Supabase creates a new user record automatically on first OTP sign-in for any valid `@nhs.scot` address.
+
+### Authorisation
+
 Three user roles exist: **admin**, **educator**, and **trainee**, stored on `user_profiles.role`.
 
 Current enforcement:

@@ -26,7 +26,7 @@ export async function updateSession(request: NextRequest) {
   );
 
   // Do not run getUser on auth pages to avoid cookie bloat
-  const publicPaths = ["/", "/auth/login", "/auth/signup", "/auth/callback"];
+  const publicPaths = ["/", "/auth/login", "/auth/signup", "/auth/callback", "/auth/confirm"];
   const isPublicPath =
     request.nextUrl.pathname === "/" ||
     publicPaths.some(

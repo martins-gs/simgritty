@@ -144,9 +144,10 @@ src/
 ├── app/                          # Next.js App Router
 │   ├── page.tsx                  # Home → redirects to dashboard or login
 │   ├── auth/
-│   │   ├── login/page.tsx        # Email/password login
-│   │   ├── signup/page.tsx       # Registration
-│   │   └── callback/route.ts     # OAuth code exchange
+│   │   ├── login/page.tsx        # Email OTP login (NHS.scot addresses only)
+│   │   ├── signup/page.tsx       # Redirects to login (no separate signup)
+│   │   ├── confirm/route.ts      # OTP magic link verification
+│   │   └── callback/route.ts     # PKCE code exchange
 │   ├── dashboard/page.tsx        # Scenarios + recent sessions
 │   ├── scenarios/
 │   │   ├── page.tsx              # Scenario list with search/filter
@@ -261,6 +262,17 @@ API routes that perform cascade deletes (scenario deletion, session deletion) ch
 ### Escalation Ceiling Enforcement
 
 The org-level `max_escalation_ceiling` (Settings page) acts as a hard cap across the organisation. The per-scenario `max_ceiling` (Escalation Rules) is the scenario author's intended limit. At runtime, the effective ceiling is `Math.min(scenario, org)`. The scenario editor slider is capped to the org ceiling, and the simulation page fetches the org setting at init rather than using a hardcoded fallback.
+
+### Authentication
+
+PROLOG uses **email OTP (magic link)** via Supabase Auth — no passwords. Access is restricted to `@nhs.scot` email addresses. The login page enforces this domain check client-side before sending the OTP request; non-NHS.scot addresses are rejected immediately without hitting Supabase.
+
+Flow:
+1. User enters their `@nhs.scot` email at `/auth/login`
+2. Supabase sends a magic link to that address
+3. Clicking the link hits `/auth/confirm`, which exchanges the token for a session and redirects to `/dashboard`
+
+There is no self-service signup page — the login page handles both new and returning users.
 
 ### Auth Token Refresh
 

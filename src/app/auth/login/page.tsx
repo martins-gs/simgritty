@@ -1,21 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ProLogIcon, ProLogWordmark } from "@/components/ProLogLogo";
 
-
 export default function LoginPage() {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
+  const [sent, setSent] = useState(false);
   const supabase = createClient();
 
   async function handleLogin(e: React.FormEvent) {
@@ -23,17 +19,25 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed.endsWith("@nhs.scot")) {
+      setError("Only @nhs.scot email addresses can access PROLOG.");
+      setLoading(false);
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: trimmed,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/confirm`,
+      },
     });
 
     if (error) {
       setError(error.message);
       setLoading(false);
     } else {
-      router.push("/dashboard");
-      router.refresh();
+      setSent(true);
     }
   }
 
@@ -49,43 +53,36 @@ export default function LoginPage() {
             For Health &amp; Care Workers
           </p>
         </div>
-        <form onSubmit={handleLogin} className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="email" className="text-[13px]">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="you@nhs.net"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="h-9"
-            />
+        {sent ? (
+          <div className="rounded-md border bg-muted/40 px-4 py-5 text-center">
+            <p className="text-[13px] font-medium">Check your email</p>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              We sent a sign-in link to <span className="font-medium">{email.trim().toLowerCase()}</span>.
+              Click it to continue.
+            </p>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="password" className="text-[13px]">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="h-9"
-            />
-          </div>
-          {error && (
-            <p className="text-[13px] text-destructive">{error}</p>
-          )}
-          <Button type="submit" className="w-full h-9 text-[13px]" disabled={loading}>
-            {loading ? "Signing in..." : "Sign in"}
-          </Button>
-        </form>
-        <p className="mt-5 text-center text-[13px] text-muted-foreground">
-          No account?{" "}
-          <Link href="/auth/signup" className="text-primary hover:underline">
-            Create one
-          </Link>
-        </p>
+        ) : (
+          <form onSubmit={handleLogin} className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className="text-[13px]">NHS Scotland email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@nhs.scot"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="h-9"
+              />
+            </div>
+            {error && (
+              <p className="text-[13px] text-destructive">{error}</p>
+            )}
+            <Button type="submit" className="w-full h-9 text-[13px]" disabled={loading}>
+              {loading ? "Sending link..." : "Send sign-in link"}
+            </Button>
+          </form>
+        )}
       </div>
     </div>
   );
