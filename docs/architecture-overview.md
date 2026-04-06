@@ -286,6 +286,14 @@ The dashboard (`src/app/dashboard/page.tsx`) has three sections:
 
 The landing page (`src/app/page.tsx`) uses real session screenshots (`/public/screenshots/`) for the escalation timeline and transcript demos rather than synthetic mock components. Inline "prolog" text throughout the page renders in the Host Grotesk Bold logo font in dark teal (`#0d2d3a`) via a `<P />` helper component, with a lighter variant (`#7ec8c8`) for use on dark backgrounds. Two sections ("Why prolog" and "Who It's For") plus a "Platform Architecture" section use a dark teal background for visual contrast. The Platform Architecture section includes two diagram variants: `EcosystemDiagram` (animated node-and-connection SVG on dark teal background) and `IsometricDiagram` (isometric 3D-style SVG on light background), both rendered as client components with intersection-observer entrance animations. The configuration demo section still uses interactive mock sliders.
 
+### Footer and Privacy Statement
+
+The footer contains the PROLOG wordmark, a "Built for NHS Scotland and HSCP staff" tag, and a `PrivacyStatement` client component (`src/components/landing/PrivacyStatement.tsx`). The component renders as a collapsed trigger — a `ShieldCheck` icon, "Privacy Statement" label, and a `ChevronDown` that rotates on open — and expands in-place to show the full 13-section UK GDPR privacy statement covering data collection, third-party providers (Supabase, OpenAI, Vercel), international transfers, retention, and individual rights. The test-service warning ("PROLOG is currently a test application…") is rendered at the top of the expanded content inside a distinct orange bordered box (`border-2 border-orange-400 bg-orange-50`) to visually separate it from the numbered privacy sections.
+
+### Test-Purposes Banner
+
+A sticky orange banner (`bg-orange-500`, `text-zinc-900`, `z-50`) is rendered at the top of every page via the root layout (`src/app/layout.tsx`), above all other content. It reads: "⚠ This site is for test purposes only — do not enter real patient data or sensitive clinical information." Because the banner occupies 36 px of vertical space, all full-height containers that previously used `h-screen` have been updated to `h-[calc(100vh-36px)]`: the `AppShell` wrapper, the `Sidebar`, and the loading/main views in the simulation page.
+
 ### Branding
 
 The logo uses Host Grotesk Bold (700) in lowercase "prolog" with dark teal colouring (`#0d2d3a`). The speech bubble icon uses the same dark teal with a white medical cross. The wordmark is rendered without a subtitle across the app (header, sidebar, footer). Nunito Sans is the base UI font. Dashboard status badges use semantic colours (teal for published, emerald for completed, red for aborted) distinct from the primary blue used for CTA buttons.
