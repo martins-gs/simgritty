@@ -502,9 +502,7 @@ export default function ReviewPage() {
         </Tabs>
 
         {/* Reflection prompt */}
-        {score.sessionValid && (
-          <ReflectionPrompt sessionId={sessionId} />
-        )}
+        <ReflectionPrompt sessionId={sessionId} />
       </div>
     </AppShell>
   );

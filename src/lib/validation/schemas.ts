@@ -33,7 +33,7 @@ const scenarioMilestoneIdSchema = z.string().min(1);
 const speakerSchema = z.enum(["trainee", "ai", "system"]);
 const turnTriggerTypeSchema = z.enum(["escalation", "de_escalation", "neutral"]);
 const sessionStatusSchema = z.enum(["created", "active", "completed", "aborted", "error"]);
-const exitTypeSchema = z.enum(["normal", "instant_exit", "educator_ended", "timeout", "auto_ceiling"]);
+const exitTypeSchema = z.enum(["normal", "instant_exit", "educator_ended", "timeout", "auto_ceiling", "max_duration"]);
 const stateEventTypeSchema = z.enum([
   "session_started",
   "session_ended",

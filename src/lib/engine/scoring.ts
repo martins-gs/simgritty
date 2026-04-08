@@ -48,8 +48,8 @@ export interface ScoringInput {
 // Constants
 // ---------------------------------------------------------------------------
 
-const MIN_TRAINEE_TURNS_FOR_SCORING = 6;
-const PRELIMINARY_TRAINEE_TURN_THRESHOLD = 12;
+const MIN_TRAINEE_TURNS_FOR_SCORING = 3;
+const PRELIMINARY_TRAINEE_TURN_THRESHOLD = 6;
 const SUPPORT_SEEKING_BASELINE = 70;
 const SUPPORT_SEEKING_APPROPRIATE_BONUS = 15;
 const SUPPORT_SEEKING_PREMATURE_PENALTY = 15;
