@@ -178,11 +178,11 @@ The overall score is a weighted average using scenario-defined weights (or equal
 
 **Qualitative labels**: Strong (80–100), Developing (60–79), Needs practice (0–59).
 
-**Session validity gate**: sessions under 6 trainee turns show no score. Sessions of 6–12 trainee turns display scores with a "preliminary" caveat.
+**Session validity gate**: sessions under 3 trainee turns show no score. Sessions of 3–6 trainee turns display scores with a "preliminary" caveat.
 
-**Evidence tracking**: every scoring event (marker detected, attempt made, milestone completed, support invoked) is recorded with its turn index and score impact. The review page shows the 2–3 highest-impact moments and a technique suggestion based on the weakest dimension.
+**Evidence tracking**: every scoring event (marker detected, attempt made, milestone completed, support invoked) is recorded with its turn index and score impact. The review page shows the 2–3 highest-impact moments and a technique suggestion based on the weakest dimension when the session is long enough to score.
 
-Scoring data is persisted to `session_scores` (one row per session) and `session_score_evidence` (one row per scoring event).
+The current review flow computes score and evidence on demand from transcript turns, events, and scenario snapshot data. `session_scores` and `session_score_evidence` may exist in the schema as legacy or future-use tables, but the current app flow does not write them.
 
 ## 7. Scenario Authoring: Traits And Archetypes
 
@@ -213,7 +213,7 @@ Supabase stores:
 - session audio recordings (Supabase Storage bucket `simulation-audio`, private, one `.webm` file per session)
 - transcript turns (`transcript_turns` with per-turn snapshots: `classifier_result`, `trigger_type`, `state_after`, `patient_voice_profile_after`, `patient_prompt_after`)
 - simulation state events (`simulation_state_events` — event types: `session_started`, `session_ended`, `escalation_change`, `de_escalation_change`, `ceiling_reached`, `trainee_exit`, `classification_result`, `clinician_audio`, `prompt_update`, `error`)
-- session scores and evidence (`session_scores`, `session_score_evidence`)
+- optional legacy scoring tables (`session_scores`, `session_score_evidence`) that are not used by the current review flow
 - trainee reflections (`session_reflections`)
 - educator notes
 
@@ -233,13 +233,24 @@ Both the simulation page and the review page are designed to work on mobile phon
 
 The review page displays:
 
-- **ScoreCard**: qualitative label badge (Strong / Developing / Needs practice), overall circular progress, and four dimension bars (0–100) with weight percentages. A session validity gate blocks scoring for sessions under 6 trainee turns.
+- **Top review section**: a two-column layout with score content on the left and trainee reflection on the right on large screens. The left side shows either a full `ScoreCard` or a score placeholder card explaining that the session was too short to score.
+- **ScoreCard**: qualitative label badge (Strong / Developing / Needs practice), overall circular progress, and four dimension bars (0–100) with weight percentages. Sessions under 3 trainee turns show the short-session placeholder instead of the score card.
 - **Escalation timeline**: always visible on the main screen (no longer in a tab), showing escalation level and trust over time with event markers.
 - **Key moments**: 2–3 highest-impact scoring events with transcript excerpts and context.
 - **Technique suggestion**: one "Next time, try" recommendation based on the weakest scoring dimension.
 - **Summary cards**: turns, events, peak level, exit type, and clinician audio success rate.
 - **Tabs**: Transcript, Event Log, Educator Notes.
-- **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data.
+- **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data and kept near the top of the review page even for short sessions. If saved reflection data cannot be loaded, the component stays visible and shows an inline error state rather than disappearing.
+
+### Live Simulation Copy
+
+The simulation page intentionally exposes trainee-facing copy rather than engine terminology:
+
+- the live meter is labelled **Patient/relative status** rather than "Escalation"
+- the support action is **Ask AI clinician for help**
+- the return action is **Resume conversation**
+- while bot mode is active, status text explains that the AI clinician is speaking on the trainee's behalf or that the patient/relative is responding to the AI clinician
+- the live classifier summary is hidden from the trainee; technique labels and effectiveness remain part of scoring/review, not the in-session UI
 
 The `TranscriptViewer` displays per-turn audio delivery badges, and the `EventLog` renders clinician audio events with path, timing, and error details. When a session has a recording, each trainee and patient turn shows a play button that seeks to the correct offset in the full session recording and plays the audio for that utterance.
 

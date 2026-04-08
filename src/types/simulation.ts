@@ -2,7 +2,7 @@ import type { EscalationState } from "@/types/escalation";
 import type { StructuredVoiceProfile } from "@/types/voice";
 
 export type SessionStatus = "created" | "active" | "completed" | "aborted" | "error";
-export type ExitType = "normal" | "instant_exit" | "educator_ended" | "timeout" | "auto_ceiling";
+export type ExitType = "normal" | "instant_exit" | "educator_ended" | "timeout" | "auto_ceiling" | "max_duration";
 export type Speaker = "trainee" | "ai" | "system";
 export type TurnTriggerType = "escalation" | "de_escalation" | "neutral";
 

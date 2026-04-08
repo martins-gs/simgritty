@@ -1,19 +1,19 @@
 # PROLOG
 
-Real-time voice simulation platform for NHS clinical communication training. Trainees practice de-escalating difficult conversations with AI-driven simulated patients that respond dynamically to tone, technique, and emotional delivery. Educators author scenarios, governance admins set org-wide guardrails, and an assessment engine scores every session across composure, de-escalation effectiveness, clinical task maintenance, and appropriate support-seeking.
+Real-time voice simulation platform for NHS clinical communication training. Trainees practice managing difficult conversations with AI-driven simulated patients or relatives that respond dynamically to tone, technique, and emotional delivery. Educators author scenarios, governance admins set org-wide guardrails, and a review engine scores completed sessions across composure, de-escalation effectiveness, clinical task maintenance, and appropriate support-seeking.
 
 Built with Next.js 16, OpenAI Realtime API (WebRTC), and Supabase.
 
 ## Features
 
-- **Live voice simulation** — speak to an AI patient via WebRTC; the patient responds in real time with emotionally adaptive voice
+- **Live voice simulation** — speak to an AI patient or relative via WebRTC; the simulated person responds in real time with emotionally adaptive voice
 - **Escalation engine** — 10-level state machine tracks trust, anger, frustration, and willingness to listen across every turn
 - **Dual classifier pipeline** — assesses trainee communication technique (effectiveness -1.0 to +1.0) and patient state shifts independently
-- **AI clinician bot** — press "De-escalate" to hand off to an expert bot that models best practice, then take back over
+- **AI clinician support** — press "Ask AI clinician for help" to hand off temporarily to an expert bot that models best practice, then "Resume conversation" when ready
 - **Session forking** — restart from any turn in a completed session to try a different approach
 - **Performance scoring** — 0-100 score across four dimensions (composure, de-escalation, clinical task maintenance, support seeking) with scenario-defined weights and qualitative labels (Strong / Developing / Needs practice)
 - **Scenario builder** — 15 personality trait dials, voice configuration, escalation rules, archetype presets, clinical milestones, and scoring weights
-- **Review & reflection** — escalation timeline, annotated transcript, key moments, technique suggestions, event log, educator notes, and trainee reflection prompts
+- **Review & reflection** — score card or short-session placeholder, trainee reflection, escalation timeline, annotated transcript, key moments, technique suggestions, event log, and educator notes
 - **Organisation governance** — ceiling caps, consent gates, content warnings, session duration limits
 
 ## Architecture Overview
@@ -116,8 +116,8 @@ PROLOG uses Supabase Postgres. Apply migrations from `supabase/migrations/` or c
 | `simulation_sessions` | Individual runs with scenario snapshot, escalation tracking, fork lineage |
 | `transcript_turns` | Each utterance with classifier result, state snapshot, voice profile |
 | `simulation_state_events` | All state changes: escalation, de-escalation, ceiling, session lifecycle |
-| `session_scores` | Persisted scoring breakdown per completed session |
-| `session_score_evidence` | Per-event evidence linking scores to specific transcript turns |
+| `session_scores` | Legacy/optional table for persisted scoring snapshots; current review UI computes scores on demand |
+| `session_score_evidence` | Legacy/optional table for persisted score evidence; current review UI derives evidence from transcript turns and events |
 | `session_reflections` | Trainee self-reflection (tags + free text, separate from performance record) |
 | `educator_notes` | Post-session feedback anchored to specific turns |
 
@@ -234,11 +234,11 @@ src/
 | GET/POST | `/api/sessions/[id]/events` | Get / append state events |
 | POST | `/api/sessions/[id]/fork` | Fork session from a specific turn |
 | GET/POST | `/api/sessions/[id]/educator-notes` | Get / create educator notes |
-| POST | `/api/sessions/[id]/reflection` | Save trainee self-reflection (tags + free text) |
+| GET/POST | `/api/sessions/[id]/reflection` | Load / save trainee self-reflection (tags + free text) |
 | GET/POST | `/api/sessions/[id]/audio` | Get signed playback URL / upload session recording |
 | GET | `/api/sessions/recent` | User's recent sessions |
 | GET | `/api/profile` | Current user's profile (display name, email, role) |
-| PUT | `/api/org-settings` | Update organisation governance |
+| GET/PUT | `/api/org-settings` | Read / update organisation governance |
 
 ## Error Handling & Validation
 
@@ -351,9 +351,9 @@ Post-session performance is scored 0-100 across four dimensions, each scored 0-1
 
 **Qualitative labels**: Strong (80-100), Developing (60-79), Needs practice (0-59)
 
-**Session validity gate**: sessions under 6 trainee turns are not scored. Sessions of 6-12 trainee turns show scores with a "preliminary" caveat.
+**Session validity gate**: sessions under 3 trainee turns are not scored. Sessions of 3-6 trainee turns show scores with a "preliminary" caveat.
 
-**Score evidence**: every point earned or lost links to a specific transcript turn and classifier output. The review page shows "key moments" (2-3 highest-impact events) and a technique suggestion based on the weakest dimension.
+**Score evidence**: every point earned or lost links to a specific transcript turn and classifier output. The review page shows either a score card or a short-session placeholder at the top, keeps the reflection panel visible near the top of the page, and shows "key moments" (2-3 highest-impact events) plus a technique suggestion when scoring is available.
 
 ## Prompt Architecture
 
@@ -368,13 +368,20 @@ The prompt is regenerated after every trainee turn to reflect the new escalation
 
 ## AI Clinician Bot
 
-When the trainee presses "De-escalate", an expert AI clinician takes over:
+When the trainee presses "Ask AI clinician for help", an expert AI clinician takes over:
 
 1. Trainee mic is muted, VAD turn detection disabled
 2. Bot generates a response via `/api/deescalate` (LLM-structured output: text + technique + voice profile)
 3. Clinician speaks via an independent WebRTC Realtime connection (cedar voice) or TTS fallback
 4. Patient responds naturally; bot classifies the patient's response and prepares the next turn
-5. Bot loops until the trainee clicks "Take over"
+5. Bot loops until the trainee clicks "Resume conversation"
+
+On the live screen, trainee-facing controls and status text are deliberately plain language:
+
+- the stress meter is labelled **Patient/relative status**
+- the support action is **Ask AI clinician for help**
+- while support is active the UI explains that the AI clinician is speaking on the trainee's behalf
+- the live screen does **not** show the internal classifier's "last assessment" or effectiveness score
 
 The clinician prompt includes **conversation progression rules** to prevent repetitive responses:
 - Never repeat a commitment already given

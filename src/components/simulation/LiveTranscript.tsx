@@ -13,9 +13,10 @@ export interface TranscriptEntry {
 interface LiveTranscriptProps {
   entries: TranscriptEntry[];
   currentAiText: string;
+  aiLabel: string;
 }
 
-export function LiveTranscript({ entries, currentAiText }: LiveTranscriptProps) {
+export function LiveTranscript({ entries, currentAiText, aiLabel }: LiveTranscriptProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,7 +56,7 @@ export function LiveTranscript({ entries, currentAiText }: LiveTranscriptProps) 
                   : entry.speaker === "system" ? "text-indigo-600"
                   : "text-orange-600"
               )}>
-                {entry.speaker === "trainee" ? "You" : entry.speaker === "system" ? "AI Clinician" : "Patient"}
+                {entry.speaker === "trainee" ? "You" : entry.speaker === "system" ? "AI Clinician" : aiLabel}
               </span>
               <span className="text-[10px] text-slate-300 tabular-nums">{formatTime(entry.timestamp)}</span>
             </div>
@@ -67,7 +68,7 @@ export function LiveTranscript({ entries, currentAiText }: LiveTranscriptProps) 
         {showLivePatientBubble && (
           <div className="py-1.5">
             <div className="flex items-baseline gap-2">
-              <span className="shrink-0 text-[11px] font-medium text-orange-600">Patient</span>
+              <span className="shrink-0 text-[11px] font-medium text-orange-600">{aiLabel}</span>
               <span className="flex items-center gap-1 text-[10px] text-emerald-500">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 live

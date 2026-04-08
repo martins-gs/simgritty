@@ -166,7 +166,6 @@ export default function SimulationPage() {
   const [elapsed, setElapsed] = useState(0);
   const [maxCeiling, setMaxCeiling] = useState(8);
   const [scenarioLoaded, setScenarioLoaded] = useState(false);
-  const [lastClassification, setLastClassification] = useState<{ technique: string; effectiveness: number } | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
   const [botActive, setBotActive] = useState(false);
   const [botSpeaking, setBotSpeaking] = useState(false);
@@ -230,7 +229,6 @@ export default function SimulationPage() {
     }
     window.addEventListener("beforeunload", handleUnload);
     return () => window.removeEventListener("beforeunload", handleUnload);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
   // Poll for audio element from hook (it's created async during connect)
@@ -322,13 +320,6 @@ export default function SimulationPage() {
           const level = turn.state_after?.level ?? peak;
           return Math.max(peak, level);
         }, engine.getLevel());
-
-        if (latestCurrentSnapshot?.classifierResult) {
-          setLastClassification({
-            technique: latestCurrentSnapshot.classifierResult.technique,
-            effectiveness: latestCurrentSnapshot.classifierResult.effectiveness,
-          });
-        }
 
         // Recover completed milestones from persisted turns so the classifier
         // doesn't re-flag already-completed milestones on session resume
@@ -1262,7 +1253,6 @@ export default function SimulationPage() {
         return;
       }
       classResult = await classifyRes.json();
-      setLastClassification({ technique: classResult!.technique, effectiveness: classResult!.effectiveness });
       if (classResult!.clinical_milestone_completed) {
         completedMilestonesRef.current.add(classResult!.clinical_milestone_completed);
       }
@@ -1450,7 +1440,6 @@ export default function SimulationPage() {
       if (!res.ok || isStale() || !engineRef.current) return null;
       const classResult = await res.json();
       if (isStale() || !engineRef.current) return null;
-      setLastClassification({ technique: classResult.technique, effectiveness: classResult.effectiveness });
       console.log("[Bot Escalation] Classifier:", classResult);
 
       const prevState = engineRef.current.getState();
@@ -1900,6 +1889,21 @@ export default function SimulationPage() {
   const aiRole = (scenarioRef.current?.ai_role as string) || "Patient";
   const traineeRole = (scenarioRef.current?.trainee_role as string) || "Clinician";
   const emotionalDriver = (scenarioRef.current?.emotional_driver as string) || "";
+  const statusHeading = "Patient/relative status";
+  const supportStatusText = botActive
+    ? botSpeaking
+      ? "AI clinician is speaking on your behalf"
+      : isSpeaking
+        ? `${aiRole} is responding to the AI clinician`
+        : "AI clinician support is active"
+    : isSpeaking
+      ? `${aiRole} is speaking`
+      : connectionStatus === "connected"
+        ? "Listening — speak when ready"
+        : "Connecting...";
+  const supportHelperText = botActive
+    ? "AI clinician support is active. Resume the conversation whenever you're ready."
+    : "The AI clinician will take over temporarily and model a response. You can resume at any time.";
 
   if (!scenarioLoaded) {
     return (
@@ -1967,7 +1971,7 @@ export default function SimulationPage() {
             )}
 
             <div className="pt-2 border-t border-slate-200/60">
-              <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Escalation</p>
+              <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">{statusHeading}</p>
               <div className="mt-2 flex items-end gap-2">
                 <span className={cn("text-3xl font-bold tabular-nums leading-none", ec.text)}>{escalationLevel}</span>
                 <span className="text-[12px] text-slate-400 pb-0.5">/10</span>
@@ -1982,22 +1986,10 @@ export default function SimulationPage() {
                 ))}
               </div>
               <div className="mt-1.5 flex justify-between text-[10px] text-slate-400">
-                <span>Calm</span>
-                <span>Ceiling {maxCeiling}</span>
+                <span>Settled</span>
+                <span>Critical</span>
               </div>
             </div>
-
-            {lastClassification && (
-              <div className="pt-2 border-t border-slate-200/60">
-                <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Last assessment</p>
-                <p className="mt-1 text-[12px] font-medium text-slate-700">{lastClassification.technique}</p>
-                <p className={cn("text-[11px] font-medium",
-                  lastClassification.effectiveness > 0.3 ? "text-emerald-600" : lastClassification.effectiveness < -0.3 ? "text-red-600" : "text-slate-500"
-                )}>
-                  {lastClassification.effectiveness > 0 ? "+" : ""}{lastClassification.effectiveness.toFixed(1)} effectiveness
-                </p>
-              </div>
-            )}
           </div>
         </aside>
 
@@ -2007,17 +1999,24 @@ export default function SimulationPage() {
           mobileTab !== "simulation" && "hidden lg:flex"
         )}>
           {/* Compact escalation indicator for mobile */}
-          <div className="flex lg:hidden items-center gap-3 mb-4">
-            <span className={cn("text-xl font-bold tabular-nums leading-none", ec.text)}>{escalationLevel}</span>
-            <div className="flex gap-0.5">
-              {Array.from({ length: 10 }, (_, i) => (
-                <div key={i} className={cn(
-                  "h-2 w-1.5 rounded-[1px] transition-all duration-300",
-                  i < escalationLevel ? ec.bar : "bg-slate-200"
-                )} />
-              ))}
+          <div className="mb-4 flex w-full max-w-lg flex-col gap-2 lg:hidden">
+            <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">{statusHeading}</p>
+            <div className="flex items-center gap-3">
+              <span className={cn("text-xl font-bold tabular-nums leading-none", ec.text)}>{escalationLevel}</span>
+              <div className="flex gap-0.5">
+                {Array.from({ length: 10 }, (_, i) => (
+                  <div key={i} className={cn(
+                    "h-2 w-1.5 rounded-[1px] transition-all duration-300",
+                    i < escalationLevel ? ec.bar : i < maxCeiling ? "bg-slate-200" : "bg-slate-100"
+                  )} />
+                ))}
+              </div>
+              <span className="text-[11px] text-slate-400">{ESCALATION_LABELS[escalationLevel]}</span>
             </div>
-            <span className="text-[11px] text-slate-400">{ESCALATION_LABELS[escalationLevel]}</span>
+            <div className="flex justify-between text-[10px] text-slate-400">
+              <span>Settled</span>
+              <span>Critical</span>
+            </div>
           </div>
 
           {/* Status text */}
@@ -2027,11 +2026,7 @@ export default function SimulationPage() {
               : connectionStatus === "connected" ? "text-emerald-500"
               : "text-slate-400"
           )}>
-            {botActive
-              ? (botSpeaking ? "AI Clinician is speaking" : isSpeaking ? `${aiRole} is responding` : "AI Clinician — preparing next response")
-              : isSpeaking ? `${aiRole} is speaking`
-              : connectionStatus === "connected" ? "Listening — speak when ready"
-              : "Connecting..."}
+            {supportStatusText}
           </p>
 
           {/* Waveform */}
@@ -2051,7 +2046,7 @@ export default function SimulationPage() {
                 className="flex items-center gap-2 rounded-full bg-indigo-600 px-5 py-2.5 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-indigo-700"
               >
                 <Hand className="h-4 w-4" />
-                Take over
+                Resume conversation
               </button>
             ) : (
               <>
@@ -2073,7 +2068,7 @@ export default function SimulationPage() {
                   className="flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-[13px] font-medium text-indigo-700 shadow-sm transition-colors hover:bg-indigo-100 disabled:opacity-40"
                 >
                   <Bot className="h-3.5 w-3.5" />
-                  De-escalate
+                  Ask AI clinician for help
                 </button>
               </>
             )}
@@ -2085,6 +2080,9 @@ export default function SimulationPage() {
               End scenario
             </button>
           </div>
+          <p className="mt-4 max-w-lg text-center text-[12px] leading-relaxed text-slate-500">
+            {supportHelperText}
+          </p>
         </main>
 
         {/* Transcript panel — desktop sidebar or mobile tab */}
@@ -2097,7 +2095,7 @@ export default function SimulationPage() {
             <span className="text-[11px] tabular-nums text-slate-400">{transcriptEntries.length} turns</span>
           </div>
           <div className="flex-1 overflow-hidden">
-            <LiveTranscript entries={transcriptEntries} currentAiText={currentAiText} />
+            <LiveTranscript entries={transcriptEntries} currentAiText={currentAiText} aiLabel={aiRole} />
           </div>
         </aside>
 
@@ -2126,7 +2124,7 @@ export default function SimulationPage() {
             )}
 
             <div className="pt-3 border-t border-slate-200/60">
-              <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Escalation</p>
+              <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">{statusHeading}</p>
               <div className="mt-2 flex items-end gap-2">
                 <span className={cn("text-3xl font-bold tabular-nums leading-none", ec.text)}>{escalationLevel}</span>
                 <span className="text-[12px] text-slate-400 pb-0.5">/10</span>
@@ -2141,22 +2139,10 @@ export default function SimulationPage() {
                 ))}
               </div>
               <div className="mt-1.5 flex justify-between text-[11px] text-slate-400">
-                <span>Calm</span>
-                <span>Ceiling {maxCeiling}</span>
+                <span>Settled</span>
+                <span>Critical</span>
               </div>
             </div>
-
-            {lastClassification && (
-              <div className="pt-3 border-t border-slate-200/60">
-                <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">Last assessment</p>
-                <p className="mt-1 text-[13px] font-medium text-slate-700">{lastClassification.technique}</p>
-                <p className={cn("text-[12px] font-medium",
-                  lastClassification.effectiveness > 0.3 ? "text-emerald-600" : lastClassification.effectiveness < -0.3 ? "text-red-600" : "text-slate-500"
-                )}>
-                  {lastClassification.effectiveness > 0 ? "+" : ""}{lastClassification.effectiveness.toFixed(1)} effectiveness
-                </p>
-              </div>
-            )}
 
             <div className="pt-3">
               <span className="text-[12px] tabular-nums text-slate-400">{formatTime(elapsed)} elapsed</span>

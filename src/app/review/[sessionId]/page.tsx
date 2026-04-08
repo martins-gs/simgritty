@@ -89,6 +89,59 @@ function needsReviewRefresh(
   return missingSessionSummary || missingClinicianAudio;
 }
 
+function ScorePlaceholderCard({
+  turnCount,
+  onBack,
+  onRestart,
+  canRestart,
+  restarting,
+}: {
+  turnCount: number;
+  onBack: () => void;
+  onRestart: () => void;
+  canRestart: boolean;
+  restarting: boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 overflow-hidden">
+      <div className="border-b border-amber-200/80 px-5 py-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-800">
+          Performance Score
+        </p>
+        <h2 className="mt-2 text-lg font-semibold text-slate-900">
+          Score unavailable for this session
+        </h2>
+        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+          This session did not include enough trainee turns to generate a performance score.
+        </p>
+      </div>
+
+      <div className="space-y-4 px-5 py-4">
+        <div className="rounded-xl border border-white/90 bg-white/85 p-4 shadow-sm">
+          <p className="text-[12px] font-medium uppercase tracking-wide text-slate-500">
+            Trainee turns recorded
+          </p>
+          <p className="mt-1 text-3xl font-bold tracking-tight text-slate-900">{turnCount}</p>
+          <p className="mt-2 text-[12px] leading-5 text-slate-500">
+            Complete at least 3 trainee turns to unlock scoring. Reflection and the full transcript are still available below.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <Button variant="outline" size="sm" onClick={onBack}>
+            Go back
+          </Button>
+          {canRestart && (
+            <Button size="sm" onClick={onRestart} disabled={restarting}>
+              {restarting ? "Restarting..." : "Practise from this moment"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ReviewPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const router = useRouter();
@@ -317,30 +370,21 @@ export default function ReviewPage() {
           </div>
         </div>
 
-        {/* Session validity gate */}
-        {!score.sessionValid ? (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center space-y-3">
-            <p className="text-sm text-amber-800 font-medium">
-              This session ended before enough interaction occurred to generate a score.
-            </p>
-            <div className="flex justify-center gap-3">
-              <Button variant="outline" size="sm" onClick={() => router.back()}>
-                Go back
-              </Button>
-              {canRestartFromSelectedTurn && (
-                <Button size="sm" onClick={handleRestartFromSelectedTurn}>
-                  Practise from this moment
-                </Button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* Score */}
-            <ScoreCard score={score} preliminary={preliminary} />
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] xl:items-start">
+          <div className="space-y-4">
+            {score.sessionValid ? (
+              <ScoreCard score={score} preliminary={preliminary} />
+            ) : (
+              <ScorePlaceholderCard
+                turnCount={score.turnCount}
+                onBack={() => router.back()}
+                onRestart={handleRestartFromSelectedTurn}
+                canRestart={canRestartFromSelectedTurn}
+                restarting={restarting}
+              />
+            )}
 
-            {/* Learning objectives (if defined) */}
-            {learningObjectives && (
+            {score.sessionValid && learningObjectives && (
               <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
                 <h3 className="text-[12px] font-medium uppercase tracking-wide text-muted-foreground mb-2">
                   Learning Objectives
@@ -353,11 +397,9 @@ export default function ReviewPage() {
               </div>
             )}
 
-            {/* Key moments */}
-            <KeyMoments moments={keyMoments} turns={turns} />
+            {score.sessionValid && <KeyMoments moments={keyMoments} turns={turns} />}
 
-            {/* Next time, try */}
-            {suggestion && (
+            {score.sessionValid && suggestion && (
               <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4">
                 <h3 className="text-[12px] font-medium uppercase tracking-wide text-blue-600 mb-1">
                   Next time, try
@@ -365,8 +407,10 @@ export default function ReviewPage() {
                 <p className="text-[13px] text-slate-700">{suggestion}</p>
               </div>
             )}
-          </>
-        )}
+          </div>
+
+          <ReflectionPrompt sessionId={sessionId} />
+        </div>
 
         {/* Summary Cards */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 sm:gap-4">
@@ -501,8 +545,6 @@ export default function ReviewPage() {
           </TabsContent>
         </Tabs>
 
-        {/* Reflection prompt */}
-        <ReflectionPrompt sessionId={sessionId} />
       </div>
     </AppShell>
   );
