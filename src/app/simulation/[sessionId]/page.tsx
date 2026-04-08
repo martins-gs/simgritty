@@ -16,6 +16,7 @@ import {
 import { Waveform } from "@/components/simulation/Waveform";
 import { LiveTranscript, type TranscriptEntry } from "@/components/simulation/LiveTranscript";
 import { Mic, MicOff, Square, Bot, Hand } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { EscalationState } from "@/types/escalation";
 import { ESCALATION_LABELS } from "@/types/escalation";
@@ -200,8 +201,19 @@ export default function SimulationPage() {
   const pendingBotTurnSeedRef = useRef<number | null>(null);
   const lastClinicianVoiceProfileRef = useRef<StructuredVoiceProfile | null>(null);
   const pendingPatientTurnCompletionRef = useRef<PendingTurnCompletion | null>(null);
+  const maxSessionDurationSecondsRef = useRef<number>(10 * 60);
 
   useEffect(() => { transcriptRef.current = transcriptEntries; }, [transcriptEntries]);
+
+  // Enforce max session duration
+  useEffect(() => {
+    if (!scenarioLoaded || endingRef.current) return;
+    if (elapsed >= maxSessionDurationSecondsRef.current) {
+      toast.warning("Maximum session duration reached");
+      handleEndSession("max_duration");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elapsed, scenarioLoaded]);
 
   // Poll for audio element from hook (it's created async during connect)
   useEffect(() => {
@@ -245,6 +257,7 @@ export default function SimulationPage() {
           if (orgRes.ok) {
             const orgData = await orgRes.json();
             if (orgData?.max_escalation_ceiling) orgCeiling = orgData.max_escalation_ceiling;
+            if (orgData?.max_session_duration_minutes) maxSessionDurationSecondsRef.current = orgData.max_session_duration_minutes * 60;
           }
         } catch {
           // Non-fatal — fall back to 10
