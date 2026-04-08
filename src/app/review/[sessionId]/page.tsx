@@ -292,7 +292,7 @@ export default function ReviewPage() {
   const clinicianAudioSubtext = clinicianAudioStats.total > 0
     ? `${clinicianAudioStats.realtimeCompleted} realtime, ${clinicianAudioStats.realtimePartial} partial, ${clinicianAudioStats.tts} TTS`
     : clinicianAudioExpected
-      ? "AI clinician turns were present, but no audio telemetry was saved."
+      ? "Supervisor intervention turns were present, but no audio telemetry was saved."
       : null;
 
   // Compute score with new system
@@ -450,7 +450,7 @@ export default function ReviewPage() {
           </Card>
           <Card className="hidden lg:block">
             <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
-              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Clinician Audio</CardTitle>
+              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Supervisor intervention</CardTitle>
             </CardHeader>
             <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
               <p className="text-xl sm:text-2xl font-bold">{clinicianAudioHeadline}</p>
@@ -466,7 +466,7 @@ export default function ReviewPage() {
         {/* Escalation Timeline — always visible on main screen */}
         <Card>
           <CardHeader>
-            <CardTitle>Escalation Over Time</CardTitle>
+            <CardTitle>Patient/Relative State Over Time</CardTitle>
           </CardHeader>
           <CardContent>
             {session.started_at ? (

@@ -10,7 +10,6 @@ import {
   Tooltip,
   ReferenceLine,
   ReferenceArea,
-  Dot,
 } from "recharts";
 import type { SimulationStateEvent } from "@/types/simulation";
 import { ESCALATION_LABELS } from "@/types/escalation";
@@ -354,7 +353,7 @@ export function EscalationTimeline({
               strokeDasharray="6 4"
               strokeWidth={1.5}
               label={{
-                value: `Ceiling ${maxCeiling}`,
+                value: `Scenario cap ${maxCeiling}`,
                 position: "right",
                 fontSize: 10,
                 fill: "#ef4444",
@@ -398,7 +397,7 @@ export function EscalationTimeline({
               y={1.5}
               stroke="none"
               label={{
-                value: "Calm",
+                value: "Settled",
                 position: "right",
                 fontSize: 9,
                 fill: "#10b981",
@@ -442,7 +441,7 @@ export function EscalationTimeline({
               y={9.5}
               stroke="none"
               label={{
-                value: "Crisis",
+                value: "Critical",
                 position: "right",
                 fontSize: 9,
                 fill: "#991b1b",
@@ -459,7 +458,7 @@ export function EscalationTimeline({
       <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
         <span className="flex items-center gap-1.5">
           <svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#334155" strokeWidth="2.5" /></svg>
-          Escalation level
+          Patient/relative state
         </span>
         <span className="flex items-center gap-1.5">
           <svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="4 3" /></svg>

@@ -54,7 +54,9 @@ const SUPPORT_SEEKING_BASELINE = 70;
 const SUPPORT_SEEKING_APPROPRIATE_BONUS = 15;
 const SUPPORT_SEEKING_PREMATURE_PENALTY = 15;
 const SUPPORT_SEEKING_CRITICAL_PENALTY_PER_TURN = 10;
+const SUPPORT_SEEKING_CRISIS_PENALTY = 10;
 const CRITICAL_GRACE_TURNS = 3;
+const CRISIS_LEVEL = 10;
 
 interface SupportEpisode {
   startTurnIndex: number;
@@ -390,6 +392,10 @@ function computeSupportSeeking(
 
   let score = SUPPORT_SEEKING_BASELINE;
   const supportEpisodes = collectSupportEpisodes(turns, events);
+  let unsupportedCriticalStreak = 0;
+  let streakPenaltyApplied = false;
+  let crisisPenaltyApplied = false;
+  const sortedTurns = [...turns].sort((a, b) => a.turn_index - b.turn_index);
 
   // Score each help-seeking episode once, at takeover start.
   for (const episode of supportEpisodes) {
@@ -425,36 +431,85 @@ function computeSupportSeeking(
   }
 
   // Penalty for sustained critical escalation without help-seeking
-  if (criticalThreshold != null) {
-    let consecutiveCritical = 0;
-
-    for (const turn of turns) {
-      if (isTurnCoveredBySupportEpisode(turn.turn_index, supportEpisodes)) {
-        consecutiveCritical = 0;
-        continue;
-      }
-
-      const level = turn.state_after?.level;
-      if (level != null && level >= criticalThreshold) {
-        consecutiveCritical++;
-        if (consecutiveCritical > CRITICAL_GRACE_TURNS) {
-          score -= SUPPORT_SEEKING_CRITICAL_PENALTY_PER_TURN;
-          evidence.push({
-            dimension: "support_seeking",
-            turnIndex: turn.turn_index,
-            evidenceType: "critical_no_support",
-            evidenceData: {
-              escalationLevel: level,
-              criticalThreshold,
-              consecutiveTurns: consecutiveCritical,
-            },
-            scoreImpact: -SUPPORT_SEEKING_CRITICAL_PENALTY_PER_TURN,
-          });
-        }
-      } else {
-        consecutiveCritical = 0;
-      }
+  for (const turn of sortedTurns) {
+    if (isTurnCoveredBySupportEpisode(turn.turn_index, supportEpisodes)) {
+      unsupportedCriticalStreak = 0;
+      streakPenaltyApplied = false;
+      continue;
     }
+
+    const level = turn.state_after?.level;
+    if (level == null) {
+      unsupportedCriticalStreak = 0;
+      streakPenaltyApplied = false;
+      continue;
+    }
+
+    if (!crisisPenaltyApplied && level >= CRISIS_LEVEL) {
+      crisisPenaltyApplied = true;
+      score -= SUPPORT_SEEKING_CRISIS_PENALTY;
+      evidence.push({
+        dimension: "support_seeking",
+        turnIndex: turn.turn_index,
+        evidenceType: "critical_no_support",
+        evidenceData: {
+          escalationLevel: level,
+          criticalThreshold,
+          consecutiveTurns: unsupportedCriticalStreak || 1,
+          crisisReached: true,
+        },
+        scoreImpact: -SUPPORT_SEEKING_CRISIS_PENALTY,
+      });
+    }
+
+    if (criticalThreshold == null || level < criticalThreshold) {
+      unsupportedCriticalStreak = 0;
+      streakPenaltyApplied = false;
+      continue;
+    }
+
+    unsupportedCriticalStreak++;
+    if (unsupportedCriticalStreak > CRITICAL_GRACE_TURNS) {
+      streakPenaltyApplied = true;
+      score -= SUPPORT_SEEKING_CRITICAL_PENALTY_PER_TURN;
+      evidence.push({
+        dimension: "support_seeking",
+        turnIndex: turn.turn_index,
+        evidenceType: "critical_no_support",
+        evidenceData: {
+          escalationLevel: level,
+          criticalThreshold,
+          consecutiveTurns: unsupportedCriticalStreak,
+        },
+        scoreImpact: -SUPPORT_SEEKING_CRITICAL_PENALTY_PER_TURN,
+      });
+    }
+  }
+
+  const lastTurn = sortedTurns[sortedTurns.length - 1];
+  const finalLevel = lastTurn?.state_after?.level ?? null;
+  if (
+    criticalThreshold != null &&
+    lastTurn &&
+    finalLevel != null &&
+    finalLevel >= criticalThreshold &&
+    !isTurnCoveredBySupportEpisode(lastTurn.turn_index, supportEpisodes) &&
+    unsupportedCriticalStreak > 0 &&
+    !streakPenaltyApplied
+  ) {
+    score -= SUPPORT_SEEKING_CRITICAL_PENALTY_PER_TURN;
+    evidence.push({
+      dimension: "support_seeking",
+      turnIndex: lastTurn.turn_index,
+      evidenceType: "critical_no_support",
+      evidenceData: {
+        escalationLevel: finalLevel,
+        criticalThreshold,
+        consecutiveTurns: unsupportedCriticalStreak,
+        terminalCriticalState: true,
+      },
+      scoreImpact: -SUPPORT_SEEKING_CRITICAL_PENALTY_PER_TURN,
+    });
   }
 
   return Math.max(0, Math.min(100, Math.round(score)));

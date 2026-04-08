@@ -80,7 +80,7 @@ export function ScoringConfigPanel({
         <div className="space-y-1.5">
           <Label>
             Critical Threshold
-            <Tooltip text="Optional. The escalation level at which NOT requesting help becomes a concern. If escalation stays at or above this level for 3+ turns without the trainee seeking support, their support seeking score is penalised." />
+            <Tooltip text="Optional. The escalation level at which NOT requesting help becomes a concern. Brief critical endings now incur a penalty, sustained periods at or above this level incur additional penalties after 3+ uncovered turns, and reaching level 10 without help is penalised even more heavily." />
           </Label>
           <Input
             type="number"
