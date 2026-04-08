@@ -118,26 +118,26 @@ export function ScoringConfigPanel({
 
         <WeightSlider
           label="Composure"
-          tooltip="Did the trainee stay calm and professional? Scored from detection of defensive language, dismissiveness, sarcasm, and hostility mirroring."
+          tooltip="Measures the trainee's ability to stay calm, respectful, and non-defensive under pressure. Dismissiveness, defensiveness, sarcasm, hostility mirroring, and repeated markers are penalised, especially when the patient or relative is already highly escalated."
           value={w.composure}
           onChange={(v) => onWeightsChange({ composure: v / 100 })}
         />
         <WeightSlider
           label="De-escalation"
-          tooltip="How effectively did the trainee manage the subject's emotional state? Scored from de-escalation attempts and whether those attempts were effective."
+          tooltip="Measures how effectively the trainee reduces the subject's emotional intensity. Scored from de-escalation attempts and whether those attempts actually lower the patient or relative's state."
           value={w.de_escalation}
           onChange={(v) => onWeightsChange({ de_escalation: v / 100 })}
         />
         <WeightSlider
           label="Clinical Task"
-          tooltip="Did the trainee continue to address the clinical need? Only available when milestones are defined."
+          tooltip="Measures whether the trainee keeps addressing the clinical need despite the conflict. Only available when milestones are defined."
           value={w.clinical_task}
           onChange={(v) => onWeightsChange({ clinical_task: v / 100 })}
           disabled={!hasMilestones}
         />
         <WeightSlider
           label="Support Seeking"
-          tooltip="Did the trainee request help at the right time? Scored from when the AI clinician was invoked relative to escalation thresholds."
+          tooltip="Measures judgment about when to continue independently and when to request the AI clinician. Missed support opportunities and delayed intervention are penalised."
           value={w.support_seeking}
           onChange={(v) => onWeightsChange({ support_seeking: v / 100 })}
         />

@@ -50,6 +50,15 @@ export interface ScoringInput {
 
 const MIN_TRAINEE_TURNS_FOR_SCORING = 3;
 const PRELIMINARY_TRAINEE_TURN_THRESHOLD = 6;
+const COMPOSURE_MARKER_WEIGHTS: Record<ComposureMarker, number> = {
+  defensive_language: 10,
+  dismissive_response: 14,
+  hostility_mirroring: 18,
+  sarcasm: 12,
+  interruption: 8,
+};
+const COMPOSURE_REPEAT_MARKER_PENALTY = 3;
+const COMPOSURE_MULTI_MARKER_MULTIPLIER = 1.1;
 const SUPPORT_SEEKING_START_SCORE = 100;
 const SUPPORT_SEEKING_APPROPRIATE_BONUS = 10;
 const SUPPORT_SEEKING_PREMATURE_PENALTY = 20;
@@ -106,28 +115,47 @@ function renormalizeWeights(weights: ScoringWeights, hasMilestones: boolean): Sc
 
 function computeComposure(
   traineeTurns: TranscriptTurn[],
+  allTurns: TranscriptTurn[],
   evidence: ScoreEvidence[]
 ): number {
   if (traineeTurns.length === 0) return 100;
 
-  const penaltyPerTurn = 100 / (traineeTurns.length * 1.5);
   let totalPenalty = 0;
+  const seenMarkerCounts = new Map<ComposureMarker, number>();
 
   for (const turn of traineeTurns) {
     const cr = turn.classifier_result;
     const markers: ComposureMarker[] = cr?.composure_markers ?? [];
     if (markers.length === 0) continue;
 
-    // Multiple markers on same turn: 1.5x penalty (not doubled)
-    const multiplier = markers.length > 1 ? 1.5 : 1;
-    const turnPenalty = penaltyPerTurn * multiplier;
+    let turnPenalty = 0;
+
+    for (const marker of markers) {
+      const seenCount = seenMarkerCounts.get(marker) ?? 0;
+      turnPenalty += COMPOSURE_MARKER_WEIGHTS[marker] + seenCount * COMPOSURE_REPEAT_MARKER_PENALTY;
+      seenMarkerCounts.set(marker, seenCount + 1);
+    }
+
+    if (markers.length > 1) {
+      turnPenalty *= COMPOSURE_MULTI_MARKER_MULTIPLIER;
+    }
+
+    const levelBefore = findLevelBeforeTurn(turn.turn_index, allTurns);
+    if (levelBefore != null) {
+      if (levelBefore >= 8) {
+        turnPenalty *= 1.2;
+      } else if (levelBefore >= 5) {
+        turnPenalty *= 1.1;
+      }
+    }
+
     totalPenalty += turnPenalty;
 
     evidence.push({
       dimension: "composure",
       turnIndex: turn.turn_index,
       evidenceType: "composure_marker",
-      evidenceData: { markers },
+      evidenceData: { markers, levelBefore },
       scoreImpact: -turnPenalty,
     });
   }
@@ -607,7 +635,7 @@ export function computeScore(input: ScoringInput): ScoreBreakdown {
   const evidence: ScoreEvidence[] = [];
 
   // Compute each dimension
-  const composure = computeComposure(traineeTurns, evidence);
+  const composure = computeComposure(traineeTurns, allTurns, evidence);
   const deEscalation = computeDeEscalation(traineeTurns, allTurns, evidence);
   const clinicalTask = computeClinicalTask(traineeTurns, milestones, evidence);
   const supportSeeking = computeSupportSeeking(

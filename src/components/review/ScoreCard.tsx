@@ -146,27 +146,27 @@ export function ScoreCard({ score, preliminary }: ScoreCardProps) {
           label="Composure"
           value={score.composure}
           weight={score.weightsUsed.composure}
-          description="Maintained a steady, professional tone under pressure"
+          description="Measures ability to remain calm, respectful, and non-defensive under pressure"
         />
         <ScoreBar
           label="De-escalation"
           value={score.deEscalation}
           weight={score.weightsUsed.de_escalation}
-          description="Effectively managed the subject's emotional state"
+          description="Measures ability to reduce the patient or relative's emotional intensity"
         />
         {score.clinicalTask != null && (
           <ScoreBar
             label="Clinical Task"
             value={score.clinicalTask}
             weight={score.weightsUsed.clinical_task}
-            description="Continued to address the clinical need"
+            description="Measures ability to keep addressing the clinical problem during conflict"
           />
         )}
         <ScoreBar
           label="Support Seeking"
           value={score.supportSeeking}
           weight={score.weightsUsed.support_seeking}
-          description="Appropriately used or declined the AI clinician's help"
+          description="Measures judgment about when to continue alone and when to request support"
         />
       </div>
       <div className="border-t border-slate-100 px-4 py-2.5 sm:px-5">
