@@ -52,9 +52,11 @@ For clinician speech, the realtime renderer now distinguishes three execution ou
 The patient is driven by a four-layer prompt built in `src/lib/engine/promptBuilder.ts`:
 
 1. **System layer**: immutable roleplay and safety rules.
-2. **State layer**: current escalation state, traits, bias state, and escalation ceiling.
+2. **State layer**: current escalation state, traits, whether configured prejudice is currently active, explicit language guidance for the current patient state, and escalation ceiling.
 3. **Memory layer**: recent conversation turns.
 4. **Voice layer**: either a deterministic voice description or a structured voice profile rendered into prompt text.
+
+The prompt now explicitly tells the model that the actual wording must match the current patient state. At higher states, that means swearing, insulting, or threatening language is expected in the words themselves rather than only in tone. When bias is configured, the prompt restricts discriminatory behaviour to the authored bias categories instead of letting it drift into unrelated prejudice.
 
 Scenarios are authored through the App Router scenario pages and stored across:
 
@@ -94,6 +96,8 @@ Patient voice-profile generation returns a seven-field structured profile:
 - delivery
 - variety
 
+The patient voice-profile request also consumes the authored `bias_intensity`, `bias_category`, and live `discrimination_active` flag alongside the numeric escalation/trust/anger state. That keeps generated delivery guidance aligned with scenarios that are meant to become discriminatory, hostile, or overtly abusive at higher patient states.
+
 Clinician turn generation returns:
 
 - the next clinician line
@@ -110,7 +114,7 @@ Clinician turn generation returns:
 - anger (0–10)
 - frustration (0–10)
 - boundary respect (0–10)
-- discrimination active (boolean flag)
+- discrimination active (boolean flag, derived dynamically from authored bias intensity/category plus the current patient state)
 - behaviour counters: interruptions, validations, unanswered questions
 
 Important current behaviour from the code:
@@ -123,6 +127,7 @@ Important current behaviour from the code:
 - **Trust penalty**: low trust slows recovery, so a patient who has lost trust does not de-escalate as easily.
 - **Anger resistance**: high anger (≥ 4) adds friction to de-escalation.
 - **Per-turn caps**: escalation can rise by at most +3 and fall by at most −2 in a single turn.
+- **Dynamic discrimination flag**: `discrimination_active` is recalculated as the conversation evolves. High-intensity bias can surface early; milder configured bias stays latent until the patient state is more escalated.
 
 ## 5. Bot Clinician Flow
 
@@ -172,7 +177,7 @@ All persistence calls from the simulation page (`persistTranscriptTurn`, `update
 - **Composure**: starts at 100, subtracts penalties when composure markers are detected (defensive language, dismissive responses, hostility mirroring, sarcasm). Multiple markers on one turn incur a 1.5× penalty.
 - **De-escalation**: measures the rate and effectiveness of de-escalation attempts. Score = attempt_rate × 0.4 + success_rate × 0.6. Effectiveness is measured by whether escalation level dropped on the next patient reply, provided the AI clinician did not intervene first. Only turns where the patient is actively escalated count.
 - **Clinical Task Maintenance** (optional): ratio of completed milestones to total milestones defined for the scenario. Excluded entirely if no milestones are defined. Milestones are tracked silently during the session (not shown to the trainee) and appear on the review page as natural clinical evidence rather than checklist items.
-- **Support Seeking**: starts at a baseline of 70. Each clinician takeover episode at or above the scenario's support threshold adds +15; below the threshold subtracts -15. Sustained critical escalation without help-seeking incurs additional penalties.
+- **Support Seeking**: starts at a baseline of 70. Each clinician takeover episode at or above the scenario's support threshold adds +15; below the threshold subtracts -15. Sustained unsupported critical escalation incurs additional penalties, and reaching level 10 without help also triggers a separate penalty.
 
 The overall score is a weighted average using scenario-defined weights (or equal defaults). When clinical task is excluded, weights are renormalized across the remaining three dimensions.
 
@@ -235,10 +240,10 @@ The review page displays:
 
 - **Top review section**: a two-column layout with score content on the left and trainee reflection on the right on large screens. The left side shows either a full `ScoreCard` or a score placeholder card explaining that the session was too short to score.
 - **ScoreCard**: qualitative label badge (Strong / Developing / Needs practice), overall circular progress, and four dimension bars (0–100) with weight percentages. Sessions under 3 trainee turns show the short-session placeholder instead of the score card.
-- **Escalation timeline**: always visible on the main screen (no longer in a tab), showing escalation level and trust over time with event markers.
+- **Patient/relative state timeline**: always visible on the main screen (no longer in a tab), showing patient/relative state and trust over time with event markers.
 - **Key moments**: 2–3 highest-impact scoring events with transcript excerpts and context.
 - **Technique suggestion**: one "Next time, try" recommendation based on the weakest scoring dimension.
-- **Summary cards**: turns, events, peak level, exit type, and clinician audio success rate.
+- **Summary cards**: turns, events, peak level, exit type, and a **Supervisor intervention** card that summarises AI clinician usage and whether audio telemetry was captured.
 - **Tabs**: Transcript, Event Log, Educator Notes.
 - **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data and kept near the top of the review page even for short sessions. If saved reflection data cannot be loaded, the component stays visible and shows an inline error state rather than disappearing.
 

@@ -1,6 +1,7 @@
 import type { EscalationState, EscalationDelta, TurnSource } from "@/types/escalation";
 import type { ClassifierResult } from "@/types/simulation";
 import type { ScenarioTraits, EscalationRules } from "@/types/scenario";
+import { isDiscriminationActive } from "@/lib/engine/biasBehaviour";
 
 export class EscalationEngine {
   private state: EscalationState;
@@ -23,11 +24,12 @@ export class EscalationEngine {
       anger: Math.round((traits.hostility + traits.frustration) / 2),
       frustration: traits.frustration,
       boundary_respect: traits.boundary_respect,
-      discrimination_active: traits.bias_intensity > 3 && traits.bias_category !== "none",
+      discrimination_active: false,
       interruptions_count: 0,
       validations_count: 0,
       unanswered_questions: 0,
     };
+    this.syncDerivedFlags();
   }
 
   getState(): EscalationState {
@@ -36,6 +38,7 @@ export class EscalationEngine {
 
   hydrateState(state: EscalationState) {
     this.state = { ...state };
+    this.syncDerivedFlags();
   }
 
   getLevel(): number {
@@ -55,6 +58,10 @@ export class EscalationEngine {
     return this.state.level >= this.rules.auto_end_threshold;
   }
 
+  private syncDerivedFlags() {
+    this.state.discrimination_active = isDiscriminationActive(this.traits, this.state);
+  }
+
   processClassification(result: ClassifierResult, source: TurnSource = "trainee"): EscalationDelta {
     const effectiveness = result.effectiveness; // -1 to +1
     const volatilityFactor = this.traits.volatility / 10;
@@ -69,6 +76,7 @@ export class EscalationEngine {
       if (result.tags.includes("validation") || result.tags.includes("empathy")) {
         this.state.validations_count++;
       }
+      this.syncDerivedFlags();
       return {
         level_delta: 0,
         trust_delta: 0,
@@ -166,6 +174,7 @@ export class EscalationEngine {
     this.state.willingness_to_listen = Math.max(0, Math.min(10, this.state.willingness_to_listen + listeningDelta));
     this.state.anger = Math.max(0, Math.min(10, this.state.anger + (levelDelta > 0 ? 1 : levelDelta < 0 ? -1 : 0)));
     this.state.frustration = Math.max(0, Math.min(10, this.state.frustration + (levelDelta > 0 ? 1 : 0)));
+    this.syncDerivedFlags();
 
     return {
       level_delta: this.state.level - oldLevel,

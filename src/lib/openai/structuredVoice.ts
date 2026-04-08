@@ -4,6 +4,7 @@ import type { StructuredClinicianTurn, StructuredVoiceProfile } from "@/types/vo
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
+import { formatBiasCategories, hasConfiguredBias } from "@/lib/engine/biasBehaviour";
 import { renderVoiceProfileForPrompt } from "@/lib/voice/renderVoiceProfile";
 
 const VOICE_PROFILE_MODEL = process.env.OPENAI_VOICE_PROFILE_MODEL || "gpt-5.4-mini";
@@ -136,9 +137,13 @@ The profile must reflect:
 - how that state has shifted through the conversation
 - their personality traits and baseline voice settings
 - how escalated, trusting, angry, and willing to listen they currently are
+- whether any configured prejudice is currently surfacing
+- whether the next turn should sound tense, hostile, abusive, profane, or threatening
 
 Use concrete wording that can be dropped directly into a speech model prompt.
-Use British English.`;
+Use British English.
+Keep any discriminatory colouring within the authored bias categories only.
+Do not clean a highly escalated delivery up into polite neutrality.`;
 
   const userPrompt = `Scenario title: ${input.title}
 Role: ${input.aiRole}
@@ -153,6 +158,7 @@ Current state:
 - Willingness to listen: ${input.currentState.willingness_to_listen}/10
 - Anger: ${input.currentState.anger}/10
 - Frustration: ${input.currentState.frustration}/10
+- Discriminatory behaviour active: ${input.currentState.discrimination_active ? "yes" : "no"}
 
 Traits:
 - Hostility: ${input.traits.hostility}/10
@@ -163,6 +169,8 @@ Traits:
 - Repetition: ${input.traits.repetition}/10
 - Entitlement: ${input.traits.entitlement}/10
 - Interruption likelihood: ${input.traits.interruption_likelihood}/10
+- Bias intensity: ${input.traits.bias_intensity}/10
+- Bias categories: ${formatBiasCategories(input.traits.bias_category)}
 
 Base voice config:
 - Voice name: ${input.voiceConfig.voice_name}
@@ -184,7 +192,19 @@ Create a voice profile for the patient's next spoken turn only.
 Use all available inputs together:
 - the patient's current numeric state
 - the recent dialogue
-- the latest clinician delivery profile, if provided, because the patient may react differently to the same words when they are delivered more softly, more firmly, or more urgently.`;
+- the latest clinician delivery profile, if provided, because the patient may react differently to the same words when they are delivered more softly, more firmly, or more urgently.
+
+Additional delivery guidance:
+- ${input.currentState.discrimination_active
+    ? `Configured prejudice is currently active. The voice should carry contempt and dismissiveness consistent with these categories only: ${formatBiasCategories(input.traits.bias_category)}.`
+    : hasConfiguredBias(input.traits)
+      ? "Configured prejudice exists but is not fully surfacing yet. Keep it latent rather than constant."
+      : "No discriminatory colouring should be present in the delivery."}
+- ${input.currentState.level >= 8
+    ? "At this state the next turn should sound openly abusive, profane, or intimidating, not merely irritated."
+    : input.currentState.level >= 6
+      ? "At this state the next turn should sound heated and hostile, with real edge in the delivery."
+      : "Keep the delivery aligned with the current state without overshooting into abuse."}`;
 
   return requestStructuredOutput<StructuredVoiceProfile>({
     systemPrompt,

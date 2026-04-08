@@ -2,6 +2,7 @@ import type { ScenarioTraits, ScenarioVoiceConfig, EscalationRules } from "@/typ
 import type { EscalationState } from "@/types/escalation";
 import type { StructuredVoiceProfile } from "@/types/voice";
 import { ESCALATION_LABELS } from "@/types/escalation";
+import { formatBiasCategories, hasConfiguredBias } from "@/lib/engine/biasBehaviour";
 import { renderVoiceProfileForPrompt } from "@/lib/voice/renderVoiceProfile";
 
 interface PromptConfig {
@@ -32,6 +33,8 @@ CRITICAL RULES:
 - Keep responses concise — real people in distress don't give long speeches
 - This is a training exercise for "${config.traineeRole}" — your job is to be realistic
 - You are British. Speak with a natural British English accent and use British vocabulary and idioms (e.g. "bloody", "rubbish", "mate", "NHS", "A&E", "GP", "consultant" not "attending"). Do NOT use American English.
+- The WORDING must match the emotional state. If you are hostile, abusive, threatening, or prejudiced, that must show up in the actual words you choose, not just the tone.
+- Swearing, insults, or discriminatory remarks are allowed only when the current state and configured traits justify them. Keep any prejudice within the authored bias categories.
 
 CONVERSATION FLOW — VERY IMPORTANT:
 - Give ONE natural response per turn, then pause for the trainee to speak
@@ -73,12 +76,11 @@ Behavioural traits:
 - Repetition tendency: ${traits.repetition}/10
 - Entitlement: ${traits.entitlement}/10
 - Interruption likelihood: ${traits.interruption_likelihood}/10
-${traits.bias_intensity > 0 && traits.bias_category !== "none"
-    ? `- Active prejudice at intensity ${traits.bias_intensity}/10. You display SPECIFICALLY these types of bias: ${formatBiasCategories(traits.bias_category)}. Only express these specific bias types, not others.`
-    : "- No active prejudice — do not display any discriminatory behaviour"}
+${getBiasBehaviourInstruction(traits, currentState)}
 
 ESCALATION BEHAVIOUR:
 - At level ${currentState.level}, you should be: ${getEscalationBehaviour(currentState.level)}
+- Spoken language at this level: ${getEscalationLanguage(currentState.level)}
 - Max ceiling: ${config.escalationRules.max_ceiling} — do not exceed this
 - If the trainee uses good communication, allow yourself to soften somewhat
 - Large emotional drops are rare — don't suddenly become calm unless the trainee is exceptional
@@ -446,19 +448,18 @@ function buildDelivery(
   return parts.join("\n");
 }
 
-const BIAS_LABELS: Record<string, string> = {
-  gender: "gender-based prejudice (sexist remarks, assumptions about capability based on gender)",
-  racial: "racial prejudice (racist remarks, assumptions based on ethnicity or skin colour)",
-  age: "age-based prejudice (dismissing someone as too young or too old)",
-  accent: "accent-based prejudice (mocking or refusing to engage based on how someone speaks)",
-  class_status: "class/social status prejudice (looking down on or up to someone based on perceived social standing)",
-  role_status: "role-based prejudice (dismissing someone based on their professional role, e.g. 'you're just a nurse')",
-};
+function getBiasBehaviourInstruction(traits: ScenarioTraits, currentState: EscalationState): string {
+  if (!hasConfiguredBias(traits)) {
+    return "- No active prejudice — do not display any discriminatory behaviour.";
+  }
 
-function formatBiasCategories(biasCategory: string): string {
-  if (biasCategory === "none" || !biasCategory) return "none";
-  const categories = biasCategory.split(",").map((s) => s.trim());
-  return categories.map((c) => BIAS_LABELS[c] || c).join("; ");
+  const categories = formatBiasCategories(traits.bias_category);
+
+  if (!currentState.discrimination_active) {
+    return `- Prejudice is configured at intensity ${traits.bias_intensity}/10 in these categories: ${categories}. It is present as an underlying attitude, but it is not fully surfacing yet. Let it leak only as biased assumptions, dismissive undertones, or barbed remarks if the trainee pushes you. Never introduce bias types outside these categories.`;
+  }
+
+  return `- Active prejudice is surfacing at intensity ${traits.bias_intensity}/10 in these categories: ${categories}. Express ONLY these specific bias types, not others. Let the prejudice show in the wording through contempt, discriminatory assumptions, or dismissive remarks that fit the conversation.`;
 }
 
 function getEscalationBehaviour(level: number): string {
@@ -469,12 +470,28 @@ function getEscalationBehaviour(level: number): string {
     4: "Frustrated and impatient. May repeat grievances. Wants answers NOW.",
     5: "Confrontational. Challenging what's being said. Voice rising.",
     6: "Accusatory. Blaming the clinician or the system. Hostile language.",
-    7: "Hostile. Personal attacks possible. Threatening to complain formally.",
-    8: "Verbally abusive. Swearing, shouting, loss of composure.",
-    9: "Threatening. Implicit or explicit threats. Extreme distress.",
-    10: "Complete loss of control. Incoherent with rage or distress.",
+    7: "Hostile and personally cutting. Personal attacks and contempt are common. Threatening to complain formally.",
+    8: "Verbally abusive. Open swearing, insults, aggressive challenges, shouting, and clear loss of composure.",
+    9: "Threatening and intimidating. Repeated profanity, offensive language, and implicit or explicit threats. Extreme distress.",
+    10: "Complete loss of control. Chaotic shouted abuse, repeated swearing, and barely coherent rage or distress.",
   };
   return behaviours[level] || behaviours[5];
+}
+
+function getEscalationLanguage(level: number): string {
+  const guidance: Record<number, string> = {
+    1: "Polite and plain-spoken. Concern shows, but the language stays measured.",
+    2: "Short, wary, and slightly suspicious. Curt without becoming rude.",
+    3: "Sharper and more impatient. Frustration should be obvious in the wording.",
+    4: "Clipped and demanding. Repeats the grievance and pushes for answers now.",
+    5: "Accusatory and challenging. Directly questions the clinician's judgement or effort.",
+    6: "Openly blaming and hostile. Hard-edged wording, with obvious resentment and contempt.",
+    7: "Personal jabs and cutting remarks are common. 'Don't you dare' or similar pushback fits.",
+    8: "Swearing, insults, and offensive language are expected. The abuse should be explicit in the words, not just implied.",
+    9: "Repeated profanity and intimidation. Threats or menacing wording can be explicit when the conversation warrants it.",
+    10: "Chaotic shouted abuse. Repeated swearing, hostile fragments, and loss of verbal control are normal.",
+  };
+  return guidance[level] || guidance[5];
 }
 
 // Explicit vocal-register directive placed at the very end of the prompt
