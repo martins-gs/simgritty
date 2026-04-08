@@ -152,7 +152,7 @@ export function ScoreCard({ score, preliminary }: ScoreCardProps) {
           label="De-escalation"
           value={score.deEscalation}
           weight={score.weightsUsed.de_escalation}
-          description="Measures ability to reduce the patient or relative's emotional intensity"
+          description="Measures ability to reduce emotional intensity without making the interaction worse"
         />
         {score.clinicalTask != null && (
           <ScoreBar

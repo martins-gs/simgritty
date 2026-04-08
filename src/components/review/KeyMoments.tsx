@@ -37,6 +37,14 @@ const EVIDENCE_DESCRIPTIONS: Record<string, (data: Record<string, unknown>) => s
     }
     return effective ? "Effective de-escalation" : "De-escalation attempt did not reduce escalation";
   },
+  de_escalation_harm: (data) => {
+    const technique = data.technique as string | undefined;
+    const effectiveness = data.effectiveness as number | undefined;
+    if (technique && effectiveness != null) {
+      return `${technique.replace(/_/g, " ")} increased tension (${effectiveness.toFixed(1)})`;
+    }
+    return "This turn increased the patient or relative's emotional intensity";
+  },
   milestone_completed: (data) => {
     const desc = data.description as string | undefined;
     return desc ? `Addressed the clinical need: ${desc}` : "Addressed a clinical need during the conversation";

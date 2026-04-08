@@ -59,6 +59,7 @@ const COMPOSURE_MARKER_WEIGHTS: Record<ComposureMarker, number> = {
 };
 const COMPOSURE_REPEAT_MARKER_PENALTY = 3;
 const COMPOSURE_MULTI_MARKER_MULTIPLIER = 1.1;
+const DE_ESCALATION_HARM_PENALTY_FACTOR = 20;
 const SUPPORT_SEEKING_START_SCORE = 100;
 const SUPPORT_SEEKING_APPROPRIATE_BONUS = 10;
 const SUPPORT_SEEKING_PREMATURE_PENALTY = 20;
@@ -187,15 +188,33 @@ function computeDeEscalation(
 
   let attemptsMade = 0;
   let effectiveAttempts = 0;
+  let harmPenalty = 0;
 
   for (const turn of scoreableTurns) {
     const cr = turn.classifier_result;
+    const levelBefore = findLevelBeforeTurn(turn.turn_index, allTurns);
+
+    if (cr?.effectiveness != null && cr.effectiveness < 0) {
+      const turnPenalty = Math.abs(cr.effectiveness) * DE_ESCALATION_HARM_PENALTY_FACTOR;
+      harmPenalty += turnPenalty;
+      evidence.push({
+        dimension: "de_escalation",
+        turnIndex: turn.turn_index,
+        evidenceType: "de_escalation_harm",
+        evidenceData: {
+          technique: cr.technique,
+          effectiveness: cr.effectiveness,
+          levelBefore,
+        },
+        scoreImpact: -turnPenalty,
+      });
+    }
+
     if (!cr?.de_escalation_attempt) continue;
 
     attemptsMade++;
 
     // Measure effectiveness: did escalation decrease after this attempt?
-    const levelBefore = findLevelBeforeTurn(turn.turn_index, allTurns);
     const { levelAfterNextPatientTurn, clinicianIntervened } = findNextPatientOutcomeAfterTurn(
       turn.turn_index,
       allTurns
@@ -242,7 +261,8 @@ function computeDeEscalation(
 
   const attemptRate = attemptsMade / opportunities;
   const successRate = effectiveAttempts / attemptsMade;
-  return Math.round((attemptRate * 0.4 + successRate * 0.6) * 100);
+  const rawScore = (attemptRate * 0.4 + successRate * 0.6) * 100;
+  return Math.max(0, Math.min(100, Math.round(rawScore - harmPenalty)));
 }
 
 /** Find the escalation level before a given trainee turn. */

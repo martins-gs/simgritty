@@ -124,7 +124,7 @@ export function ScoringConfigPanel({
         />
         <WeightSlider
           label="De-escalation"
-          tooltip="Measures how effectively the trainee reduces the subject's emotional intensity. Scored from de-escalation attempts and whether those attempts actually lower the patient or relative's state."
+          tooltip="Measures how effectively the trainee reduces the subject's emotional intensity. Helpful attempts are credited when they lower the next patient or relative state, and turns that further inflame the interaction reduce the score."
           value={w.de_escalation}
           onChange={(v) => onWeightsChange({ de_escalation: v / 100 })}
         />

@@ -345,7 +345,7 @@ Post-session performance is scored 0-100 across four dimensions, each scored 0-1
 | Dimension | Measures | How |
 |-----------|----------|-----|
 | Composure | Measures ability to remain calm, respectful, and non-defensive under pressure | Start at 100, subtract weighted penalties for composure markers. Dismissiveness and hostility mirroring cost more than minor interruption, repeated markers compound, and poor composure during higher patient/relative state is penalised more heavily |
-| De-escalation | Effectiveness of de-escalation attempts | 40% attempt rate + 60% success rate, measured against patient state change without clinician takeover intervening first |
+| De-escalation | Measures ability to reduce the patient or relative's emotional intensity without worsening the interaction | 40% attempt rate + 60% success rate, measured against patient/relative state change without AI clinician takeover intervening first. Turns that further inflame an already-escalated interaction subtract from the score |
 | Clinical Task | Continued to address the clinical need (optional) | Ratio of completed milestones to total defined milestones |
 | Support Seeking | Appropriately used or declined the AI clinician | Starts from 100. Appropriate takeover requests receive a small credit, premature requests are penalised, and each trainee turn taken at or above the support threshold without asking for help counts as a missed support opportunity. Unsupported deterioration into critical or crisis states reduces the score further. Legacy scenarios with no explicit support threshold fall back to the critical threshold or level 6 |
 
