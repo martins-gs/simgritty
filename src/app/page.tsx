@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import {
   Mic,
@@ -21,8 +22,6 @@ import {
 } from "lucide-react";
 import { getUser } from "@/lib/supabase/server";
 import { HeroTextRotator } from "@/components/landing/HeroTextRotator";
-import { IsometricDiagram } from "@/components/landing/IsometricDiagram";
-import { IsometricDiagramV2 } from "@/components/landing/IsometricDiagramV2";
 import { IsometricDiagramV3 } from "@/components/landing/IsometricDiagramV3";
 import { ProLogWordmark } from "@/components/ProLogLogo";
 import { PrivacyStatement } from "@/components/landing/PrivacyStatement";
@@ -79,17 +78,21 @@ function SessionScreenshots() {
   return (
     <div className="space-y-6">
       <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
-        <img
+        <Image
           src="/screenshots/escalation-timeline.png"
           alt="Escalation timeline from a real PROLOG session showing escalation level and trust over time"
-          className="w-full"
+          width={2192}
+          height={908}
+          className="h-auto w-full"
         />
       </div>
       <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
-        <img
+        <Image
           src="/screenshots/transcript.png"
           alt="Transcript from a real PROLOG session showing patient, trainee, and AI clinician turns with classification tags"
-          className="w-full"
+          width={2200}
+          height={1168}
+          className="h-auto w-full"
         />
       </div>
     </div>
@@ -263,66 +266,6 @@ export default async function LandingPage() {
             </p>
             <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
               <CtaButtons user={user} />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Mobile-First Advantage ──────────────────────────────── */}
-      <section className="border-t border-border/60 bg-card">
-        <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
-          <div className="mx-auto max-w-3xl">
-            <p className="mb-2 text-center text-[13px] font-medium uppercase tracking-wide text-primary">
-              Mobile-First, Not Headset-Dependent
-            </p>
-            <h2 className="text-center text-xl font-semibold tracking-tight sm:text-2xl">
-              Immersive training without the hardware overhead
-            </h2>
-            <p className="mt-4 text-[14px] leading-relaxed text-muted-foreground">
-              Extended reality headsets are expensive to procure, difficult to
-              deploy at scale, and costly to maintain. Every headset needs
-              charging, cleaning, software updates, and technical support —
-              and your training capacity is limited by how many units you own
-              as well as the time and costs of developing immersive content.
-            </p>
-            <p className="mt-3 text-[14px] leading-relaxed text-muted-foreground">
-              <P /> runs on the devices your staff already carry. A mobile
-              phone, tablet, or laptop with a browser and microphone is all it
-              takes. This makes it significantly cheaper to produce, deploy,
-              and maintain — while delivering a more meaningful level of
-              engagement, because trainees practise with their own voice in
-              natural spoken conversation rather than navigating a virtual
-              environment with controllers.
-            </p>
-
-            {/* Comparison table */}
-            <div className="mt-8 overflow-hidden rounded-xl border border-border/60">
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="border-b border-border/60 bg-muted/30">
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground" />
-                    <th className="px-4 py-2.5 text-left font-semibold"><P /></th>
-                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">XR Headsets</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {([
-                    ["Hardware required", "Any device with a browser", "Dedicated headset per trainee"],
-                    ["Hardware cost", "None", "Significant per-unit investment"],
-                    ["Content creation", "Minimal — educators configure scenarios in minutes", "Expensive 3D environments, voice actors, scripting"],
-                    ["Deployment", "Share a link", "Provision, configure, distribute"],
-                    ["Ongoing maintenance", "None", "Charging, cleaning, repairs, updates"],
-                    ["Scalability", "Unlimited — scales with your cohort", "Limited by inventory"],
-                    ["Engagement model", "Natural voice conversation", "Fixed multiple choice options"],
-                  ] as const).map(([label, sg, xr]) => (
-                    <tr key={label} className="bg-card">
-                      <td className="px-4 py-2 font-medium text-muted-foreground">{label}</td>
-                      <td className="px-4 py-2">{sg}</td>
-                      <td className="px-4 py-2 text-muted-foreground">{xr}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
           </div>
         </div>
@@ -513,7 +456,7 @@ export default async function LandingPage() {
               Fine-tune every aspect of the AI character
             </h2>
             <p className="mx-auto mt-3 max-w-lg text-[14px] leading-relaxed text-muted-foreground">
-              Educators shape the patient or relative's personality across
+              Educators shape the patient or relative&apos;s personality across
               emotional, behavioural, cognitive, and vocal dimensions. Toggle
               specific bias categories and control their intensity to create
               precisely the training challenge needed.
@@ -645,6 +588,66 @@ export default async function LandingPage() {
                 practice ground that accelerates readiness, with enough
                 rigour to be useful and enough transparency to be trusted.
               </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Mobile-First Advantage ──────────────────────────────── */}
+      <section className="border-t border-border/60 bg-card">
+        <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
+          <div className="mx-auto max-w-3xl">
+            <p className="mb-2 text-center text-[13px] font-medium uppercase tracking-wide text-primary">
+              Mobile-First, Not Headset-Dependent
+            </p>
+            <h2 className="text-center text-xl font-semibold tracking-tight sm:text-2xl">
+              Immersive training without the hardware overhead
+            </h2>
+            <p className="mt-4 text-[14px] leading-relaxed text-muted-foreground">
+              Extended reality headsets are expensive to procure, difficult to
+              deploy at scale, and costly to maintain. Every headset needs
+              charging, cleaning, software updates, and technical support —
+              and your training capacity is limited by how many units you own
+              as well as the time and costs of developing immersive content.
+            </p>
+            <p className="mt-3 text-[14px] leading-relaxed text-muted-foreground">
+              <P /> runs on the devices your staff already carry. A mobile
+              phone, tablet, or laptop with a browser and microphone is all it
+              takes. This makes it significantly cheaper to produce, deploy,
+              and maintain — while delivering a more meaningful level of
+              engagement, because trainees practise with their own voice in
+              natural spoken conversation rather than navigating a virtual
+              environment with controllers.
+            </p>
+
+            {/* Comparison table */}
+            <div className="mt-8 overflow-hidden rounded-xl border border-border/60">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-b border-border/60 bg-muted/30">
+                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground" />
+                    <th className="px-4 py-2.5 text-left font-semibold"><P /></th>
+                    <th className="px-4 py-2.5 text-left font-medium text-muted-foreground">XR Headsets</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {([
+                    ["Hardware required", "Any device with a browser", "Dedicated headset per trainee"],
+                    ["Hardware cost", "None", "Significant per-unit investment"],
+                    ["Content creation", "Minimal — educators configure scenarios in minutes", "Expensive 3D environments, voice actors, scripting"],
+                    ["Deployment", "Share a link", "Provision, configure, distribute"],
+                    ["Ongoing maintenance", "None", "Charging, cleaning, repairs, updates"],
+                    ["Scalability", "Unlimited — scales with your cohort", "Limited by inventory"],
+                    ["Engagement model", "Natural voice conversation", "Fixed multiple choice options"],
+                  ] as const).map(([label, sg, xr]) => (
+                    <tr key={label} className="bg-card">
+                      <td className="px-4 py-2 font-medium text-muted-foreground">{label}</td>
+                      <td className="px-4 py-2">{sg}</td>
+                      <td className="px-4 py-2 text-muted-foreground">{xr}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -828,4 +831,3 @@ export default async function LandingPage() {
     </div>
   );
 }
-
