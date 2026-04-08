@@ -261,10 +261,11 @@ Forking is session-based rather than template-based: a new session can be create
 PROLOG uses **email OTP (magic link)** via Supabase Auth. Access is restricted to `@nhs.scot` email addresses — the login page validates the domain client-side before calling Supabase, so non-NHS.scot addresses never reach the auth service. The OTP flow:
 
 1. `POST supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: '/auth/confirm' } })`
-2. Supabase emails a magic link; the user clicks it
-3. `GET /auth/confirm` receives either a PKCE `?code=` (browser-initiated PKCE flow) or `?token_hash=&type=` (token hash flow) and exchanges it for a session, then redirects to `/dashboard`
+2. Supabase emails a magic link via Resend; the user clicks it
+3. The browser loads `/auth/confirm` — a **client-side page** that renders a "Complete sign-in" button
+4. The user clicks the button; the browser Supabase client calls `verifyOtp({ token_hash, type })` (or `exchangeCodeForSession(code)` for the PKCE code flow) and redirects to `/dashboard`
 
-The `HEAD /auth/confirm` handler returns 200 without consuming the token, preventing email clients from pre-fetching and invalidating the link.
+The confirm page is intentionally client-side rather than a server-side route handler. Email clients (including Outlook's reading pane) make background GET requests to links in emails; a server-side handler would consume the one-time token before the user ever clicked. With a client-side page the token is only consumed when JavaScript runs in a real browser and the user explicitly clicks the button.
 
 There is no self-service password-based signup. Supabase creates a new user record automatically on first OTP sign-in for any valid `@nhs.scot` address.
 
