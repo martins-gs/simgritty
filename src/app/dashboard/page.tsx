@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Plus, Play, Trash2 } from "lucide-react";
+import { Play, Trash2 } from "lucide-react";
 
 interface ScenarioItem {
   id: string;
@@ -42,8 +42,6 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<SessionItem | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [deleteScenarioTarget, setDeleteScenarioTarget] = useState<ScenarioItem | null>(null);
-  const [deletingScenario, setDeletingScenario] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -85,22 +83,6 @@ export default function DashboardPage() {
     setDeleteTarget(null);
   }
 
-  async function handleDeleteScenario() {
-    if (!deleteScenarioTarget) return;
-    setDeletingScenario(true);
-    const res = await fetch(`/api/scenarios/${deleteScenarioTarget.id}`, { method: "DELETE" });
-    if (res.ok) {
-      setScenarios((prev) => prev.filter((s) => s.id !== deleteScenarioTarget.id));
-      // Also remove sessions that belonged to this scenario
-      setSessions((prev) => prev.filter((s) => s.scenario_id !== deleteScenarioTarget.id));
-      toast.success("Scenario deleted");
-    } else {
-      toast.error("Failed to delete scenario");
-    }
-    setDeletingScenario(false);
-    setDeleteScenarioTarget(null);
-  }
-
   const publishedScenarios = scenarios.filter((s) => s.status === "published");
 
   return (
@@ -112,76 +94,36 @@ export default function DashboardPage() {
           </h1>
         </div>
 
-        {/* Quick start */}
-        {publishedScenarios.length > 0 && (
-          <section>
-            <h2 className="mb-3 text-[13px] font-medium uppercase tracking-wide text-muted-foreground">
-              Start a simulation
-            </h2>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Scenarios available to you */}
+        <section className="rounded-xl bg-muted/40 border border-border/40 p-5">
+          <div className="mb-4">
+            <h2 className="text-[13px] font-medium uppercase tracking-wide text-muted-foreground">Scenarios available to you</h2>
+          </div>
+          {loading ? (
+            <p className="py-8 text-center text-[13px] text-muted-foreground">Loading...</p>
+          ) : publishedScenarios.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border/80 bg-card py-10 text-center">
+              <p className="text-[13px] text-muted-foreground">No scenarios available yet</p>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-3">
               {publishedScenarios.map((s) => (
                 <Link
                   key={s.id}
                   href={`/scenarios/${s.id}/briefing`}
-                  className="group flex items-center justify-between rounded-lg border border-border/60 bg-card px-4 py-3 transition-colors hover:border-primary/30 hover:bg-accent/40"
+                  className="group relative w-[220px] rounded-xl border border-border/60 bg-card p-4 shadow-sm transition-colors hover:border-primary/30 hover:shadow-md"
                 >
-                  <div className="min-w-0">
-                    <p className="truncate text-[13px] font-medium">{s.title}</p>
-                    <p className="text-[11px] text-muted-foreground capitalize">{s.difficulty}</p>
-                  </div>
-                  <div className="ml-3 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                    <Play className="h-3.5 w-3.5" />
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Scenarios */}
-        <section className="rounded-xl bg-muted/40 border border-border/40 p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-[13px] font-medium uppercase tracking-wide text-muted-foreground">Scenarios</h2>
-            <Link href="/scenarios/new" className="flex items-center gap-1.5 text-[13px] font-medium text-primary hover:underline">
-              <Plus className="h-3.5 w-3.5" />New
-            </Link>
-          </div>
-          {loading ? (
-            <p className="py-8 text-center text-[13px] text-muted-foreground">Loading...</p>
-          ) : scenarios.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-border/80 bg-card py-10 text-center">
-              <p className="text-[13px] text-muted-foreground">No scenarios yet</p>
-              <Link href="/scenarios/new" className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-primary hover:underline">
-                <Plus className="h-3.5 w-3.5" />Create your first scenario
-              </Link>
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-3">
-              {scenarios.map((s) => (
-                <div key={s.id} className="group relative w-[220px] rounded-xl border border-border/60 bg-card p-4 shadow-sm transition-colors hover:border-primary/30 hover:shadow-md">
-                  <Link href={`/scenarios/${s.id}`} className="block">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <Badge
-                        variant="secondary"
-                        className={`text-[10px] ${s.status === "published" ? "bg-teal-50 text-teal-700 border border-teal-200" : ""}`}
-                      >{s.status}</Badge>
-                      <span className="text-[11px] text-muted-foreground capitalize">{s.difficulty}</span>
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <span className="text-[11px] text-muted-foreground capitalize">{s.difficulty}</span>
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                      <Play className="h-3 w-3" />
                     </div>
-                    <p className="text-[13px] font-medium leading-snug">{s.title}</p>
-                    {s.setting && (
-                      <p className="mt-1 text-[11px] text-muted-foreground leading-snug">{s.setting}</p>
-                    )}
-                  </Link>
-                  {userId && s.created_by === userId && (
-                    <button
-                      onClick={() => setDeleteScenarioTarget(s)}
-                      className="absolute top-3 right-3 flex h-6 w-6 items-center justify-center rounded text-slate-400 opacity-0 transition-all group-hover:opacity-100 hover:bg-red-50 hover:text-red-500"
-                      aria-label="Delete scenario"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                  </div>
+                  <p className="text-[13px] font-medium leading-snug">{s.title}</p>
+                  {s.setting && (
+                    <p className="mt-1 text-[11px] text-muted-foreground leading-snug">{s.setting}</p>
                   )}
-                </div>
+                </Link>
               ))}
             </div>
           )}
@@ -255,23 +197,6 @@ export default function DashboardPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete scenario confirmation dialog */}
-      <Dialog open={!!deleteScenarioTarget} onOpenChange={(open) => { if (!open) setDeleteScenarioTarget(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete scenario</DialogTitle>
-            <DialogDescription>
-              This will permanently delete &ldquo;{deleteScenarioTarget?.title}&rdquo; and all associated sessions, transcripts, events, and notes. This cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" className="text-[13px]" onClick={() => setDeleteScenarioTarget(null)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDeleteScenario} disabled={deletingScenario} className="text-[13px]">
-              {deletingScenario ? "Deleting..." : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </AppShell>
   );
 }
