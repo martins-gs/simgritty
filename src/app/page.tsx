@@ -322,27 +322,6 @@ export default async function LandingPage() {
         </div>
       </section>
 
-      {/* ── Isometric Diagram ──────────────────────────────── */}
-      <section className="border-t border-border/60 bg-background">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
-          <div className="mb-6 text-center">
-            <p className="mb-2 text-[13px] font-medium uppercase tracking-wide text-primary">
-              System Architecture
-            </p>
-            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
-              Complete training system from authoring to review
-            </h2>
-            <p className="mx-auto mt-3 max-w-xl text-[14px] leading-relaxed text-muted-foreground">
-              Educators author scenarios with domain knowledge, safety constraints, and scoring rubrics.
-              Trainees interact with the live runtime core where the AI counterpart, behavioural model,
-              and assessment engine work together during every conversation.
-              Review and feedback outputs complete the learning cycle.
-            </p>
-          </div>
-          <IsometricDiagramV3 />
-        </div>
-      </section>
-
       {/* ── Features ────────────────────────────────────────────── */}
       <section className="border-t border-border/60 bg-card">
         <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
@@ -421,6 +400,32 @@ export default async function LandingPage() {
                 whether the situation improves or worsens.
               </p>
             </div>
+            <div className="rounded-xl border border-border/60 bg-background p-5">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                <Users className="h-4.5 w-4.5 text-primary" />
+              </div>
+              <h3 className="text-[14px] font-semibold">Expert Support</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                Call in a senior AI clinician for help when the situation
+                escalates uncontrollably. The handover is seamless — same
+                patient, same emotional state — so trainees witness expert
+                de-escalation technique applied in real time before stepping
+                back in with renewed confidence. Knowing when to ask for help
+                is itself a scored clinical skill.
+              </p>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-background p-5">
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                <RefreshCw className="h-4.5 w-4.5 text-primary" />
+              </div>
+              <h3 className="text-[14px] font-semibold">Fork &amp; Replay</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+                Turn any session into a decision tree. After review, select any
+                moment in the transcript and restart from there with a different
+                approach. Explore how a calmer response or a different
+                de-escalation technique could have a different outcome.
+              </p>
+            </div>
           </div>
         </div>
       </section>
@@ -474,7 +479,7 @@ export default async function LandingPage() {
               How It Works
             </p>
             <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
-              From scenario to skill in five steps
+              Trainees progress from scenario to skill in five steps
             </h2>
           </div>
           <div className="mx-auto max-w-2xl">
@@ -554,6 +559,27 @@ export default async function LandingPage() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* ── Isometric Diagram ──────────────────────────────── */}
+      <section className="border-t border-border/60 bg-background">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
+          <div className="mb-6 text-center">
+            <p className="mb-2 text-[13px] font-medium uppercase tracking-wide text-primary">
+              System Architecture
+            </p>
+            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              Complete training system from authoring to review
+            </h2>
+            <p className="mx-auto mt-3 max-w-xl text-[14px] leading-relaxed text-muted-foreground">
+              Educators author scenarios with domain knowledge, safety constraints, and scoring rubrics.
+              Trainees interact with the live runtime core where the AI counterpart, behavioural model,
+              and assessment engine work together during every conversation.
+              Review and feedback outputs complete the learning cycle.
+            </p>
+          </div>
+          <IsometricDiagramV3 />
         </div>
       </section>
 
