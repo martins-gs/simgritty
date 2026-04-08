@@ -60,7 +60,7 @@ export function ScoringConfigPanel({
         <div className="space-y-1.5">
           <Label>
             Support Threshold
-            <Tooltip text="The escalation level at which it becomes appropriate for the trainee to request the AI clinician's help. Below this level, requesting help is scored as premature. Set this based on the severity of the scenario." />
+            <Tooltip text="The escalation level at which it becomes appropriate for the trainee to request the AI clinician's help. Below this level, requesting help is scored as premature. Once the trainee keeps talking at or above this level without asking for help, the support-seeking score drops." />
           </Label>
           <Input
             type="number"
@@ -73,14 +73,14 @@ export function ScoringConfigPanel({
               onSupportThresholdChange(v != null && v >= 1 && v <= 10 ? v : null);
             }}
           />
-          <p className="text-[10px] text-muted-foreground">Required for scoring to be enabled</p>
+          <p className="text-[10px] text-muted-foreground">Recommended so support-seeking matches the scenario&apos;s intended intervention point</p>
         </div>
 
         {/* Critical Threshold */}
         <div className="space-y-1.5">
           <Label>
             Critical Threshold
-            <Tooltip text="Optional. The escalation level at which NOT requesting help becomes a concern. Brief critical endings now incur a penalty, sustained periods at or above this level incur additional penalties after 3+ uncovered turns, and reaching level 10 without help is penalised even more heavily." />
+            <Tooltip text="Optional. The escalation level at which missed support opportunities are judged even more harshly. Once the trainee keeps responding above the support threshold without asking for help, the score drops; if the unsupported situation worsens into this critical range or reaches level 10, it drops much more sharply." />
           </Label>
           <Input
             type="number"

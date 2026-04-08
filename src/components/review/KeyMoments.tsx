@@ -48,8 +48,21 @@ const EVIDENCE_DESCRIPTIONS: Record<string, (data: Record<string, unknown>) => s
       ? `Appropriately sought help (escalation at ${level})`
       : `Sought help prematurely (escalation at ${level})`;
   },
+  support_not_requested: (data) => {
+    const level = data.escalationLevel as number | undefined;
+    return `Support was indicated at level ${level}, but the trainee continued without requesting intervention`;
+  },
   critical_no_support: (data) => {
     const level = data.escalationLevel as number | undefined;
+    if (data.crisisReached) {
+      return `The conversation reached level ${level} without support after earlier missed intervention opportunities`;
+    }
+    if (data.delayedEscalation) {
+      return `After missed support opportunities, the conversation worsened to level ${level}`;
+    }
+    if (data.missedOpportunity) {
+      return `Critical support opportunity missed at level ${level}`;
+    }
     return `Critical escalation at level ${level} without seeking support`;
   },
 };
