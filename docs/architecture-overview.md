@@ -170,6 +170,15 @@ These events are persisted via `POST /api/sessions/:id/events`. Because the `cli
 
 All persistence calls from the simulation page (`persistTranscriptTurn`, `updatePersistedTurnSnapshot`, `persistSessionEvent`, session end) are tracked through a central `pendingPersistenceRef` set. Requests use `keepalive: true` for reliability during page transitions. Before navigating to the review page on session end, `flushPendingPersistence()` awaits all in-flight persistence calls (with a 2.5 s timeout), ensuring the review page loads with complete data.
 
+### Abandoned Session Handling
+
+Sessions that are not explicitly ended by the trainee (tab close, hard refresh, or SPA navigation to another page) are automatically closed via two mechanisms:
+
+- **Tab close / hard refresh**: a `beforeunload` event listener fires `navigator.sendBeacon` to `POST /api/sessions/:id/end` with `exit_type: "instant_exit"`. `sendBeacon` is guaranteed to be dispatched by the browser even as the page tears down, with no risk of blocking navigation.
+- **SPA navigation** (component unmount): the simulation page's main `useEffect` cleanup fires a `fetch` with `keepalive: true` to the same endpoint if `endingRef.current` is false (i.e. `handleEndSession` was not already called).
+
+Both paths are no-ops if `endingRef.current` is already true, preventing double-end when the trainee uses the normal End Session button or when max-duration auto-end fires.
+
 ## 6. Scoring
 
 `src/lib/engine/scoring.ts` computes a post-session performance breakdown across four dimensions, each scored 0–100:
@@ -227,6 +236,8 @@ The session APIs persist transcript turns and state events during the live run, 
 ### Review Page
 
 The review page (`src/app/review/[sessionId]/page.tsx`) loads session, transcript, events, and educator notes in parallel. It includes a retry mechanism (up to 8 attempts at 750 ms intervals) that re-fetches if the session data appears incomplete — specifically if `exit_type`, `peak_escalation_level`, or `ended_at` are missing, or if clinician turns are present but no `clinician_audio` events have arrived yet. This handles the race between the simulation page's final persistence flush and the review page load.
+
+Valid `exit_type` values: `normal`, `instant_exit` (early exit button or abandoned session), `educator_ended`, `timeout`, `auto_ceiling` (escalation ceiling reached), `max_duration` (org session duration limit reached).
 
 ### Responsive Layout
 

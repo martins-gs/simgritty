@@ -130,6 +130,7 @@ hostility, frustration, impatience, trust, willingness_to_listen, sarcasm, bias_
 - `forked_from_session_id` / `forked_from_turn_index` — restart from a specific turn
 - `scenario_snapshot` (JSONB) — entire scenario frozen at session creation
 - `peak_escalation_level` / `final_escalation_level` — tracked for scoring
+- `exit_type` — how the session ended: `normal` (end button), `instant_exit` (early exit or abandoned), `educator_ended`, `timeout`, `auto_ceiling` (escalation ceiling reached), `max_duration` (org time limit reached)
 
 **`transcript_turns`** stores per-turn snapshots:
 - `classifier_result` (JSONB) — `{technique, effectiveness, tags, confidence, reasoning}` plus scoring fields for trainee turns: `composure_markers`, `de_escalation_attempt`, `de_escalation_technique`, `clinical_milestone_completed`
