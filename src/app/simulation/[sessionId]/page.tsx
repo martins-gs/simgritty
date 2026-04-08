@@ -215,6 +215,24 @@ export default function SimulationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elapsed, scenarioLoaded]);
 
+  // Close the session if the user closes the tab or hard-refreshes.
+  // sendBeacon is guaranteed to be dispatched even as the page tears down.
+  useEffect(() => {
+    function handleUnload() {
+      if (endingRef.current) return;
+      navigator.sendBeacon(
+        `/api/sessions/${sessionId}/end`,
+        new Blob(
+          [JSON.stringify({ exit_type: "instant_exit", peak_escalation_level: peakLevelRef.current })],
+          { type: "application/json" }
+        )
+      );
+    }
+    window.addEventListener("beforeunload", handleUnload);
+    return () => window.removeEventListener("beforeunload", handleUnload);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
   // Poll for audio element from hook (it's created async during connect)
   useEffect(() => {
     const interval = setInterval(() => {
@@ -386,7 +404,22 @@ export default function SimulationPage() {
       }
     }
     init();
-    return () => { cancelled = true; abortController.abort(); if (timerRef.current) clearInterval(timerRef.current); disconnect(); disposeRecorder(); };
+    return () => {
+      cancelled = true;
+      abortController.abort();
+      if (timerRef.current) clearInterval(timerRef.current);
+      disconnect();
+      disposeRecorder();
+      // End the session on SPA navigation (component unmount) if not already ending
+      if (!endingRef.current) {
+        fetch(`/api/sessions/${sessionId}/end`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          keepalive: true,
+          body: JSON.stringify({ exit_type: "instant_exit", peak_escalation_level: peakLevelRef.current }),
+        }).catch(() => {});
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
