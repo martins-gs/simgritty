@@ -473,7 +473,7 @@ export function EscalationTimeline({
           <Button
             type="button"
             size="sm"
-            variant="outline"
+            variant="default"
             disabled={!recordingUrl}
             onClick={() => {
               const audio = audioRef.current;
