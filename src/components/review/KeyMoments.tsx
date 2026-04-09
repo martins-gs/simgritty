@@ -10,7 +10,7 @@ interface KeyMomentsProps {
   activeMomentIndex?: number | null;
 }
 
-const DIMENSION_LABELS: Record<string, string> = {
+export const DIMENSION_LABELS: Record<string, string> = {
   composure: "Composure",
   de_escalation: "De-escalation",
   clinical_task: "Clinical Task",
@@ -76,10 +76,66 @@ const EVIDENCE_DESCRIPTIONS: Record<string, (data: Record<string, unknown>) => s
   },
 };
 
-function describeEvidence(evidence: ScoreEvidence): string {
+export function describeEvidence(evidence: ScoreEvidence): string {
   const fn = EVIDENCE_DESCRIPTIONS[evidence.evidenceType];
   if (fn) return fn(evidence.evidenceData);
   return evidence.evidenceType.replace(/_/g, " ");
+}
+
+export function KeyMomentCard({
+  moment,
+  turn,
+  isActive = false,
+}: {
+  moment: ScoreEvidence;
+  turn: TranscriptTurn | undefined;
+  isActive?: boolean;
+}) {
+  const isPositive = moment.scoreImpact > 0;
+  const isNegative = moment.scoreImpact < 0;
+
+  return (
+    <div
+      aria-current={isActive ? "step" : undefined}
+      className={cn(
+        "rounded-lg border p-3 transition-all",
+        isPositive && "border-emerald-200 bg-emerald-50/50",
+        isNegative && "border-red-200 bg-red-50/50",
+        !isPositive && !isNegative && "border-slate-200 bg-slate-50/50",
+        isActive && "ring-2 ring-slate-900/15 shadow-md"
+      )}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <span className={cn(
+          "text-[10px] font-medium uppercase tracking-wide",
+          isPositive ? "text-emerald-600" : isNegative ? "text-red-600" : "text-slate-500"
+        )}>
+          {DIMENSION_LABELS[moment.dimension] ?? moment.dimension} — Turn {moment.turnIndex + 1}
+        </span>
+        {moment.scoreImpact !== 0 && (
+          <span className={cn(
+            "text-[10px] font-bold tabular-nums",
+            isPositive ? "text-emerald-600" : "text-red-600"
+          )}>
+            {isPositive ? "+" : ""}{Math.round(moment.scoreImpact)}
+          </span>
+        )}
+        {isActive && (
+          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
+            Now
+          </span>
+        )}
+      </div>
+      {turn && (
+        <p className="text-[12px] text-slate-700 italic line-clamp-2">
+          &ldquo;{turn.content}&rdquo;
+        </p>
+      )}
+      <p className="mt-1 text-[12px] text-slate-500">
+        {describeEvidence(moment)}
+      </p>
+    </div>
+  );
 }
 
 export function KeyMoments({ moments, turns, activeMomentIndex = null }: KeyMomentsProps) {
@@ -91,52 +147,13 @@ export function KeyMoments({ moments, turns, activeMomentIndex = null }: KeyMome
       <div className="space-y-2">
         {moments.map((moment, i) => {
           const turn = turns.find((t) => t.turn_index === moment.turnIndex);
-          const isPositive = moment.scoreImpact > 0;
-          const isNegative = moment.scoreImpact < 0;
-          const isActive = activeMomentIndex === i;
-
           return (
-            <div
+            <KeyMomentCard
               key={i}
-              aria-current={isActive ? "step" : undefined}
-              className={cn(
-                "rounded-lg border p-3 transition-all",
-                isPositive && "border-emerald-200 bg-emerald-50/50",
-                isNegative && "border-red-200 bg-red-50/50",
-                !isPositive && !isNegative && "border-slate-200 bg-slate-50/50",
-                isActive && "ring-2 ring-slate-900/15 shadow-md"
-              )}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <span className={cn(
-                  "text-[10px] font-medium uppercase tracking-wide",
-                  isPositive ? "text-emerald-600" : isNegative ? "text-red-600" : "text-slate-500"
-                )}>
-                  {DIMENSION_LABELS[moment.dimension] ?? moment.dimension} — Turn {moment.turnIndex + 1}
-                </span>
-                {moment.scoreImpact !== 0 && (
-                  <span className={cn(
-                    "text-[10px] font-bold tabular-nums",
-                    isPositive ? "text-emerald-600" : "text-red-600"
-                  )}>
-                    {isPositive ? "+" : ""}{Math.round(moment.scoreImpact)}
-                  </span>
-                )}
-                {isActive && (
-                  <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
-                    Current
-                  </span>
-                )}
-              </div>
-              {turn && (
-                <p className="text-[12px] text-slate-700 italic line-clamp-2">
-                  &ldquo;{turn.content}&rdquo;
-                </p>
-              )}
-              <p className="mt-1 text-[12px] text-slate-500">
-                {describeEvidence(moment)}
-              </p>
-            </div>
+              moment={moment}
+              turn={turn}
+              isActive={activeMomentIndex === i}
+            />
           );
         })}
       </div>

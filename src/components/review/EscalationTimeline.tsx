@@ -225,11 +225,16 @@ export function EscalationTimeline({
 }: EscalationTimelineProps) {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevOverlayIndexRef = useRef<number | null | undefined>(undefined);
+  const dataRef = useRef<ChartPoint[]>([]);
+  const keyMomentEntriesRef = useRef<KeyMomentEntry[]>([]);
   const [chartSize, setChartSize] = useState<{ width: number; height: number } | null>(null);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hoveredTime, setHoveredTime] = useState<number | null>(null);
+  const [overlayData, setOverlayData] = useState<{ time: number; point: ChartPoint } | null>(null);
   const startTime = new Date(sessionStartedAt).getTime();
 
   useEffect(() => {
@@ -363,6 +368,10 @@ export function EscalationTimeline({
     .filter((entry): entry is KeyMomentEntry => entry !== null)
     .sort((a, b) => a.time - b.time || a.index - b.index);
 
+  // Keep refs current so the overlay effect can read latest values without them as deps
+  dataRef.current = data;
+  keyMomentEntriesRef.current = keyMomentEntries;
+
   const lastTurn = turns[turns.length - 1];
   const lastTurnTime = lastTurn ? getRelativeTime(lastTurn.started_at, startTime) : 0;
   const resolvedPlaybackTime = recordingUrl ? playbackTime : 0;
@@ -387,10 +396,43 @@ export function EscalationTimeline({
     : playbackSecond;
   const markerPoint = getChartPointAtTime(data, markerTime);
   const activeKeyMoment = getKeyMomentAtTime(keyMomentEntries, hoveredSecond ?? playbackSecond);
+  // Overlay tracks playback only — hover position never triggers an auto card
+  const activeKeyMomentForOverlay = getKeyMomentAtTime(keyMomentEntries, playbackSecond);
 
   useEffect(() => {
     onActiveKeyMomentChange?.(activeKeyMoment?.index ?? null);
   }, [activeKeyMoment?.index, onActiveKeyMomentChange]);
+
+  // Show overlay card when playback crosses a key moment timestamp
+  useEffect(() => {
+    if (!playbackActive) {
+      // Reset so each new play session triggers cards fresh
+      prevOverlayIndexRef.current = undefined;
+      return;
+    }
+
+    const newIndex = activeKeyMomentForOverlay?.index ?? null;
+    if (newIndex === prevOverlayIndexRef.current) return;
+    prevOverlayIndexRef.current = newIndex;
+
+    if (newIndex === null) return;
+
+    const entry = keyMomentEntriesRef.current.find((e) => e.index === newIndex);
+    if (!entry) return;
+
+    const point = getChartPointAtTime(dataRef.current, entry.time);
+    if (!point) return;
+
+    if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+    setOverlayData({ time: entry.time, point });
+    overlayTimerRef.current = setTimeout(() => setOverlayData(null), 15_000);
+  }, [activeKeyMomentForOverlay?.index, playbackActive]);
+
+  useEffect(() => {
+    return () => {
+      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+    };
+  }, []);
 
   if (data.length === 0) {
     return (
@@ -478,7 +520,7 @@ export function EscalationTimeline({
 
       <div
         ref={chartContainerRef}
-        className="h-56 w-full sm:h-80"
+        className="relative h-56 w-full sm:h-80"
         style={{ minWidth: 1, minHeight: 1 }}
         onMouseMove={(event) => {
           if (!chartSize) return;
@@ -691,6 +733,71 @@ export function EscalationTimeline({
         ) : (
           <div className="h-full w-full animate-pulse rounded-xl bg-slate-100/70" />
         )}
+
+        {overlayData && (() => {
+          const { time, point } = overlayData;
+          const levelColor = getLevelColor(point.level);
+          return (
+            <div className="pointer-events-none absolute bottom-3 left-9 z-10 w-60 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-blue-500">
+                  Key moment
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-medium text-slate-400">
+                    {formatTime(time)}
+                  </span>
+                  <span
+                    className="rounded-full px-2 py-0.5 text-[11px] font-bold text-white"
+                    style={{ backgroundColor: levelColor }}
+                  >
+                    Level {point.level}
+                  </span>
+                </div>
+              </div>
+
+              <p className="mb-0.5 text-[12px] font-semibold text-slate-800">
+                {ESCALATION_LABELS[point.level] ?? `Level ${point.level}`}
+              </p>
+
+              {point.technique && (
+                <p className="mt-1.5 text-[12px] text-slate-600">
+                  <span className="font-medium">Technique:</span> {point.technique}
+                </p>
+              )}
+
+              {point.effectiveness !== null && (
+                <p className="mt-0.5 text-[12px]">
+                  <span className="font-medium text-slate-600">Effectiveness:</span>{" "}
+                  <span
+                    className="font-bold"
+                    style={{ color: getEffectivenessColor(point.effectiveness) }}
+                  >
+                    {point.effectiveness > 0 ? "+" : ""}
+                    {point.effectiveness.toFixed(2)}
+                  </span>
+                </p>
+              )}
+
+              {point.reasoning && (
+                <p className="mt-1.5 line-clamp-3 text-[12px] italic leading-relaxed text-slate-500">
+                  {point.reasoning}
+                </p>
+              )}
+
+              {(point.trust !== null || point.listening !== null) && (
+                <div className="mt-2 flex gap-4 border-t border-slate-100 pt-2 text-[11px]">
+                  {point.trust !== null && (
+                    <span className="font-medium text-blue-500">Trust: {point.trust}/10</span>
+                  )}
+                  {point.listening !== null && (
+                    <span className="font-medium text-purple-500">Listening: {point.listening}/10</span>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
