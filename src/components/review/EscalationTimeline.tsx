@@ -101,6 +101,25 @@ function getKeyMomentAtTime(entries: KeyMomentEntry[], time: number | null) {
   return null;
 }
 
+// Returns the index of the most recent chart event with classifier data at or before `time`.
+// Uses fractional time so sub-second events are never skipped.
+function getLastSignificantDataIndex(data: ChartPoint[], time: number | null): number | null {
+  if (!data.length || time === null) return null;
+  let result: number | null = null;
+  for (let i = 0; i < data.length; i++) {
+    if (data[i].time > time) break;
+    if (
+      data[i].type === "escalation_change" ||
+      data[i].type === "de_escalation_change" ||
+      data[i].technique !== null ||
+      data[i].reasoning !== null
+    ) {
+      result = i;
+    }
+  }
+  return result;
+}
+
 function formatTime(secs: number) {
   const wholeSeconds = Math.max(0, Math.floor(secs));
   const m = Math.floor(wholeSeconds / 60);
@@ -228,7 +247,6 @@ export function EscalationTimeline({
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevOverlayIndexRef = useRef<number | null | undefined>(undefined);
   const dataRef = useRef<ChartPoint[]>([]);
-  const keyMomentEntriesRef = useRef<KeyMomentEntry[]>([]);
   const [chartSize, setChartSize] = useState<{ width: number; height: number } | null>(null);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -368,9 +386,8 @@ export function EscalationTimeline({
     .filter((entry): entry is KeyMomentEntry => entry !== null)
     .sort((a, b) => a.time - b.time || a.index - b.index);
 
-  // Keep refs current so the overlay effect can read latest values without them as deps
+  // Keep ref current so the overlay effect can read latest data without it as a dep
   dataRef.current = data;
-  keyMomentEntriesRef.current = keyMomentEntries;
 
   const lastTurn = turns[turns.length - 1];
   const lastTurnTime = lastTurn ? getRelativeTime(lastTurn.started_at, startTime) : 0;
@@ -396,14 +413,14 @@ export function EscalationTimeline({
     : playbackSecond;
   const markerPoint = getChartPointAtTime(data, markerTime);
   const activeKeyMoment = getKeyMomentAtTime(keyMomentEntries, hoveredSecond ?? playbackSecond);
-  // Overlay tracks playback only — hover position never triggers an auto card
-  const activeKeyMomentForOverlay = getKeyMomentAtTime(keyMomentEntries, playbackSecond);
+  // Overlay tracks chart events — uses fractional time to avoid skipping sub-second events
+  const activeDataIndexForOverlay = getLastSignificantDataIndex(data, resolvedPlaybackTime);
 
   useEffect(() => {
     onActiveKeyMomentChange?.(activeKeyMoment?.index ?? null);
   }, [activeKeyMoment?.index, onActiveKeyMomentChange]);
 
-  // Show overlay card when playback crosses a key moment timestamp
+  // Show overlay card when the playback head crosses a significant chart event
   useEffect(() => {
     if (!playbackActive) {
       // Reset so each new play session triggers cards fresh
@@ -411,22 +428,16 @@ export function EscalationTimeline({
       return;
     }
 
-    const newIndex = activeKeyMomentForOverlay?.index ?? null;
-    if (newIndex === prevOverlayIndexRef.current) return;
-    prevOverlayIndexRef.current = newIndex;
+    if (activeDataIndexForOverlay === null || activeDataIndexForOverlay === prevOverlayIndexRef.current) return;
+    prevOverlayIndexRef.current = activeDataIndexForOverlay;
 
-    if (newIndex === null) return;
-
-    const entry = keyMomentEntriesRef.current.find((e) => e.index === newIndex);
-    if (!entry) return;
-
-    const point = getChartPointAtTime(dataRef.current, entry.time);
+    const point = dataRef.current[activeDataIndexForOverlay];
     if (!point) return;
 
     if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
-    setOverlayData({ time: entry.time, point });
+    setOverlayData({ time: point.time, point });
     overlayTimerRef.current = setTimeout(() => setOverlayData(null), 15_000);
-  }, [activeKeyMomentForOverlay?.index, playbackActive]);
+  }, [activeDataIndexForOverlay, playbackActive]);
 
   useEffect(() => {
     return () => {
@@ -739,21 +750,16 @@ export function EscalationTimeline({
           const levelColor = getLevelColor(point.level);
           return (
             <div className="pointer-events-none absolute bottom-3 left-9 z-10 w-60 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-blue-500">
-                  Key moment
+              <div className="mb-2 flex items-center justify-between gap-4">
+                <span className="text-[11px] font-medium text-slate-400">
+                  {formatTime(time)}
                 </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-medium text-slate-400">
-                    {formatTime(time)}
-                  </span>
-                  <span
-                    className="rounded-full px-2 py-0.5 text-[11px] font-bold text-white"
-                    style={{ backgroundColor: levelColor }}
-                  >
-                    Level {point.level}
-                  </span>
-                </div>
+                <span
+                  className="rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white"
+                  style={{ backgroundColor: levelColor }}
+                >
+                  Level {point.level}
+                </span>
               </div>
 
               <p className="mb-0.5 text-[12px] font-semibold text-slate-800">
