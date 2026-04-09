@@ -10,14 +10,20 @@ import {
   Tooltip,
   ReferenceLine,
   ReferenceArea,
+  ReferenceDot,
 } from "recharts";
-import type { SimulationStateEvent } from "@/types/simulation";
+import { Pause, Play } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { SimulationStateEvent, TranscriptTurn, Speaker } from "@/types/simulation";
 import { ESCALATION_LABELS } from "@/types/escalation";
 
 interface EscalationTimelineProps {
   events: SimulationStateEvent[];
+  turns: TranscriptTurn[];
   maxCeiling: number;
   sessionStartedAt: string;
+  recordingUrl?: string | null;
 }
 
 interface ChartPoint {
@@ -31,12 +37,37 @@ interface ChartPoint {
   effectiveness: number | null;
 }
 
+interface AnalysisEntry {
+  id: string;
+  time: number;
+  turnIndex: number;
+  speaker: Speaker;
+  content: string;
+  technique: string;
+  effectiveness: number;
+  reasoning: string;
+  tags: string[];
+  levelBefore: number;
+  levelAfter: number;
+  trustAfter: number;
+  listeningAfter: number;
+}
+
+const CHART_MARGIN = { top: 8, right: 52, bottom: 6, left: 4 };
+const REVIEW_SEGMENT_SECONDS = 10;
+
 function getLevelColor(level: number): string {
   if (level <= 2) return "#10b981";
   if (level <= 4) return "#f59e0b";
   if (level <= 6) return "#f97316";
   if (level <= 8) return "#ef4444";
   return "#991b1b";
+}
+
+function getEffectivenessColor(effectiveness: number): string {
+  if (effectiveness > 0.2) return "#10b981";
+  if (effectiveness < -0.2) return "#ef4444";
+  return "#94a3b8";
 }
 
 function getEventDotColor(type: string): string {
@@ -47,9 +78,49 @@ function getEventDotColor(type: string): string {
   return "#94a3b8";
 }
 
+function getSpeakerLabel(speaker: Speaker): string {
+  if (speaker === "trainee") return "Trainee";
+  if (speaker === "system") return "AI Clinician";
+  return "Patient/Relative";
+}
+
+function getRelativeTime(timestamp: string, startTime: number) {
+  return Math.max(0, (new Date(timestamp).getTime() - startTime) / 1000);
+}
+
+function snapToReviewSegment(seconds: number | null) {
+  if (seconds === null || !Number.isFinite(seconds)) return null;
+  return Math.max(0, Math.floor(seconds / REVIEW_SEGMENT_SECONDS) * REVIEW_SEGMENT_SECONDS);
+}
+
+function getChartPointAtTime(data: ChartPoint[], time: number | null) {
+  if (!data.length || time === null) return null;
+
+  let point = data[0];
+  for (const entry of data) {
+    if (entry.time > time) break;
+    point = entry;
+  }
+
+  return point;
+}
+
+function getAnalysisEntryAtTime(entries: AnalysisEntry[], time: number | null) {
+  if (!entries.length || time === null) return null;
+
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    if (entries[i].time <= time) {
+      return entries[i];
+    }
+  }
+
+  return null;
+}
+
 function formatTime(secs: number) {
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
+  const wholeSeconds = Math.max(0, Math.floor(secs));
+  const m = Math.floor(wholeSeconds / 60);
+  const s = wholeSeconds % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
@@ -104,8 +175,8 @@ function CustomTooltip({
   const levelColor = getLevelColor(data.level);
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm max-w-xs">
-      <div className="flex items-center justify-between gap-4 mb-2">
+    <div className="max-w-xs rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm">
+      <div className="mb-2 flex items-center justify-between gap-4">
         <span className="text-[11px] font-medium text-slate-400">
           {formatTime(label ?? data.time)}
         </span>
@@ -117,24 +188,22 @@ function CustomTooltip({
         </span>
       </div>
 
-      <p className="text-[12px] font-semibold text-slate-800 mb-0.5">
+      <p className="mb-0.5 text-[12px] font-semibold text-slate-800">
         {ESCALATION_LABELS[data.level] ?? `Level ${data.level}`}
       </p>
 
       {data.technique && (
-        <p className="text-[12px] text-slate-600 mt-1.5">
+        <p className="mt-1.5 text-[12px] text-slate-600">
           <span className="font-medium">Technique:</span> {data.technique}
         </p>
       )}
 
       {data.effectiveness !== null && (
-        <p className="text-[12px] mt-0.5">
+        <p className="mt-0.5 text-[12px]">
           <span className="font-medium text-slate-600">Effectiveness:</span>{" "}
           <span
             className="font-bold"
-            style={{
-              color: data.effectiveness > 0.2 ? "#10b981" : data.effectiveness < -0.2 ? "#ef4444" : "#94a3b8",
-            }}
+            style={{ color: getEffectivenessColor(data.effectiveness) }}
           >
             {data.effectiveness > 0 ? "+" : ""}
             {data.effectiveness.toFixed(2)}
@@ -143,18 +212,18 @@ function CustomTooltip({
       )}
 
       {data.reasoning && (
-        <p className="text-[12px] text-slate-500 mt-1.5 leading-relaxed italic">
+        <p className="mt-1.5 text-[12px] italic leading-relaxed text-slate-500">
           {data.reasoning}
         </p>
       )}
 
       {(data.trust !== null || data.listening !== null) && (
-        <div className="mt-2 pt-2 border-t border-slate-100 flex gap-4 text-[11px]">
+        <div className="mt-2 flex gap-4 border-t border-slate-100 pt-2 text-[11px]">
           {data.trust !== null && (
-            <span className="text-blue-500 font-medium">Trust: {data.trust}/10</span>
+            <span className="font-medium text-blue-500">Trust: {data.trust}/10</span>
           )}
           {data.listening !== null && (
-            <span className="text-purple-500 font-medium">Listening: {data.listening}/10</span>
+            <span className="font-medium text-purple-500">Listening: {data.listening}/10</span>
           )}
         </div>
       )}
@@ -164,11 +233,18 @@ function CustomTooltip({
 
 export function EscalationTimeline({
   events,
+  turns,
   maxCeiling,
   sessionStartedAt,
+  recordingUrl,
 }: EscalationTimelineProps) {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [chartSize, setChartSize] = useState<{ width: number; height: number } | null>(null);
+  const [playbackTime, setPlaybackTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [hoveredTime, setHoveredTime] = useState<number | null>(null);
   const startTime = new Date(sessionStartedAt).getTime();
 
   useEffect(() => {
@@ -199,6 +275,60 @@ export function EscalationTimeline({
     };
   }, []);
 
+  useEffect(() => {
+    if (!recordingUrl) return;
+
+    const audio = new Audio(recordingUrl);
+    audio.preload = "metadata";
+    audioRef.current = audio;
+
+    const syncTime = () => {
+      setPlaybackTime(audio.currentTime || 0);
+    };
+
+    const syncMetadata = () => {
+      if (Number.isFinite(audio.duration)) {
+        setAudioDuration(audio.duration);
+      }
+    };
+
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+    const handleEnded = () => {
+      syncTime();
+      setIsPlaying(false);
+    };
+    const handleError = () => {
+      setIsPlaying(false);
+    };
+
+    audio.addEventListener("timeupdate", syncTime);
+    audio.addEventListener("loadedmetadata", syncMetadata);
+    audio.addEventListener("durationchange", syncMetadata);
+    audio.addEventListener("play", handlePlay);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("error", handleError);
+    audio.load();
+
+    return () => {
+      audio.pause();
+      audio.removeEventListener("timeupdate", syncTime);
+      audio.removeEventListener("loadedmetadata", syncMetadata);
+      audio.removeEventListener("durationchange", syncMetadata);
+      audio.removeEventListener("play", handlePlay);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("error", handleError);
+      audio.removeAttribute("src");
+      audio.load();
+
+      if (audioRef.current === audio) {
+        audioRef.current = null;
+      }
+    };
+  }, [recordingUrl]);
+
   const data: ChartPoint[] = events
     .filter((e) => e.escalation_after !== null)
     .map((e) => {
@@ -208,7 +338,7 @@ export function EscalationTimeline({
         reasoning?: string;
       } | undefined;
       return {
-        time: Math.round((new Date(e.created_at).getTime() - startTime) / 1000),
+        time: getRelativeTime(e.created_at, startTime),
         level: e.escalation_after!,
         trust: e.trust_after,
         listening: e.listening_after,
@@ -235,6 +365,37 @@ export function EscalationTimeline({
     }
   }
 
+  const levelBeforeMap = new Map<string, number>();
+  let lastKnownLevel = data[0]?.level ?? 3;
+  const analysisEntries: AnalysisEntry[] = [];
+
+  for (const turn of turns) {
+    levelBeforeMap.set(turn.id, lastKnownLevel);
+
+    if (turn.state_after && (turn.speaker === "trainee" || turn.speaker === "system")) {
+      const classifier = turn.classifier_result;
+      if (classifier) {
+        analysisEntries.push({
+          id: turn.id,
+          time: getRelativeTime(turn.started_at, startTime),
+          turnIndex: turn.turn_index,
+          speaker: turn.speaker,
+          content: turn.content,
+          technique: classifier.technique,
+          effectiveness: classifier.effectiveness,
+          reasoning: classifier.reasoning,
+          tags: classifier.tags,
+          levelBefore: levelBeforeMap.get(turn.id) ?? lastKnownLevel,
+          levelAfter: turn.state_after.level,
+          trustAfter: turn.state_after.trust,
+          listeningAfter: turn.state_after.willingness_to_listen,
+        });
+      }
+
+      lastKnownLevel = turn.state_after.level;
+    }
+  }
+
   if (data.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center text-[13px] text-slate-400">
@@ -243,59 +404,138 @@ export function EscalationTimeline({
     );
   }
 
+  const lastTurn = turns[turns.length - 1];
+  const lastTurnTime = lastTurn ? getRelativeTime(lastTurn.started_at, startTime) : 0;
+  const resolvedPlaybackTime = recordingUrl ? playbackTime : 0;
+  const resolvedAudioDuration = recordingUrl ? audioDuration : 0;
+  const playbackActive = recordingUrl ? isPlaying : false;
+  const timelineMaxTime = Math.max(
+    data[data.length - 1]?.time ?? 0,
+    analysisEntries[analysisEntries.length - 1]?.time ?? 0,
+    lastTurnTime,
+    resolvedAudioDuration,
+    resolvedPlaybackTime,
+    REVIEW_SEGMENT_SECONDS
+  );
   const peakLevel = Math.max(...data.map((d) => d.level));
   const finalLevel = data[data.length - 1].level;
   const escalationEvents = data.filter((d) => d.type === "escalation_change").length;
   const deescalationEvents = data.filter((d) => d.type === "de_escalation_change").length;
+  const playbackCheckpointTime = snapToReviewSegment(resolvedPlaybackTime);
+  const hoveredCheckpointTime = snapToReviewSegment(hoveredTime);
+  const markerTime = !playbackActive && hoveredCheckpointTime !== null
+    ? hoveredCheckpointTime
+    : playbackCheckpointTime;
+  const cardTime = hoveredCheckpointTime ?? playbackCheckpointTime;
+  const markerPoint = getChartPointAtTime(data, markerTime);
+  const activeAnalysis = getAnalysisEntryAtTime(analysisEntries, cardTime);
+  const currentSegmentEnd = cardTime === null
+    ? null
+    : Math.min(cardTime + REVIEW_SEGMENT_SECONDS, timelineMaxTime);
+  const analysisDelta = activeAnalysis
+    ? activeAnalysis.levelAfter - activeAnalysis.levelBefore
+    : 0;
 
   return (
     <div className="space-y-4">
-      {/* Summary chips */}
-      <div className="flex flex-wrap gap-2">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px]">
-          <span className="text-slate-400">Peak </span>
-          <span className="font-bold" style={{ color: getLevelColor(peakLevel) }}>
-            {peakLevel}
-          </span>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px]">
-          <span className="text-slate-400">Final </span>
-          <span className="font-bold" style={{ color: getLevelColor(finalLevel) }}>
-            {finalLevel}
-          </span>
-        </div>
-        {escalationEvents > 0 && (
-          <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-1.5 text-[11px]">
-            <span className="font-bold text-red-600">{escalationEvents}</span>
-            <span className="text-red-400"> escalation{escalationEvents !== 1 ? "s" : ""}</span>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px]">
+            <span className="text-slate-400">Peak </span>
+            <span className="font-bold" style={{ color: getLevelColor(peakLevel) }}>
+              {peakLevel}
+            </span>
           </div>
-        )}
-        {deescalationEvents > 0 && (
-          <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-[11px]">
-            <span className="font-bold text-emerald-600">{deescalationEvents}</span>
-            <span className="text-emerald-400"> de-escalation{deescalationEvents !== 1 ? "s" : ""}</span>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px]">
+            <span className="text-slate-400">Final </span>
+            <span className="font-bold" style={{ color: getLevelColor(finalLevel) }}>
+              {finalLevel}
+            </span>
           </div>
-        )}
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px]">
-          <span className="text-slate-400">Duration </span>
-          <span className="font-bold text-slate-700">
-            {formatTime(data[data.length - 1].time)}
-          </span>
+          {escalationEvents > 0 && (
+            <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-1.5 text-[11px]">
+              <span className="font-bold text-red-600">{escalationEvents}</span>
+              <span className="text-red-400"> escalation{escalationEvents !== 1 ? "s" : ""}</span>
+            </div>
+          )}
+          {deescalationEvents > 0 && (
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-[11px]">
+              <span className="font-bold text-emerald-600">{deescalationEvents}</span>
+              <span className="text-emerald-400"> de-escalation{deescalationEvents !== 1 ? "s" : ""}</span>
+            </div>
+          )}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px]">
+            <span className="text-slate-400">Duration </span>
+            <span className="font-bold text-slate-700">
+              {formatTime(timelineMaxTime)}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] text-slate-600">
+            {formatTime(resolvedPlaybackTime)} / {formatTime(timelineMaxTime)}
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!recordingUrl}
+            onClick={() => {
+              const audio = audioRef.current;
+              if (!audio) return;
+
+              if (!audio.paused) {
+                audio.pause();
+                return;
+              }
+
+              const duration = Number.isFinite(audio.duration) ? audio.duration : resolvedAudioDuration;
+              if (duration > 0 && audio.currentTime >= duration - 0.25) {
+                audio.currentTime = 0;
+                setPlaybackTime(0);
+              }
+
+              void audio.play().catch(() => {
+                setIsPlaying(false);
+              });
+            }}
+            className="gap-2"
+            title={recordingUrl ? (playbackActive ? "Pause conversation playback" : "Play full conversation") : "Session audio unavailable"}
+          >
+            {playbackActive ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            {playbackActive ? "Pause" : "Play"}
+          </Button>
+          <div className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] text-slate-500">
+            10s checkpoints
+          </div>
         </div>
       </div>
 
-      {/* Chart */}
       <div
         ref={chartContainerRef}
         className="h-56 w-full sm:h-80"
         style={{ minWidth: 1, minHeight: 1 }}
+        onMouseMove={(event) => {
+          if (!chartSize) return;
+
+          const rect = event.currentTarget.getBoundingClientRect();
+          const usableWidth = chartSize.width - CHART_MARGIN.left - CHART_MARGIN.right;
+          if (usableWidth <= 0 || timelineMaxTime <= 0) return;
+
+          const x = event.clientX - rect.left - CHART_MARGIN.left;
+          const clampedX = Math.min(Math.max(x, 0), usableWidth);
+          const ratio = clampedX / usableWidth;
+          setHoveredTime(ratio * timelineMaxTime);
+        }}
+        onMouseLeave={() => setHoveredTime(null)}
       >
         {chartSize ? (
           <AreaChart
             width={chartSize.width}
             height={chartSize.height}
             data={data}
-            margin={{ top: 8, right: 52, bottom: 6, left: 4 }}
+            margin={CHART_MARGIN}
           >
             <defs>
               <linearGradient id="escalationGradient" x1="0" y1="0" x2="0" y2="1">
@@ -309,7 +549,6 @@ export function EscalationTimeline({
               </linearGradient>
             </defs>
 
-            {/* Severity zone backgrounds */}
             <ReferenceArea y1={0} y2={2.5} fill="#10b981" fillOpacity={0.04} />
             <ReferenceArea y1={2.5} y2={4.5} fill="#f59e0b" fillOpacity={0.04} />
             <ReferenceArea y1={4.5} y2={6.5} fill="#f97316" fillOpacity={0.04} />
@@ -324,6 +563,8 @@ export function EscalationTimeline({
 
             <XAxis
               dataKey="time"
+              type="number"
+              domain={[0, timelineMaxTime]}
               tickFormatter={formatTime}
               stroke="#94a3b8"
               fontSize={11}
@@ -346,7 +587,45 @@ export function EscalationTimeline({
               cursor={{ stroke: "#cbd5e1", strokeDasharray: "4 4" }}
             />
 
-            {/* Ceiling line */}
+            {markerTime !== null && markerPoint && (
+              <>
+                <ReferenceLine
+                  x={markerTime}
+                  stroke={hoveredCheckpointTime !== null && !playbackActive ? "#0f172a" : "#2563eb"}
+                  strokeDasharray={hoveredCheckpointTime !== null && !playbackActive ? "4 4" : "6 3"}
+                  strokeWidth={1.5}
+                />
+                <ReferenceDot
+                  x={markerTime}
+                  y={markerPoint.level}
+                  ifOverflow="extendDomain"
+                  shape={(props: { cx?: number; cy?: number }) => {
+                    if (!props.cx || !props.cy) return <g />;
+                    return (
+                      <g>
+                        <circle
+                          cx={props.cx}
+                          cy={props.cy}
+                          r={10}
+                          fill={hoveredCheckpointTime !== null && !playbackActive ? "#0f172a" : "#2563eb"}
+                          opacity={0.16}
+                          className="animate-pulse"
+                        />
+                        <circle
+                          cx={props.cx}
+                          cy={props.cy}
+                          r={5}
+                          fill={hoveredCheckpointTime !== null && !playbackActive ? "#0f172a" : "#2563eb"}
+                          stroke="white"
+                          strokeWidth={2}
+                        />
+                      </g>
+                    );
+                  }}
+                />
+              </>
+            )}
+
             <ReferenceLine
               y={maxCeiling}
               stroke="#ef4444"
@@ -361,7 +640,6 @@ export function EscalationTimeline({
               }}
             />
 
-            {/* Trust overlay */}
             <Area
               type="monotone"
               dataKey="trust"
@@ -373,7 +651,6 @@ export function EscalationTimeline({
               connectNulls
             />
 
-            {/* Escalation area */}
             <Area
               type="stepAfter"
               dataKey="level"
@@ -381,7 +658,6 @@ export function EscalationTimeline({
               fill="url(#escalationGradient)"
             />
 
-            {/* Escalation line */}
             <Area
               type="stepAfter"
               dataKey="level"
@@ -392,7 +668,6 @@ export function EscalationTimeline({
               activeDot={{ r: 8, fill: "#334155", stroke: "white", strokeWidth: 3 }}
             />
 
-            {/* Zone labels on the right */}
             <ReferenceLine
               y={1.5}
               stroke="none"
@@ -454,7 +729,115 @@ export function EscalationTimeline({
         )}
       </div>
 
-      {/* Legend */}
+      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+        {analysisEntries.length === 0 ? (
+          <p className="text-[13px] text-slate-500">
+            No analysis or feedback cards were recorded for this session.
+          </p>
+        ) : activeAnalysis && cardTime !== null ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+                  hoveredCheckpointTime !== null
+                    ? "bg-slate-900 text-white"
+                    : playbackActive
+                      ? "bg-blue-100 text-blue-700"
+                      : "bg-slate-200 text-slate-700"
+                )}
+              >
+                {hoveredCheckpointTime !== null ? "Preview" : playbackActive ? "Playback" : "Paused"}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                Segment {formatTime(cardTime)}-{formatTime(currentSegmentEnd ?? cardTime)}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                {getSpeakerLabel(activeAnalysis.speaker)} · Turn {activeAnalysis.turnIndex + 1}
+              </span>
+            </div>
+
+            <p className="text-sm font-medium leading-relaxed text-slate-900">
+              &ldquo;{activeAnalysis.content}&rdquo;
+            </p>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-lg border border-white/80 bg-white px-3 py-2 shadow-sm">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Technique</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">{activeAnalysis.technique}</p>
+              </div>
+              <div className="rounded-lg border border-white/80 bg-white px-3 py-2 shadow-sm">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Effectiveness</p>
+                <p
+                  className="mt-1 text-sm font-semibold"
+                  style={{ color: getEffectivenessColor(activeAnalysis.effectiveness) }}
+                >
+                  {activeAnalysis.effectiveness > 0 ? "+" : ""}
+                  {activeAnalysis.effectiveness.toFixed(2)}
+                </p>
+              </div>
+              <div className="rounded-lg border border-white/80 bg-white px-3 py-2 shadow-sm">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Patient/Relative State</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">
+                  Level {activeAnalysis.levelAfter} · {ESCALATION_LABELS[activeAnalysis.levelAfter] ?? "Unknown"}
+                </p>
+                <p
+                  className={cn(
+                    "mt-1 text-[11px] font-medium",
+                    analysisDelta > 0 && "text-red-600",
+                    analysisDelta < 0 && "text-emerald-600",
+                    analysisDelta === 0 && "text-slate-500"
+                  )}
+                >
+                  {analysisDelta > 0
+                    ? `Escalated +${analysisDelta}`
+                    : analysisDelta < 0
+                      ? `De-escalated ${analysisDelta}`
+                      : "State unchanged"}
+                </p>
+              </div>
+              <div className="rounded-lg border border-white/80 bg-white px-3 py-2 shadow-sm">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Trust / Listening</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">
+                  {activeAnalysis.trustAfter}/10 trust
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  {activeAnalysis.listeningAfter}/10 willingness to listen
+                </p>
+              </div>
+            </div>
+
+            {activeAnalysis.reasoning && (
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                  Analysis / Feedback
+                </p>
+                <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                  {activeAnalysis.reasoning}
+                </p>
+              </div>
+            )}
+
+            {activeAnalysis.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {activeAnalysis.tags.map((tag) => (
+                  <span
+                    key={`${activeAnalysis.id}-${tag}`}
+                    className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-500"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-[13px] text-slate-500">
+            Press Play or hover the timeline to step through the existing analysis cards.
+          </p>
+        )}
+      </div>
+
       <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
         <span className="flex items-center gap-1.5">
           <svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#334155" strokeWidth="2.5" /></svg>
@@ -463,6 +846,10 @@ export function EscalationTimeline({
         <span className="flex items-center gap-1.5">
           <svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="4 3" /></svg>
           Trust
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-full border-2 border-blue-500 bg-white" />
+          Playback marker
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full border-2 border-red-400 bg-white" />

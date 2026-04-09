@@ -487,8 +487,10 @@ export default function ReviewPage() {
             {session.started_at ? (
               <EscalationTimeline
                 events={events}
+                turns={turns}
                 maxCeiling={snapshot.escalation_rules[0]?.max_ceiling ?? 8}
-                sessionStartedAt={session.started_at}
+                sessionStartedAt={recordingStartedAt ?? session.started_at}
+                recordingUrl={recordingUrl}
               />
             ) : (
               <p className="text-muted-foreground text-sm">No timeline data available</p>
