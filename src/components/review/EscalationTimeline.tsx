@@ -763,7 +763,7 @@ export function EscalationTimeline({
           if (!moment) return null;
           const turn = turns.find((t) => t.turn_index === moment.turnIndex);
           return (
-            <div className="pointer-events-none absolute bottom-3 left-9 right-14 z-10 shadow-xl">
+            <div className="pointer-events-none absolute bottom-3 left-9 z-10 w-72 overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-black/5">
               <KeyMomentCard moment={moment} turn={turn} isActive />
             </div>
           );
