@@ -228,7 +228,9 @@ export function EscalationTimeline({
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const overlayIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevOverlayIndexRef = useRef<number | null | undefined>(undefined);
+  const keyMomentEntriesRef = useRef<KeyMomentEntry[]>([]);
   const [chartSize, setChartSize] = useState<{ width: number; height: number } | null>(null);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -368,6 +370,9 @@ export function EscalationTimeline({
     .filter((entry): entry is KeyMomentEntry => entry !== null)
     .sort((a, b) => a.time - b.time || a.index - b.index);
 
+  // Keep ref current so the overlay interval can read the latest value without stale closures
+  keyMomentEntriesRef.current = keyMomentEntries;
+
   const lastTurn = turns[turns.length - 1];
   const lastTurnTime = lastTurn ? getRelativeTime(lastTurn.started_at, startTime) : 0;
   const resolvedPlaybackTime = recordingUrl ? playbackTime : 0;
@@ -392,33 +397,51 @@ export function EscalationTimeline({
     : playbackSecond;
   const markerPoint = getChartPointAtTime(data, markerTime);
   const activeKeyMoment = getKeyMomentAtTime(keyMomentEntries, hoveredSecond ?? playbackSecond);
-  // Overlay uses fractional time so key moments within the same second are never skipped
-  const activeKeyMomentForOverlay = getKeyMomentAtTime(keyMomentEntries, resolvedPlaybackTime);
 
   useEffect(() => {
     onActiveKeyMomentChange?.(activeKeyMoment?.index ?? null);
   }, [activeKeyMoment?.index, onActiveKeyMomentChange]);
 
-  // Show a KeyMomentCard overlay when the playback head crosses each key moment timestamp
+  // Poll audio.currentTime directly so we never miss a key moment due to React
+  // batching or dep-array ordering. Runs every 250 ms while playing.
   useEffect(() => {
     if (!playbackActive) {
-      // Reset so every new play session triggers all cards fresh
+      // Clear the polling interval and reset state for next play session
+      if (overlayIntervalRef.current) {
+        clearInterval(overlayIntervalRef.current);
+        overlayIntervalRef.current = null;
+      }
       prevOverlayIndexRef.current = undefined;
       return;
     }
 
-    const newIndex = activeKeyMomentForOverlay?.index ?? null;
-    if (newIndex === null || newIndex === prevOverlayIndexRef.current) return;
-    prevOverlayIndexRef.current = newIndex;
+    overlayIntervalRef.current = setInterval(() => {
+      const audio = audioRef.current;
+      if (!audio) return;
 
-    if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
-    setOverlayMomentIndex(newIndex);
-    overlayTimerRef.current = setTimeout(() => setOverlayMomentIndex(null), 15_000);
-  }, [activeKeyMomentForOverlay?.index, playbackActive]);
+      const entry = getKeyMomentAtTime(keyMomentEntriesRef.current, audio.currentTime);
+      const newIndex = entry?.index ?? null;
+
+      if (newIndex === null || newIndex === prevOverlayIndexRef.current) return;
+      prevOverlayIndexRef.current = newIndex;
+
+      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+      setOverlayMomentIndex(newIndex);
+      overlayTimerRef.current = setTimeout(() => setOverlayMomentIndex(null), 15_000);
+    }, 250);
+
+    return () => {
+      if (overlayIntervalRef.current) {
+        clearInterval(overlayIntervalRef.current);
+        overlayIntervalRef.current = null;
+      }
+    };
+  }, [playbackActive]);
 
   useEffect(() => {
     return () => {
       if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+      if (overlayIntervalRef.current) clearInterval(overlayIntervalRef.current);
     };
   }, []);
 
