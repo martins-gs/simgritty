@@ -87,7 +87,7 @@ export default function ConfirmClient({ token_hash, type, code }: Props) {
             Click below to complete your sign-in.
           </p>
           <Button
-            className="w-full h-9 text-[13px]"
+            className="h-9 w-full bg-emerald-600 text-[13px] text-white hover:bg-emerald-700 focus-visible:border-emerald-700 focus-visible:ring-emerald-200"
             onClick={handleConfirm}
             disabled={status === "verifying"}
           >

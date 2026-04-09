@@ -6,7 +6,7 @@ Built with Next.js 16, OpenAI Realtime API (WebRTC), and Supabase.
 
 ## Features
 
-- **Live voice simulation** — speak to an AI patient or relative via WebRTC; the simulated person responds in real time with emotionally adaptive voice, stronger abusive language at high patient state, and authored bias behaviour when configured
+- **Live voice simulation** — speak to an AI counterpart (patient, relative, or staff member) via your laptop or mobile microphone and speakers; the simulated person responds in real time with emotionally adaptive voice, stronger abusive language at high patient state, and authored bias behaviour when configured
 - **Escalation engine** — 10-level state machine tracks trust, anger, frustration, and willingness to listen across every turn
 - **Dual classifier pipeline** — assesses trainee communication technique (effectiveness -1.0 to +1.0) and patient state shifts independently
 - **AI clinician support** — press "Ask AI clinician for help" to hand off temporarily to an expert bot that models best practice, then "Resume conversation" when ready
@@ -109,10 +109,10 @@ PROLOG uses Supabase Postgres. Apply migrations from `supabase/migrations/` or c
 | `org_settings` | Governance: ceiling caps, consent gates, session duration limits |
 | `user_profiles` | User accounts linked to org + role (admin/educator/trainee) |
 | `scenario_templates` | Scenario metadata: title, setting, roles, backstory, difficulty, scoring weights, support/critical thresholds |
-| `scenario_traits` | 16 personality dials per scenario (0-10 each) |
+| `scenario_traits` | 15 personality dials per scenario (0-10 each) plus `bias_category` |
 | `scenario_voice_config` | Voice parameters: voice name, speaking rate, expressiveness, pause/interruption styles |
 | `escalation_rules` | Initial level, ceiling, auto-end threshold, custom triggers |
-| `scenario_milestones` | Optional clinical milestones per scenario (description + classifier hint, max 5) |
+| `scenario_milestones` | Optional clinical milestones per scenario (description + classifier hint, max 10) |
 | `simulation_sessions` | Individual runs with scenario snapshot, escalation tracking, fork lineage |
 | `transcript_turns` | Each utterance with classifier result, state snapshot, voice profile |
 | `simulation_state_events` | All state changes: escalation, de-escalation, ceiling, session lifecycle |
@@ -143,11 +143,12 @@ hostility, frustration, impatience, trust, willingness_to_listen, sarcasm, bias_
 ```
 src/
 ├── app/                          # Next.js App Router
-│   ├── page.tsx                  # Home → redirects to dashboard or login
+│   ├── page.tsx                  # Marketing landing page with Start Here / Sign In CTAs
 │   ├── auth/
 │   │   ├── login/page.tsx        # Email OTP login (NHS.scot addresses only)
 │   │   ├── signup/page.tsx       # Redirects to login (no separate signup)
-│   │   ├── confirm/route.ts      # OTP magic link verification
+│   │   ├── confirm/page.tsx      # Magic-link landing page with final confirmation step
+│   │   ├── confirm/confirm-client.tsx # Client-side OTP verification + dashboard redirect
 │   │   └── callback/route.ts     # PKCE code exchange
 │   ├── dashboard/page.tsx        # Scenarios + recent sessions
 │   ├── scenarios/
@@ -164,7 +165,7 @@ src/
 │   └── api/                      # API routes (see below)
 │
 ├── components/
-│   ├── landing/                  # HeroTextRotator, EcosystemDiagram, IsometricDiagram
+│   ├── landing/                  # HeroTextRotator, PrivacyStatement, IsometricDiagramV3
 │   ├── layout/                   # AppShell, Sidebar (hidden on mobile), TopBar (includes mobile nav)
 │   ├── simulation/               # Waveform, LiveTranscript, EscalationMeter, ConsentGate
 │   ├── scenarios/                # ScenarioForm, TraitDialPanel, VoiceConfigPanel, ArchetypeSelector, ScoringConfigPanel, MilestonesEditor
@@ -239,7 +240,7 @@ src/
 | GET/POST | `/api/sessions/[id]/reflection` | Load / save trainee self-reflection (tags + free text) |
 | GET/POST | `/api/sessions/[id]/audio` | Get signed playback URL / upload session recording |
 | GET | `/api/sessions/recent` | User's recent sessions |
-| GET | `/api/profile` | Current user's profile (display name, email, role) |
+| GET | `/api/profile` | Current user's profile (`id`, `display_name`, `role`, `org_id`) |
 | GET/PUT | `/api/org-settings` | Read / update organisation governance |
 
 ## Error Handling & Validation
@@ -272,7 +273,8 @@ PROLOG uses **email OTP (magic link)** via Supabase Auth — no passwords. Acces
 Flow:
 1. User enters their `@nhs.scot` email at `/auth/login`
 2. Supabase sends a magic link to that address
-3. Clicking the link hits `/auth/confirm`, which exchanges the token for a session and redirects to `/dashboard`
+3. Clicking the link opens `/auth/confirm`, which shows a final green **Complete sign-in** button
+4. Clicking that button verifies the OTP client-side (or exchanges the PKCE code) and redirects to `/dashboard`
 
 There is no self-service signup page — the login page handles both new and returning users.
 
@@ -431,7 +433,7 @@ Server-side VAD (voice activity detection):
 
 ## Session Forking
 
-From the review page, select any turn and click "Restart From Selected Turn" to create a forked session:
+From the review page, select any turn and click "Restart From Turn" to create a forked session:
 
 - The new session inherits the conversation history up to the selected turn
 - Engine state, voice profile, and patient prompt are restored from the turn's snapshot

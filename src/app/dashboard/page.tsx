@@ -30,6 +30,7 @@ interface SessionItem {
   peak_escalation_level: number | null;
   started_at: string | null;
   ended_at: string | null;
+  created_at: string;
   scenario_templates: { title: string } | null;
   trainee_name: string | null;
 }
@@ -85,6 +86,19 @@ export default function DashboardPage() {
 
   const publishedScenarios = scenarios.filter((s) => s.status === "published");
 
+  const formatSessionDateTime = (session: SessionItem) => {
+    const rawTimestamp = session.started_at ?? session.ended_at ?? session.created_at;
+    const parsedTimestamp = Date.parse(rawTimestamp);
+    if (Number.isNaN(parsedTimestamp)) {
+      return null;
+    }
+
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(parsedTimestamp);
+  };
+
   return (
     <AppShell>
       <div className="space-y-8">
@@ -136,44 +150,53 @@ export default function DashboardPage() {
               Recent sessions
             </h2>
             <div className="divide-y divide-border/60 rounded-lg border border-border/60 bg-card">
-              {sessions.map((s) => (
-                <div key={s.id} className="flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-accent/40">
-                  <Link href={`/review/${s.id}`} className="flex-1 min-w-0">
-                    <p className="truncate text-[13px] font-medium">
-                      {s.scenario_templates?.title ?? "Untitled"}
-                    </p>
-                    {s.trainee_name && (
-                      <p className="text-[11px] text-muted-foreground">{s.trainee_name}</p>
-                    )}
-                  </Link>
-                  <div className="flex items-center gap-2 shrink-0 ml-3">
-                    {s.peak_escalation_level != null && (
-                      <span className="text-[11px] text-muted-foreground">Peak {s.peak_escalation_level}</span>
-                    )}
-                    <Badge
-                      variant="secondary"
-                      className={`text-[10px] ${
-                        s.status === "completed"
-                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                          : s.status === "aborted"
-                            ? "bg-red-50 text-red-700 border border-red-200"
-                            : ""
-                      }`}
-                    >
-                      {s.exit_type === "instant_exit" ? "exited" : s.status}
-                    </Badge>
-                    {userId && s.trainee_id === userId && (
-                      <button
-                        onClick={(e) => { e.preventDefault(); setDeleteTarget(s); }}
-                        className="ml-1 flex h-6 w-6 items-center justify-center rounded text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                        aria-label="Delete session"
+              {sessions.map((s) => {
+                const sessionDateTime = formatSessionDateTime(s);
+
+                return (
+                  <div key={s.id} className="flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-accent/40">
+                    <Link href={`/review/${s.id}`} className="flex-1 min-w-0">
+                      <p className="truncate text-[13px] font-medium">
+                        {s.scenario_templates?.title ?? "Untitled"}
+                      </p>
+                      {s.trainee_name && (
+                        <p className="text-[11px] text-muted-foreground">{s.trainee_name}</p>
+                      )}
+                      {sessionDateTime && (
+                        <p className="text-[11px] text-muted-foreground">
+                          {sessionDateTime}
+                        </p>
+                      )}
+                    </Link>
+                    <div className="flex items-center gap-2 shrink-0 ml-3">
+                      {s.peak_escalation_level != null && (
+                        <span className="text-[11px] text-muted-foreground">Peak {s.peak_escalation_level}</span>
+                      )}
+                      <Badge
+                        variant="secondary"
+                        className={`text-[10px] ${
+                          s.status === "completed"
+                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : s.status === "aborted"
+                              ? "bg-red-50 text-red-700 border border-red-200"
+                              : ""
+                        }`}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
+                        {s.exit_type === "instant_exit" ? "exited" : s.status}
+                      </Badge>
+                      {userId && s.trainee_id === userId && (
+                        <button
+                          onClick={(e) => { e.preventDefault(); setDeleteTarget(s); }}
+                          className="ml-1 flex h-6 w-6 items-center justify-center rounded text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                          aria-label="Delete session"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         )}

@@ -351,9 +351,11 @@ export default async function LandingPage() {
               </div>
               <h3 className="text-[14px] font-semibold">Real-Time Voice Simulation</h3>
               <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-                Speak naturally with AI patients, relatives, and staff through your
-                microphone. Voice tone, pacing, and emotional intensity all
-                shift dynamically as the conversation evolves.
+                Speak naturally with your AI counterpart
+                {" "}
+                (patient/relative/staff) in real time using your laptop/mobile
+                microphone and speakers. Voice tone, pacing, and emotional
+                intensity all shift dynamically as the conversation evolves.
               </p>
             </div>
             <div className="rounded-xl border border-border/60 bg-background p-5">
@@ -755,12 +757,13 @@ export default async function LandingPage() {
               <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
                 <Users className="h-4.5 w-4.5 text-primary" />
               </div>
-              <h3 className="text-[14px] font-semibold">Staff-to-Staff Scenarios</h3>
+              <h3 className="text-[14px] font-semibold">Group Conversation Simulation</h3>
               <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-                Extend the AI counterpart so that it can simulate
-                microaggressions from other staff members rather than only
-                patients and relatives, reflecting the full range of workplace
-                interactions.
+                Help trainees learn to contribute more effectively in group
+                conversations with multiple AI counterparts each representing
+                a particular staff member/patient/relative (akin to
+                multi-disciplinary teams), each with their own agenda,
+                prejudices, and jargon.
               </p>
             </div>
             <div className="rounded-xl border border-border/60 bg-card p-5">
@@ -791,11 +794,11 @@ export default async function LandingPage() {
               <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
                 <Trophy className="h-4.5 w-4.5 text-primary" />
               </div>
-              <h3 className="text-[14px] font-semibold">Anonymised Cohort Scoreboard</h3>
+              <h3 className="text-[14px] font-semibold">Cohort Analysis</h3>
               <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-                Create an anonymised scoreboard so trainees know where they
-                are scoring relative to their cohort, providing motivation
-                and context for improvement.
+                Perform analysis across all of the recorded learner sessions
+                for a cohort in order to generate a series of common learner
+                challenges that can be discussed in class.
               </p>
             </div>
             <div className="rounded-xl border border-border/60 bg-card p-5">

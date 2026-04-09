@@ -156,11 +156,20 @@ export function TranscriptViewer({
           return (
             <div
               key={turn.id}
+              role="button"
+              tabIndex={0}
+              aria-pressed={selectedTurnId === turn.id}
               className={cn(
-                "rounded-lg border p-3 transition-colors cursor-pointer hover:bg-accent/50",
+                "cursor-pointer touch-manipulation rounded-lg border p-3 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
                 selectedTurnId === turn.id && "border-primary bg-accent/30"
               )}
               onClick={() => onTurnSelect?.(turn.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onTurnSelect?.(turn.id);
+                }
+              }}
             >
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">

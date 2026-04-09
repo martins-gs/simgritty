@@ -245,7 +245,7 @@ Both the simulation page and the review page are designed to work on mobile phon
 
 - **AppShell**: the sidebar nav (`w-56`) is hidden below the `md` breakpoint. The TopBar renders compact icon-based navigation links and a sign-out button on mobile instead.
 - **Simulation page**: uses a tab bar (Simulation / Transcript / Scenario) below `lg`, switching to the three-panel layout on larger screens.
-- **Review page**: ScoreCard stacks vertically on mobile (label + ring inline, summary below). Summary cards use a 2-column grid on mobile, 3 on `sm`, 5 on `lg`. The escalation timeline chart height reduces from `h-80` to `h-56` on mobile. Transcript/Event Log/Notes use `60vh` height on mobile instead of a fixed 500px. The "Restart From Turn" button goes full-width below the card title on mobile.
+- **Review page**: ScoreCard stacks vertically on mobile (label + ring inline, summary below). Summary cards use a 2-column grid on mobile, 3 on `sm`, 5 on `lg`. The escalation timeline chart height reduces from `h-80` to `h-56` on mobile. Transcript/Event Log/Notes use `60vh` height on mobile instead of a fixed 500px. The Transcript / Event Log / Educator Notes section switcher is rendered as an explicit three-button segmented control, and mobile places the "Restart From Turn" action in its own full-width action area below the transcript list.
 
 The review page displays:
 
@@ -255,7 +255,7 @@ The review page displays:
 - **Key moments**: 2–3 highest-impact scoring events with transcript excerpts and context.
 - **Technique suggestion**: one "Next time, try" recommendation based on the weakest scoring dimension.
 - **Summary cards**: turns, events, peak level, exit type, and a **Supervisor intervention** card that summarises AI clinician usage and whether audio telemetry was captured.
-- **Tabs**: Transcript, Event Log, Educator Notes.
+- **Section switcher**: Transcript, Event Log, and Educator Notes are shown one panel at a time using a segmented control rather than the previous tabs primitive.
 - **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data and kept near the top of the review page even for short sessions. If saved reflection data cannot be loaded, the component stays visible and shows an inline error state rather than disappearing.
 
 ### Live Simulation Copy
@@ -289,7 +289,7 @@ PROLOG uses **email OTP (magic link)** via Supabase Auth. Access is restricted t
 
 1. `POST supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: '/auth/confirm' } })`
 2. Supabase emails a magic link via Resend; the user clicks it
-3. The browser loads `/auth/confirm` — a **client-side page** that renders a "Complete sign-in" button
+3. The browser loads `/auth/confirm` — a **client-side page** that renders a green "Complete sign-in" button
 4. The user clicks the button; the browser Supabase client calls `verifyOtp({ token_hash, type })` (or `exchangeCodeForSession(code)` for the PKCE code flow) and redirects to `/dashboard`
 
 The confirm page is intentionally client-side rather than a server-side route handler. Email clients (including Outlook's reading pane) make background GET requests to links in emails; a server-side handler would consume the one-time token before the user ever clicked. With a client-side page the token is only consumed when JavaScript runs in a real browser and the user explicitly clicks the button.
@@ -318,15 +318,14 @@ Read access to sessions, transcripts, events, educator notes, audio, and scenari
 
 ## 10. Dashboard
 
-The dashboard (`src/app/dashboard/page.tsx`) has three sections:
+The dashboard (`src/app/dashboard/page.tsx`) currently has a welcome header plus two main content sections:
 
-- **Start a simulation**: quick-launch cards for published scenarios, linking directly to the briefing page.
-- **Scenarios**: visually distinct tinted panel (`bg-muted/40`) containing compact fixed-width cards (220px) with white backgrounds and shadow lift on hover. Cards show status badge, difficulty, clinical setting, and title. Only the creator sees the delete button.
-- **Recent sessions**: list of the 6 most recent sessions across all users, showing scenario title, trainee name and email, peak escalation level, exit status, and a delete button (owner only).
+- **Scenarios available to you**: a tinted panel (`bg-muted/40`) containing compact fixed-width cards (220px) for published scenarios, each linking directly to the briefing page. Cards show difficulty, title, and setting.
+- **Recent sessions**: the 6 most recent sessions across all users, showing scenario title, trainee identity, session date/time (preferring `started_at`, then `ended_at`, then `created_at`), peak escalation level, exit status, and an owner-only delete button.
 
 ## 11. Landing Page
 
-The landing page (`src/app/page.tsx`) uses real session screenshots (`/public/screenshots/`) for the escalation timeline and transcript demos rather than synthetic mock components. Inline "prolog" text throughout the page renders in the Host Grotesk Bold logo font in dark teal (`#0d2d3a`) via a `<P />` helper component, with a lighter variant (`#7ec8c8`) for use on dark backgrounds. Two sections ("Why prolog" and "Who It's For") plus a "Platform Architecture" section use a dark teal background for visual contrast. The Platform Architecture section includes two diagram variants: `EcosystemDiagram` (animated node-and-connection SVG on dark teal background) and `IsometricDiagram` (isometric 3D-style SVG on light background), both rendered as client components with intersection-observer entrance animations. The configuration demo section still uses interactive mock sliders.
+The landing page (`src/app/page.tsx`) is a marketing-style overview rather than a redirect. It uses real session screenshots (`/public/screenshots/`) for the escalation timeline and transcript demos, an `IsometricDiagramV3` component for the system architecture section, and inline "prolog" text rendered in the Host Grotesk Bold logo font in dark teal (`#0d2d3a`) via a `<P />` helper component, with a lighter variant (`#7ec8c8`) for use on dark backgrounds. The page includes feature, outputs, configuration, workflow, audience, architecture, privacy, roadmap, and CTA sections; the configuration demo still uses interactive mock sliders.
 
 ### Footer and Privacy Statement
 
@@ -339,3 +338,13 @@ A sticky orange banner (`bg-orange-500`, `text-zinc-900`, `z-50`) is rendered at
 ### Branding
 
 The logo uses Host Grotesk Bold (700) in lowercase "prolog" with dark teal colouring (`#0d2d3a`). The speech bubble icon uses the same dark teal with a white medical cross. The wordmark is rendered without a subtitle across the app (header, sidebar, footer). Nunito Sans is the base UI font. Dashboard status badges use semantic colours (teal for published, emerald for completed, red for aborted) distinct from the primary blue used for CTA buttons.
+
+### Sign-In Flow
+
+The sign-in flow is intentionally two-step:
+
+1. The login page (`/auth/login`) accepts only `@nhs.scot` email addresses and sends a magic link.
+2. The emailed link opens `/auth/confirm`, which renders a final green **Complete sign-in** button.
+3. The user clicks that button to verify the OTP client-side and proceed into the app.
+
+This avoids background email-client link prefetches consuming the one-time token before the user reaches a real browser.

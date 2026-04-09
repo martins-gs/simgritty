@@ -11,10 +11,10 @@ import { ScoreCard } from "@/components/review/ScoreCard";
 import { KeyMoments } from "@/components/review/KeyMoments";
 import { ReflectionPrompt } from "@/components/review/ReflectionPrompt";
 import { computeScore, isSessionPreliminary, pickKeyMoments, getNextTimeTrySuggestion } from "@/lib/engine/scoring";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type {
   TranscriptTurn,
@@ -142,6 +142,8 @@ function ScorePlaceholderCard({
   );
 }
 
+type ReviewPanel = "transcript" | "events" | "notes";
+
 export default function ReviewPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const router = useRouter();
@@ -152,6 +154,7 @@ export default function ReviewPage() {
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [restarting, setRestarting] = useState(false);
+  const [activePanel, setActivePanel] = useState<ReviewPanel>("transcript");
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [recordingStartedAt, setRecordingStartedAt] = useState<string | null>(null);
   const audioFetchedRef = useRef(false);
@@ -317,27 +320,39 @@ export default function ReviewPage() {
     if (!selectedTurn) return;
     setRestarting(true);
 
-    const res = await fetch(`/api/sessions/${sessionId}/fork`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        turn_index: selectedTurn.turn_index,
-        fork_label: `Retry from turn ${selectedTurn.turn_index}`,
-      }),
-    });
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/fork`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          turn_index: selectedTurn.turn_index,
+          fork_label: `Retry from turn ${selectedTurn.turn_index}`,
+        }),
+      });
 
-    if (!res.ok) {
-      toast.error("Failed to create forked session");
+      if (!res.ok) {
+        toast.error("Failed to create forked session");
+        return;
+      }
+
+      const forked = parseStringIdRecord(await res.json());
+      if (!forked) {
+        throw new Error("Fork response invalid");
+      }
+
+      router.push(`/simulation/${forked.id}`);
+    } catch {
+      toast.error("Failed to restart from this turn");
+    } finally {
       setRestarting(false);
-      return;
     }
-
-    const forked = parseStringIdRecord(await res.json());
-    if (!forked) {
-      throw new Error("Fork response invalid");
-    }
-    router.push(`/simulation/${forked.id}`);
   }
+
+  const reviewPanels: Array<{ value: ReviewPanel; label: string }> = [
+    { value: "transcript", label: "Transcript" },
+    { value: "events", label: "Event Log" },
+    { value: "notes", label: "Educator Notes" },
+  ];
 
   return (
     <AppShell>
@@ -482,15 +497,39 @@ export default function ReviewPage() {
         </Card>
 
         {/* Transcript + Event Log + Educator Notes */}
-        <Tabs defaultValue="transcript">
-          <TabsList>
-            <TabsTrigger value="transcript">Transcript</TabsTrigger>
-            <TabsTrigger value="events">Event Log</TabsTrigger>
-            <TabsTrigger value="notes">Educator Notes</TabsTrigger>
-          </TabsList>
+        <div className="space-y-4">
+          <div
+            role="tablist"
+            aria-label="Review sections"
+            className="grid grid-cols-3 gap-1 rounded-lg border border-border/60 bg-muted/40 p-1"
+          >
+            {reviewPanels.map((panel) => (
+              <button
+                key={panel.value}
+                id={`review-tab-${panel.value}`}
+                type="button"
+                role="tab"
+                aria-controls={`review-panel-${panel.value}`}
+                aria-selected={activePanel === panel.value}
+                onClick={() => setActivePanel(panel.value)}
+                className={cn(
+                  "rounded-md px-3 py-2 text-xs font-medium transition-colors sm:text-sm",
+                  activePanel === panel.value
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
+                )}
+              >
+                {panel.label}
+              </button>
+            ))}
+          </div>
 
-          <TabsContent value="transcript" className="mt-4">
-            <Card>
+          {activePanel === "transcript" && (
+            <Card
+              id="review-panel-transcript"
+              role="tabpanel"
+              aria-labelledby="review-tab-transcript"
+            >
               <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
                 <div>
                   <CardTitle className="text-base">Transcript</CardTitle>
@@ -502,7 +541,7 @@ export default function ReviewPage() {
                   size="sm"
                   onClick={handleRestartFromSelectedTurn}
                   disabled={!canRestartFromSelectedTurn || restarting}
-                  className="w-full sm:w-auto"
+                  className="hidden sm:inline-flex"
                 >
                   {restarting ? "Restarting..." : "Restart From Turn"}
                 </Button>
@@ -517,11 +556,32 @@ export default function ReviewPage() {
                   sessionStartedAt={recordingStartedAt ?? session.started_at}
                 />
               </CardContent>
+              <div className="border-t px-4 py-3 sm:hidden">
+                <p className="text-xs text-muted-foreground">
+                  {selectedTurn
+                    ? canRestartFromSelectedTurn
+                      ? `Turn ${selectedTurn.turn_index} selected for restart.`
+                      : `Turn ${selectedTurn.turn_index} selected, but restart is not available from that point.`
+                    : "Select a transcript turn to restart from that point."}
+                </p>
+                <Button
+                  size="sm"
+                  onClick={handleRestartFromSelectedTurn}
+                  disabled={!canRestartFromSelectedTurn || restarting}
+                  className="mt-3 w-full"
+                >
+                  {restarting ? "Restarting..." : "Restart From Turn"}
+                </Button>
+              </div>
             </Card>
-          </TabsContent>
+          )}
 
-          <TabsContent value="events" className="mt-4">
-            <Card>
+          {activePanel === "events" && (
+            <Card
+              id="review-panel-events"
+              role="tabpanel"
+              aria-labelledby="review-tab-events"
+            >
               <CardContent className="p-0 h-[60vh] sm:h-[500px]">
                 <EventLog
                   events={events}
@@ -529,10 +589,14 @@ export default function ReviewPage() {
                 />
               </CardContent>
             </Card>
-          </TabsContent>
+          )}
 
-          <TabsContent value="notes" className="mt-4">
-            <Card>
+          {activePanel === "notes" && (
+            <Card
+              id="review-panel-notes"
+              role="tabpanel"
+              aria-labelledby="review-tab-notes"
+            >
               <CardContent className="p-0 h-[60vh] sm:h-[500px]">
                 <EducatorNotes
                   sessionId={sessionId}
@@ -542,8 +606,8 @@ export default function ReviewPage() {
                 />
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
+          )}
+        </div>
 
       </div>
     </AppShell>

@@ -2,13 +2,13 @@
 
 ## Summary
 
-ElevenLabs integration is **technically feasible and recommended** for the clinician voice pipeline. The Eleven v3 model's audio tag system provides rich emotional delivery control that maps well to SimGritty's existing `StructuredVoiceProfile` architecture. Latency is not a blocker. The patient voice pipeline remains on OpenAI Realtime (no viable ElevenLabs equivalent). Structured output generation (voice profiles, clinician turns) also stays on OpenAI.
+ElevenLabs integration is **technically feasible and recommended** for the clinician voice pipeline. The Eleven v3 model's audio tag system provides rich emotional delivery control that maps well to PROLOG's existing `StructuredVoiceProfile` architecture. Latency is not a blocker. The patient voice pipeline remains on OpenAI Realtime (no viable ElevenLabs equivalent). Structured output generation (voice profiles, clinician turns) also stays on OpenAI.
 
 ---
 
 ## Current Architecture
 
-SimGritty has two independent voice pipelines:
+PROLOG has two independent voice pipelines:
 
 | Pipeline | Current tech | Key files |
 |----------|-------------|-----------|
