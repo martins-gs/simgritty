@@ -14,16 +14,18 @@ import {
 } from "recharts";
 import { Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import type { SimulationStateEvent, TranscriptTurn, Speaker } from "@/types/simulation";
+import type { ScoreEvidence } from "@/lib/engine/scoring";
+import type { SimulationStateEvent, TranscriptTurn } from "@/types/simulation";
 import { ESCALATION_LABELS } from "@/types/escalation";
 
 interface EscalationTimelineProps {
   events: SimulationStateEvent[];
   turns: TranscriptTurn[];
+  keyMoments: ScoreEvidence[];
   maxCeiling: number;
   sessionStartedAt: string;
   recordingUrl?: string | null;
+  onActiveKeyMomentChange?: (index: number | null) => void;
 }
 
 interface ChartPoint {
@@ -37,24 +39,12 @@ interface ChartPoint {
   effectiveness: number | null;
 }
 
-interface AnalysisEntry {
-  id: string;
+interface KeyMomentEntry {
+  index: number;
   time: number;
-  turnIndex: number;
-  speaker: Speaker;
-  content: string;
-  technique: string;
-  effectiveness: number;
-  reasoning: string;
-  tags: string[];
-  levelBefore: number;
-  levelAfter: number;
-  trustAfter: number;
-  listeningAfter: number;
 }
 
 const CHART_MARGIN = { top: 8, right: 52, bottom: 6, left: 4 };
-const REVIEW_SEGMENT_SECONDS = 10;
 
 function getLevelColor(level: number): string {
   if (level <= 2) return "#10b981";
@@ -78,19 +68,13 @@ function getEventDotColor(type: string): string {
   return "#94a3b8";
 }
 
-function getSpeakerLabel(speaker: Speaker): string {
-  if (speaker === "trainee") return "Trainee";
-  if (speaker === "system") return "AI Clinician";
-  return "Patient/Relative";
-}
-
 function getRelativeTime(timestamp: string, startTime: number) {
   return Math.max(0, (new Date(timestamp).getTime() - startTime) / 1000);
 }
 
-function snapToReviewSegment(seconds: number | null) {
+function snapToSecond(seconds: number | null) {
   if (seconds === null || !Number.isFinite(seconds)) return null;
-  return Math.max(0, Math.floor(seconds / REVIEW_SEGMENT_SECONDS) * REVIEW_SEGMENT_SECONDS);
+  return Math.max(0, Math.floor(seconds));
 }
 
 function getChartPointAtTime(data: ChartPoint[], time: number | null) {
@@ -105,7 +89,7 @@ function getChartPointAtTime(data: ChartPoint[], time: number | null) {
   return point;
 }
 
-function getAnalysisEntryAtTime(entries: AnalysisEntry[], time: number | null) {
+function getKeyMomentAtTime(entries: KeyMomentEntry[], time: number | null) {
   if (!entries.length || time === null) return null;
 
   for (let i = entries.length - 1; i >= 0; i -= 1) {
@@ -171,7 +155,6 @@ function CustomTooltip({
 }) {
   if (!active || !payload?.length) return null;
   const data = payload[0].payload;
-
   const levelColor = getLevelColor(data.level);
 
   return (
@@ -234,9 +217,11 @@ function CustomTooltip({
 export function EscalationTimeline({
   events,
   turns,
+  keyMoments,
   maxCeiling,
   sessionStartedAt,
   recordingUrl,
+  onActiveKeyMomentChange,
 }: EscalationTimelineProps) {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -365,44 +350,18 @@ export function EscalationTimeline({
     }
   }
 
-  const levelBeforeMap = new Map<string, number>();
-  let lastKnownLevel = data[0]?.level ?? 3;
-  const analysisEntries: AnalysisEntry[] = [];
+  const keyMomentEntries: KeyMomentEntry[] = keyMoments
+    .map((moment, index) => {
+      const turn = turns.find((candidate) => candidate.turn_index === moment.turnIndex);
+      if (!turn) return null;
 
-  for (const turn of turns) {
-    levelBeforeMap.set(turn.id, lastKnownLevel);
-
-    if (turn.state_after && (turn.speaker === "trainee" || turn.speaker === "system")) {
-      const classifier = turn.classifier_result;
-      if (classifier) {
-        analysisEntries.push({
-          id: turn.id,
-          time: getRelativeTime(turn.started_at, startTime),
-          turnIndex: turn.turn_index,
-          speaker: turn.speaker,
-          content: turn.content,
-          technique: classifier.technique,
-          effectiveness: classifier.effectiveness,
-          reasoning: classifier.reasoning,
-          tags: classifier.tags,
-          levelBefore: levelBeforeMap.get(turn.id) ?? lastKnownLevel,
-          levelAfter: turn.state_after.level,
-          trustAfter: turn.state_after.trust,
-          listeningAfter: turn.state_after.willingness_to_listen,
-        });
-      }
-
-      lastKnownLevel = turn.state_after.level;
-    }
-  }
-
-  if (data.length === 0) {
-    return (
-      <div className="flex h-64 items-center justify-center text-[13px] text-slate-400">
-        No escalation data recorded
-      </div>
-    );
-  }
+      return {
+        index,
+        time: getRelativeTime(turn.started_at, startTime),
+      };
+    })
+    .filter((entry): entry is KeyMomentEntry => entry !== null)
+    .sort((a, b) => a.time - b.time || a.index - b.index);
 
   const lastTurn = turns[turns.length - 1];
   const lastTurnTime = lastTurn ? getRelativeTime(lastTurn.started_at, startTime) : 0;
@@ -411,30 +370,35 @@ export function EscalationTimeline({
   const playbackActive = recordingUrl ? isPlaying : false;
   const timelineMaxTime = Math.max(
     data[data.length - 1]?.time ?? 0,
-    analysisEntries[analysisEntries.length - 1]?.time ?? 0,
+    keyMomentEntries[keyMomentEntries.length - 1]?.time ?? 0,
     lastTurnTime,
     resolvedAudioDuration,
     resolvedPlaybackTime,
-    REVIEW_SEGMENT_SECONDS
+    1
   );
   const peakLevel = Math.max(...data.map((d) => d.level));
   const finalLevel = data[data.length - 1].level;
   const escalationEvents = data.filter((d) => d.type === "escalation_change").length;
   const deescalationEvents = data.filter((d) => d.type === "de_escalation_change").length;
-  const playbackCheckpointTime = snapToReviewSegment(resolvedPlaybackTime);
-  const hoveredCheckpointTime = snapToReviewSegment(hoveredTime);
-  const markerTime = !playbackActive && hoveredCheckpointTime !== null
-    ? hoveredCheckpointTime
-    : playbackCheckpointTime;
-  const cardTime = hoveredCheckpointTime ?? playbackCheckpointTime;
+  const playbackSecond = snapToSecond(resolvedPlaybackTime);
+  const hoveredSecond = snapToSecond(hoveredTime);
+  const markerTime = !playbackActive && hoveredSecond !== null
+    ? hoveredSecond
+    : playbackSecond;
   const markerPoint = getChartPointAtTime(data, markerTime);
-  const activeAnalysis = getAnalysisEntryAtTime(analysisEntries, cardTime);
-  const currentSegmentEnd = cardTime === null
-    ? null
-    : Math.min(cardTime + REVIEW_SEGMENT_SECONDS, timelineMaxTime);
-  const analysisDelta = activeAnalysis
-    ? activeAnalysis.levelAfter - activeAnalysis.levelBefore
-    : 0;
+  const activeKeyMoment = getKeyMomentAtTime(keyMomentEntries, hoveredSecond ?? playbackSecond);
+
+  useEffect(() => {
+    onActiveKeyMomentChange?.(activeKeyMoment?.index ?? null);
+  }, [activeKeyMoment?.index, onActiveKeyMomentChange]);
+
+  if (data.length === 0) {
+    return (
+      <div className="flex h-64 items-center justify-center text-[13px] text-slate-400">
+        No escalation data recorded
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -507,7 +471,7 @@ export function EscalationTimeline({
             {playbackActive ? "Pause" : "Play"}
           </Button>
           <div className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] text-slate-500">
-            10s checkpoints
+            1s playhead
           </div>
         </div>
       </div>
@@ -591,8 +555,8 @@ export function EscalationTimeline({
               <>
                 <ReferenceLine
                   x={markerTime}
-                  stroke={hoveredCheckpointTime !== null && !playbackActive ? "#0f172a" : "#2563eb"}
-                  strokeDasharray={hoveredCheckpointTime !== null && !playbackActive ? "4 4" : "6 3"}
+                  stroke={hoveredSecond !== null && !playbackActive ? "#0f172a" : "#2563eb"}
+                  strokeDasharray={hoveredSecond !== null && !playbackActive ? "4 4" : "6 3"}
                   strokeWidth={1.5}
                 />
                 <ReferenceDot
@@ -607,7 +571,7 @@ export function EscalationTimeline({
                           cx={props.cx}
                           cy={props.cy}
                           r={10}
-                          fill={hoveredCheckpointTime !== null && !playbackActive ? "#0f172a" : "#2563eb"}
+                          fill={hoveredSecond !== null && !playbackActive ? "#0f172a" : "#2563eb"}
                           opacity={0.16}
                           className="animate-pulse"
                         />
@@ -615,7 +579,7 @@ export function EscalationTimeline({
                           cx={props.cx}
                           cy={props.cy}
                           r={5}
-                          fill={hoveredCheckpointTime !== null && !playbackActive ? "#0f172a" : "#2563eb"}
+                          fill={hoveredSecond !== null && !playbackActive ? "#0f172a" : "#2563eb"}
                           stroke="white"
                           strokeWidth={2}
                         />
@@ -726,115 +690,6 @@ export function EscalationTimeline({
           </AreaChart>
         ) : (
           <div className="h-full w-full animate-pulse rounded-xl bg-slate-100/70" />
-        )}
-      </div>
-
-      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-        {analysisEntries.length === 0 ? (
-          <p className="text-[13px] text-slate-500">
-            No analysis or feedback cards were recorded for this session.
-          </p>
-        ) : activeAnalysis && cardTime !== null ? (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
-                  hoveredCheckpointTime !== null
-                    ? "bg-slate-900 text-white"
-                    : playbackActive
-                      ? "bg-blue-100 text-blue-700"
-                      : "bg-slate-200 text-slate-700"
-                )}
-              >
-                {hoveredCheckpointTime !== null ? "Preview" : playbackActive ? "Playback" : "Paused"}
-              </span>
-              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600">
-                Segment {formatTime(cardTime)}-{formatTime(currentSegmentEnd ?? cardTime)}
-              </span>
-              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600">
-                {getSpeakerLabel(activeAnalysis.speaker)} · Turn {activeAnalysis.turnIndex + 1}
-              </span>
-            </div>
-
-            <p className="text-sm font-medium leading-relaxed text-slate-900">
-              &ldquo;{activeAnalysis.content}&rdquo;
-            </p>
-
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-lg border border-white/80 bg-white px-3 py-2 shadow-sm">
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">Technique</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">{activeAnalysis.technique}</p>
-              </div>
-              <div className="rounded-lg border border-white/80 bg-white px-3 py-2 shadow-sm">
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">Effectiveness</p>
-                <p
-                  className="mt-1 text-sm font-semibold"
-                  style={{ color: getEffectivenessColor(activeAnalysis.effectiveness) }}
-                >
-                  {activeAnalysis.effectiveness > 0 ? "+" : ""}
-                  {activeAnalysis.effectiveness.toFixed(2)}
-                </p>
-              </div>
-              <div className="rounded-lg border border-white/80 bg-white px-3 py-2 shadow-sm">
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">Patient/Relative State</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">
-                  Level {activeAnalysis.levelAfter} · {ESCALATION_LABELS[activeAnalysis.levelAfter] ?? "Unknown"}
-                </p>
-                <p
-                  className={cn(
-                    "mt-1 text-[11px] font-medium",
-                    analysisDelta > 0 && "text-red-600",
-                    analysisDelta < 0 && "text-emerald-600",
-                    analysisDelta === 0 && "text-slate-500"
-                  )}
-                >
-                  {analysisDelta > 0
-                    ? `Escalated +${analysisDelta}`
-                    : analysisDelta < 0
-                      ? `De-escalated ${analysisDelta}`
-                      : "State unchanged"}
-                </p>
-              </div>
-              <div className="rounded-lg border border-white/80 bg-white px-3 py-2 shadow-sm">
-                <p className="text-[11px] uppercase tracking-wide text-slate-400">Trust / Listening</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">
-                  {activeAnalysis.trustAfter}/10 trust
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  {activeAnalysis.listeningAfter}/10 willingness to listen
-                </p>
-              </div>
-            </div>
-
-            {activeAnalysis.reasoning && (
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-                  Analysis / Feedback
-                </p>
-                <p className="mt-1 text-sm leading-relaxed text-slate-600">
-                  {activeAnalysis.reasoning}
-                </p>
-              </div>
-            )}
-
-            {activeAnalysis.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {activeAnalysis.tags.map((tag) => (
-                  <span
-                    key={`${activeAnalysis.id}-${tag}`}
-                    className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-500"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="text-[13px] text-slate-500">
-            Press Play or hover the timeline to step through the existing analysis cards.
-          </p>
         )}
       </div>
 

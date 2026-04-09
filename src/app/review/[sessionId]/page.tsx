@@ -157,6 +157,7 @@ export default function ReviewPage() {
   const [activePanel, setActivePanel] = useState<ReviewPanel>("transcript");
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [recordingStartedAt, setRecordingStartedAt] = useState<string | null>(null);
+  const [activeKeyMomentIndex, setActiveKeyMomentIndex] = useState<number | null>(null);
   const audioFetchedRef = useRef(false);
 
   useEffect(() => {
@@ -412,7 +413,13 @@ export default function ReviewPage() {
               </div>
             )}
 
-            {score.sessionValid && <KeyMoments moments={keyMoments} turns={turns} />}
+            {score.sessionValid && (
+              <KeyMoments
+                moments={keyMoments}
+                turns={turns}
+                activeMomentIndex={activeKeyMomentIndex}
+              />
+            )}
 
             {score.sessionValid && suggestion && (
               <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4">
@@ -488,9 +495,11 @@ export default function ReviewPage() {
               <EscalationTimeline
                 events={events}
                 turns={turns}
+                keyMoments={keyMoments}
                 maxCeiling={snapshot.escalation_rules[0]?.max_ceiling ?? 8}
                 sessionStartedAt={recordingStartedAt ?? session.started_at}
                 recordingUrl={recordingUrl}
+                onActiveKeyMomentChange={setActiveKeyMomentIndex}
               />
             ) : (
               <p className="text-muted-foreground text-sm">No timeline data available</p>

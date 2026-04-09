@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 interface KeyMomentsProps {
   moments: ScoreEvidence[];
   turns: TranscriptTurn[];
+  activeMomentIndex?: number | null;
 }
 
 const DIMENSION_LABELS: Record<string, string> = {
@@ -81,7 +82,7 @@ function describeEvidence(evidence: ScoreEvidence): string {
   return evidence.evidenceType.replace(/_/g, " ");
 }
 
-export function KeyMoments({ moments, turns }: KeyMomentsProps) {
+export function KeyMoments({ moments, turns, activeMomentIndex = null }: KeyMomentsProps) {
   if (moments.length === 0) return null;
 
   return (
@@ -92,15 +93,18 @@ export function KeyMoments({ moments, turns }: KeyMomentsProps) {
           const turn = turns.find((t) => t.turn_index === moment.turnIndex);
           const isPositive = moment.scoreImpact > 0;
           const isNegative = moment.scoreImpact < 0;
+          const isActive = activeMomentIndex === i;
 
           return (
             <div
               key={i}
+              aria-current={isActive ? "step" : undefined}
               className={cn(
-                "rounded-lg border p-3",
+                "rounded-lg border p-3 transition-all",
                 isPositive && "border-emerald-200 bg-emerald-50/50",
                 isNegative && "border-red-200 bg-red-50/50",
-                !isPositive && !isNegative && "border-slate-200 bg-slate-50/50"
+                !isPositive && !isNegative && "border-slate-200 bg-slate-50/50",
+                isActive && "ring-2 ring-slate-900/15 shadow-md"
               )}
             >
               <div className="flex items-center gap-2 mb-1">
@@ -116,6 +120,11 @@ export function KeyMoments({ moments, turns }: KeyMomentsProps) {
                     isPositive ? "text-emerald-600" : "text-red-600"
                   )}>
                     {isPositive ? "+" : ""}{Math.round(moment.scoreImpact)}
+                  </span>
+                )}
+                {isActive && (
+                  <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
+                    Current
                   </span>
                 )}
               </div>
