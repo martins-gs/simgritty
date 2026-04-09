@@ -25,10 +25,10 @@ function getSpeakerLabel(speaker: string): string {
   return "Patient";
 }
 
-function getSpeakerVariant(speaker: string): "default" | "secondary" | "outline" {
-  if (speaker === "trainee") return "default";
-  if (speaker === "system") return "outline";
-  return "secondary";
+function getSpeakerClassName(speaker: string): string {
+  if (speaker === "trainee") return "border-blue-300 bg-blue-50 text-blue-700";
+  if (speaker === "system") return "border-indigo-300 bg-indigo-50 text-indigo-700";
+  return "border-slate-300 bg-slate-50 text-slate-600";
 }
 
 function EscalationImpact({
@@ -174,11 +174,8 @@ export function TranscriptViewer({
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
                   <Badge
-                    variant={getSpeakerVariant(turn.speaker)}
-                    className={cn(
-                      "text-[10px]",
-                      turn.speaker === "system" && "border-indigo-300 text-indigo-700 bg-indigo-50"
-                    )}
+                    variant="outline"
+                    className={cn("text-[10px]", getSpeakerClassName(turn.speaker))}
                   >
                     {getSpeakerLabel(turn.speaker)}
                   </Badge>
