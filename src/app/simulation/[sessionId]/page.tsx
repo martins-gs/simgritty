@@ -712,6 +712,19 @@ export default function SimulationPage() {
           },
         };
 
+        const audioAnalysisEventIndex = eventIndexRef.current++;
+        persistSessionEvent({
+          event_index: audioAnalysisEventIndex,
+          event_type: "classification_result",
+          payload: {
+            __event_kind: "trainee_audio_delivery",
+            source: "trainee_audio_delivery",
+            item_id: itemId,
+            turn_index: turn.turnIndex,
+            delivery_analysis: deliveryAnalysis,
+          },
+        });
+
         const patchRes = await updatePersistedTurnDeliveryAnalysis(
           turn.turnIndex,
           nextSnapshot.classifierResult,
