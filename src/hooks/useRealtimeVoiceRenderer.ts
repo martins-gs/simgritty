@@ -163,19 +163,28 @@ export function useRealtimeVoiceRenderer() {
       const ephemeralKey = sessionData.client_secret?.value;
       const realtimeModel = sessionData.model as string | undefined;
       if (!ephemeralKey || !realtimeModel) throw new Error("Invalid clinician realtime session");
+      console.info(
+        `[Clinician Audio] Session token OK — model=${realtimeModel}, ` +
+        `ice_servers=${Array.isArray(sessionData.ice_servers) ? sessionData.ice_servers.length : "none"}`
+      );
       if (isStale()) {
         cleanupAttempt();
         return false;
       }
 
-      // Use ICE servers from OpenAI session response (includes TURN for
-      // reliable NAT traversal).  Fall back to a public STUN server.
-      const iceServers: RTCIceServer[] =
+      const rawIceServers: RTCIceServer[] | undefined =
         Array.isArray(sessionData.ice_servers) && sessionData.ice_servers.length > 0
-          ? sessionData.ice_servers
-          : [{ urls: "stun:stun.l.google.com:19302" }];
+          ? sessionData.ice_servers.map((s: Record<string, unknown>) => ({
+              urls: s.urls ?? s.url,
+              ...(s.username ? { username: s.username as string } : {}),
+              ...(s.credential ? { credential: s.credential as string } : {}),
+            }))
+          : undefined;
+      const iceServers: RTCIceServer[] = rawIceServers ?? [
+        { urls: "stun:stun.l.google.com:19302" },
+      ];
 
-      const nextPc = new RTCPeerConnection({ iceServers });
+      const nextPc = new RTCPeerConnection({ iceServers, bundlePolicy: "max-bundle" });
       pc = nextPc;
       pcRef.current = nextPc;
       nextPc.addTransceiver("audio", { direction: "recvonly" });
@@ -366,10 +375,10 @@ export function useRealtimeVoiceRenderer() {
 
       // Monitor the peer connection for ICE/DTLS failures.
       nextPc.onconnectionstatechange = () => {
-        if (isStale()) return;
         const state = nextPc.connectionState;
+        console.info(`[Clinician Audio] connectionState → ${state}`);
+        if (isStale()) return;
         if (state === "failed") {
-          console.error("[Clinician Audio] Peer connection failed (connectionState=failed)");
           if (connectionTimeoutRef.current) {
             clearTimeout(connectionTimeoutRef.current);
             connectionTimeoutRef.current = null;
@@ -379,6 +388,10 @@ export function useRealtimeVoiceRenderer() {
             config.onError("Clinician voice connection failed — check your network");
           });
         }
+      };
+
+      nextPc.oniceconnectionstatechange = () => {
+        console.info(`[Clinician Audio] iceConnectionState → ${nextPc.iceConnectionState}`);
       };
 
       // Safety timeout: if the data channel hasn't opened within
@@ -409,29 +422,7 @@ export function useRealtimeVoiceRenderer() {
         return false;
       }
 
-      // Wait for ICE gathering so the offer SDP includes all local candidates.
-      if (nextPc.iceGatheringState !== "complete") {
-        await new Promise<void>((resolve) => {
-          const onGatheringChange = () => {
-            if (nextPc.iceGatheringState === "complete") {
-              nextPc.removeEventListener("icegatheringstatechange", onGatheringChange);
-              resolve();
-            }
-          };
-          nextPc.addEventListener("icegatheringstatechange", onGatheringChange);
-          setTimeout(() => {
-            nextPc.removeEventListener("icegatheringstatechange", onGatheringChange);
-            resolve();
-          }, 5_000);
-        });
-        if (isStale()) {
-          cleanupAttempt();
-          return false;
-        }
-      }
-
-      const localSdp = nextPc.localDescription?.sdp ?? offer.sdp;
-
+      console.info(`[Clinician Audio] Sending SDP offer (model=${realtimeModel})…`);
       const sdpRes = await fetch(
         `https://api.openai.com/v1/realtime?model=${encodeURIComponent(realtimeModel)}`,
         {
@@ -440,22 +431,35 @@ export function useRealtimeVoiceRenderer() {
             Authorization: `Bearer ${ephemeralKey}`,
             "Content-Type": "application/sdp",
           },
-          body: localSdp,
+          body: offer.sdp,
         }
       );
 
-      if (!sdpRes.ok) throw new Error("Clinician realtime SDP exchange failed");
+      if (!sdpRes.ok) {
+        const detail = await sdpRes.text().catch(() => "");
+        throw new Error(`Clinician SDP exchange failed (${sdpRes.status}): ${detail}`);
+      }
       if (isStale()) {
         cleanupAttempt();
         return false;
       }
 
       const answerSdp = await sdpRes.text();
+      console.info(
+        `[Clinician Audio] SDP answer received (${answerSdp.length} bytes, ` +
+        `starts_with_v=${answerSdp.startsWith("v=")})`
+      );
+      if (!answerSdp.startsWith("v=")) {
+        throw new Error(
+          `Clinician SDP answer is not valid SDP (starts with: ${answerSdp.slice(0, 40)})`
+        );
+      }
       if (isStale()) {
         cleanupAttempt();
         return false;
       }
       await nextPc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+      console.info("[Clinician Audio] Remote description set");
       if (isStale()) {
         cleanupAttempt();
         return false;

@@ -52,7 +52,10 @@ export async function POST(request: Request) {
 
   if (!response.ok) {
     const errorData = await response.text();
-    console.error("OpenAI Realtime session error:", errorData);
+    console.error(
+      `[Realtime Session] OpenAI error: status=${response.status} model=${REALTIME_MODEL}`,
+      errorData,
+    );
     return NextResponse.json(
       { error: "Failed to create realtime session", detail: errorData },
       { status: 500 }
@@ -60,5 +63,10 @@ export async function POST(request: Request) {
   }
 
   const data = await response.json();
+  console.info(
+    `[Realtime Session] OK — model=${REALTIME_MODEL}, ` +
+    `has_client_secret=${!!data.client_secret?.value}, ` +
+    `ice_servers=${Array.isArray(data.ice_servers) ? data.ice_servers.length : "none"}`
+  );
   return NextResponse.json({ ...data, model: REALTIME_MODEL });
 }

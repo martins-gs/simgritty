@@ -347,6 +347,7 @@ export function useRealtimeSession() {
     };
 
     try {
+      console.info("[Realtime] Fetching session token…");
       const tokenRes = await fetch("/api/realtime/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -356,38 +357,57 @@ export function useRealtimeSession() {
         }),
       });
 
-      if (!tokenRes.ok) throw new Error("Failed to get session token");
+      if (!tokenRes.ok) {
+        const detail = await tokenRes.text().catch(() => "");
+        throw new Error(`Failed to get session token (${tokenRes.status}): ${detail}`);
+      }
       const sessionData = await tokenRes.json();
       const ephemeralKey = sessionData.client_secret?.value;
       const realtimeModel = sessionData.model as string | undefined;
       if (!ephemeralKey) throw new Error("No ephemeral key in response");
       if (!realtimeModel) throw new Error("No realtime model in response");
+
+      console.info(
+        `[Realtime] Session token OK — model=${realtimeModel}, ` +
+        `ice_servers=${Array.isArray(sessionData.ice_servers) ? sessionData.ice_servers.length : "none"}`
+      );
       if (isStale()) {
         cleanupAttempt();
         return;
       }
 
-      // Use ICE servers from OpenAI session response (includes TURN for
-      // reliable NAT traversal).  Fall back to a public STUN server.
-      const iceServers: RTCIceServer[] =
+      // Use ICE servers from OpenAI session response if provided.
+      // Fall back to a public STUN server so the ICE agent can discover
+      // server-reflexive candidates for NAT traversal.
+      const rawIceServers: RTCIceServer[] | undefined =
         Array.isArray(sessionData.ice_servers) && sessionData.ice_servers.length > 0
-          ? sessionData.ice_servers
-          : [{ urls: "stun:stun.l.google.com:19302" }];
+          ? sessionData.ice_servers.map((s: Record<string, unknown>) => ({
+              urls: s.urls ?? s.url,
+              ...(s.username ? { username: s.username as string } : {}),
+              ...(s.credential ? { credential: s.credential as string } : {}),
+            }))
+          : undefined;
+      const iceServers: RTCIceServer[] = rawIceServers ?? [
+        { urls: "stun:stun.l.google.com:19302" },
+      ];
 
-      const nextPc = new RTCPeerConnection({ iceServers });
+      const nextPc = new RTCPeerConnection({ iceServers, bundlePolicy: "max-bundle" });
       pc = nextPc;
       pcRef.current = nextPc;
 
       const nextAudioEl = document.createElement("audio");
       nextAudioEl.autoplay = true;
+      nextAudioEl.setAttribute("playsinline", "true");
       audioEl = nextAudioEl;
       audioElRef.current = nextAudioEl;
 
       nextPc.ontrack = (event) => {
         if (disconnectedRef.current) return;
+        console.info("[Realtime] ontrack — remote audio stream received");
         nextAudioEl.srcObject = event.streams[0];
       };
 
+      console.info("[Realtime] Requesting microphone…");
       const nextStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -395,6 +415,7 @@ export function useRealtimeSession() {
           autoGainControl: true,
         },
       });
+      console.info("[Realtime] Microphone acquired");
       if (isStale()) {
         stream = nextStream;
         cleanupAttempt();
@@ -414,6 +435,7 @@ export function useRealtimeSession() {
             clearTimeout(connectionTimeoutRef.current);
             connectionTimeoutRef.current = null;
           }
+          console.info("[Realtime] Data channel open — connected!");
           setConnectionStatus("connected");
         }
       };
@@ -428,21 +450,20 @@ export function useRealtimeSession() {
         }
       };
 
-      nextDc.onerror = () => {
+      nextDc.onerror = (ev) => {
         if (!isStale()) {
+          console.error("[Realtime] Data channel error", ev);
           config.onError("Data channel error");
           setConnectionStatus("error");
         }
       };
 
       // Monitor the peer connection for ICE/DTLS failures.
-      // Without this, if the ICE connection fails (firewall, network),
-      // the status stays at "connecting" forever.
       nextPc.onconnectionstatechange = () => {
-        if (isStale()) return;
         const state = nextPc.connectionState;
+        console.info(`[Realtime] connectionState → ${state}`);
+        if (isStale()) return;
         if (state === "failed") {
-          console.error("[Realtime] Peer connection failed (connectionState=failed)");
           if (connectionTimeoutRef.current) {
             clearTimeout(connectionTimeoutRef.current);
             connectionTimeoutRef.current = null;
@@ -450,15 +471,11 @@ export function useRealtimeSession() {
           config.onError("Connection failed — check your network and try again");
           setConnectionStatus("error");
         } else if (state === "disconnected") {
-          console.warn("[Realtime] Peer connection disconnected (connectionState=disconnected)");
-          // "disconnected" can be transient; browsers may recover.
-          // Only update if we were previously connected.
           const currentStatus = useSimulationStore.getState().connectionStatus;
           if (currentStatus === "connected") {
             setConnectionStatus("reconnecting");
           }
         } else if (state === "connected") {
-          // ICE + DTLS succeeded — if we were reconnecting, restore status.
           const currentStatus = useSimulationStore.getState().connectionStatus;
           if (currentStatus === "reconnecting") {
             setConnectionStatus("connected");
@@ -466,9 +483,16 @@ export function useRealtimeSession() {
         }
       };
 
+      nextPc.oniceconnectionstatechange = () => {
+        console.info(`[Realtime] iceConnectionState → ${nextPc.iceConnectionState}`);
+      };
+
+      nextPc.onicegatheringstatechange = () => {
+        console.info(`[Realtime] iceGatheringState → ${nextPc.iceGatheringState}`);
+      };
+
       // Safety timeout: if the data channel hasn't opened within
-      // CONNECTION_TIMEOUT_MS, treat this as a failure so the user
-      // isn't stuck on "Connecting..." forever.
+      // CONNECTION_TIMEOUT_MS, treat this as a failure.
       if (connectionTimeoutRef.current) {
         clearTimeout(connectionTimeoutRef.current);
       }
@@ -478,7 +502,11 @@ export function useRealtimeSession() {
         const currentStatus = useSimulationStore.getState().connectionStatus;
         if (currentStatus === "connecting") {
           console.error(
-            `[Realtime] Connection timeout: data channel did not open within ${CONNECTION_TIMEOUT_MS}ms`
+            `[Realtime] Connection timeout after ${CONNECTION_TIMEOUT_MS}ms ` +
+            `(iceConnectionState=${nextPc.iceConnectionState}, ` +
+            `connectionState=${nextPc.connectionState}, ` +
+            `iceGatheringState=${nextPc.iceGatheringState}, ` +
+            `signalingState=${nextPc.signalingState})`
           );
           config.onError("Connection timed out — please check your network and try again");
           setConnectionStatus("error");
@@ -497,34 +525,11 @@ export function useRealtimeSession() {
         return;
       }
 
-      // Wait for ICE gathering so the offer SDP includes all local
-      // candidates.  Without this the offer is sent with zero candidates
-      // and the remote peer may be unable to reach us.
-      if (nextPc.iceGatheringState !== "complete") {
-        await new Promise<void>((resolve) => {
-          const onGatheringChange = () => {
-            if (nextPc.iceGatheringState === "complete") {
-              nextPc.removeEventListener("icegatheringstatechange", onGatheringChange);
-              resolve();
-            }
-          };
-          nextPc.addEventListener("icegatheringstatechange", onGatheringChange);
-          // Don't wait forever — 5 s is generous for STUN/TURN gathering.
-          setTimeout(() => {
-            nextPc.removeEventListener("icegatheringstatechange", onGatheringChange);
-            resolve();
-          }, 5_000);
-        });
-        if (isStale()) {
-          cleanupAttempt();
-          return;
-        }
-      }
-
-      // Use the gathered local description (includes ICE candidates),
-      // NOT the original offer which has none.
-      const localSdp = nextPc.localDescription?.sdp ?? offer.sdp;
-
+      // Send the offer SDP to OpenAI's Realtime WebRTC endpoint.
+      // IMPORTANT: send offer.sdp (without ICE candidates), NOT
+      // pc.localDescription.sdp.  OpenAI's API expects a candidate-free
+      // offer and embeds its own candidates in the answer.
+      console.info(`[Realtime] Sending SDP offer to OpenAI (model=${realtimeModel})…`);
       const sdpRes = await fetch(
         `https://api.openai.com/v1/realtime?model=${encodeURIComponent(realtimeModel)}`,
         {
@@ -533,17 +538,31 @@ export function useRealtimeSession() {
             Authorization: `Bearer ${ephemeralKey}`,
             "Content-Type": "application/sdp",
           },
-          body: localSdp,
+          body: offer.sdp,
         }
       );
 
-      if (!sdpRes.ok) throw new Error("SDP exchange failed");
+      if (!sdpRes.ok) {
+        const detail = await sdpRes.text().catch(() => "");
+        throw new Error(`SDP exchange failed (${sdpRes.status}): ${detail}`);
+      }
       if (isStale()) {
         cleanupAttempt();
         return;
       }
 
       const answerSdp = await sdpRes.text();
+      console.info(
+        `[Realtime] SDP answer received (${answerSdp.length} bytes, ` +
+        `starts_with_v=${answerSdp.startsWith("v=")})`
+      );
+
+      if (!answerSdp.startsWith("v=")) {
+        throw new Error(
+          `SDP answer from OpenAI is not valid SDP (starts with: ${answerSdp.slice(0, 40)})`
+        );
+      }
+
       if (isStale()) {
         cleanupAttempt();
         return;
@@ -552,6 +571,7 @@ export function useRealtimeSession() {
         type: "answer",
         sdp: answerSdp,
       });
+      console.info("[Realtime] Remote description set — waiting for data channel to open…");
       if (isStale()) {
         cleanupAttempt();
       }
