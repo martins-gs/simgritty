@@ -85,8 +85,14 @@ function needsReviewRefresh(
   const missingClinicianAudio =
     expectsClinicianAudio(turns, events) &&
     !events.some(isClinicianAudioEvent);
+  const missingTraineeDeliveryAnalysis = turns.some(
+    (turn) =>
+      turn.speaker === "trainee" &&
+      turn.classifier_result !== null &&
+      turn.classifier_result.trainee_delivery_analysis == null
+  );
 
-  return missingSessionSummary || missingClinicianAudio;
+  return missingSessionSummary || missingClinicianAudio || missingTraineeDeliveryAnalysis;
 }
 
 function ScorePlaceholderCard({
