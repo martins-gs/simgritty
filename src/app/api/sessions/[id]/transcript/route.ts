@@ -206,10 +206,12 @@ export async function PATCH(
     patient_prompt_after: body.patient_prompt_after || null,
   };
 
-  const { error } = await supabase
+  const { data: updatedTurn, error } = await supabase
     .from("transcript_turns")
     .update(snapshotUpdate)
-    .eq("id", existingTurn.id);
+    .eq("id", existingTurn.id)
+    .select("turn_index, classifier_result")
+    .maybeSingle();
 
   if (error) {
     if (isSnapshotColumnError(error.message)) {
@@ -218,5 +220,22 @@ export async function PATCH(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ success: true });
+  if (!updatedTurn) {
+    return NextResponse.json(
+      { error: `Transcript turn ${body.turn_index} update returned no row` },
+      { status: 500 }
+    );
+  }
+
+  const storedDeliveryAnalysis = getPersistedDeliveryAnalysis(updatedTurn.classifier_result);
+  console.info(
+    `[Transcript API] stored turn=${updatedTurn.turn_index} trainee_audio_delivery=${storedDeliveryAnalysis ? "present" : "absent"}`
+  );
+
+  return NextResponse.json({
+    success: true,
+    turnIndex: updatedTurn.turn_index,
+    hasTraineeDeliveryAnalysis: !!storedDeliveryAnalysis,
+    markers: storedDeliveryAnalysis?.markers ?? [],
+  });
 }

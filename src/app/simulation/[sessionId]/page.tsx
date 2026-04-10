@@ -686,8 +686,31 @@ export default function SimulationPage() {
           );
           return;
         }
+        const patchAck = await readJsonSafely(
+          patchRes,
+          (raw) => {
+            if (typeof raw !== "object" || raw === null) {
+              return null;
+            }
+            const record = raw as Record<string, unknown>;
+            return {
+              hasTraineeDeliveryAnalysis: record.hasTraineeDeliveryAnalysis === true,
+              markers: Array.isArray(record.markers)
+                ? record.markers.filter((value): value is string => typeof value === "string")
+                : [],
+            };
+          },
+          null,
+          "transcript patch acknowledgement"
+        );
+        if (!patchAck?.hasTraineeDeliveryAnalysis) {
+          console.warn(
+            `[Simulation] Trainee audio analysis patch acknowledged without stored delivery item_id=${itemId} turn_index=${turn.turnIndex}`
+          );
+          return;
+        }
         console.info(
-          `[Simulation] Trainee audio analysis saved item_id=${itemId} turn_index=${turn.turnIndex} markers=${deliveryAnalysis.markers.join(",") || "none"} confidence=${deliveryAnalysis.confidence.toFixed(2)}`
+          `[Simulation] Trainee audio analysis saved item_id=${itemId} turn_index=${turn.turnIndex} markers=${patchAck.markers.join(",") || "none"} confidence=${deliveryAnalysis.confidence.toFixed(2)}`
         );
       } catch (error) {
         console.error("[Simulation] Trainee audio analysis error", error);
