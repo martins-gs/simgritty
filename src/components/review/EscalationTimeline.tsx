@@ -118,13 +118,30 @@ function getSupportDetail(moment: ScoreEvidence) {
 
   const levelValue = moment.evidenceData.escalationLevel;
   const level = typeof levelValue === "number" ? levelValue : null;
-  if (level === null) return describeEvidence(moment);
+  const appropriate = moment.evidenceData.appropriate as boolean | undefined;
 
   if (moment.evidenceType === "support_invoked") {
-    return `Support was sought at level ${level}.`;
+    if (appropriate) {
+      return `Good decision to seek support — the situation (level ${level}) warranted calling for help.`;
+    }
+    return `Support was requested, but the situation (level ${level}) hadn't yet reached the point where it was needed. This can be seen as premature.`;
   }
 
-  return `Support was indicated at level ${level}.`;
+  if (moment.evidenceType === "critical_no_support") {
+    if (moment.evidenceData.crisisReached) {
+      return `The situation reached crisis point (level ${level}) without support being requested. Earlier intervention could have prevented this.`;
+    }
+    if (moment.evidenceData.delayedEscalation) {
+      return `After earlier missed opportunities to seek help, the situation worsened to level ${level}. Requesting support sooner would have helped.`;
+    }
+    return `The situation was critical (level ${level}) and support should have been requested. Continuing alone at this point risks harm.`;
+  }
+
+  if (moment.evidenceType === "support_not_requested") {
+    return `At level ${level}, this was an opportunity to call for support. Continuing without help at this intensity makes de-escalation harder.`;
+  }
+
+  return describeEvidence(moment);
 }
 
 function getTurnCueTime(turn: TranscriptTurn, startTime: number) {
@@ -146,7 +163,7 @@ function TimelineMomentCard({
   const level = sa?.level ?? null;
   const levelColor = level !== null ? getLevelColor(level) : "#64748b";
   const supportDetail = getSupportDetail(moment);
-  const impactLabel = supportDetail ? "Support" : "Impact";
+  const impactLabel = supportDetail ? "Seeking support" : "Impact";
   const impactText = supportDetail ?? describeEvidence(moment);
 
   return (
