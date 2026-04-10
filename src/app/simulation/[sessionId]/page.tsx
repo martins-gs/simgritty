@@ -639,7 +639,6 @@ export default function SimulationPage() {
             audioBase64,
             durationMs: turn.durationMs ?? segment.durationMs ?? null,
           }),
-          keepalive: true,
         }).catch(() => null);
 
         if (!res || !res.ok) {
