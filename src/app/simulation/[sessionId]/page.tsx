@@ -679,7 +679,13 @@ export default function SimulationPage() {
           },
         };
 
-        await updatePersistedTurnSnapshot(turn.turnIndex, nextSnapshot);
+        const patchRes = await updatePersistedTurnSnapshot(turn.turnIndex, nextSnapshot);
+        if (!patchRes?.ok) {
+          console.warn(
+            `[Simulation] Trainee audio analysis patch failed item_id=${itemId} turn_index=${turn.turnIndex} status=${patchRes?.status ?? "network"}`
+          );
+          return;
+        }
         console.info(
           `[Simulation] Trainee audio analysis saved item_id=${itemId} turn_index=${turn.turnIndex} markers=${deliveryAnalysis.markers.join(",") || "none"} confidence=${deliveryAnalysis.confidence.toFixed(2)}`
         );

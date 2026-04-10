@@ -5,6 +5,7 @@ import {
   transcriptTurnCreateRequestBodySchema,
   transcriptTurnPatchRequestBodySchema,
 } from "@/lib/validation/schemas";
+import type { ClassifierResult, TraineeDeliveryAnalysis } from "@/types/simulation";
 
 function isSnapshotColumnError(message: string) {
   return [
@@ -13,6 +14,47 @@ function isSnapshotColumnError(message: string) {
     "patient_voice_profile_after",
     "patient_prompt_after",
   ].some((column) => message.includes(column));
+}
+
+function getPersistedDeliveryAnalysis(
+  classifierResult: unknown
+): TraineeDeliveryAnalysis | null {
+  if (!classifierResult || typeof classifierResult !== "object") {
+    return null;
+  }
+
+  const candidate = (classifierResult as Record<string, unknown>).trainee_delivery_analysis;
+  if (!candidate || typeof candidate !== "object") {
+    return null;
+  }
+
+  return candidate as TraineeDeliveryAnalysis;
+}
+
+function mergeClassifierResult(
+  existing: unknown,
+  incoming: ClassifierResult | null | undefined
+): ClassifierResult | null {
+  if (incoming === undefined) {
+    if (!existing || typeof existing !== "object") {
+      return null;
+    }
+    return existing as ClassifierResult;
+  }
+
+  if (incoming === null) {
+    return null;
+  }
+
+  const existingDeliveryAnalysis = getPersistedDeliveryAnalysis(existing);
+  if (incoming.trainee_delivery_analysis || !existingDeliveryAnalysis) {
+    return incoming;
+  }
+
+  return {
+    ...incoming,
+    trainee_delivery_analysis: existingDeliveryAnalysis,
+  };
 }
 
 export async function GET(
@@ -122,8 +164,38 @@ export async function PATCH(
     );
   }
 
+  const { data: existingTurn, error: existingTurnError } = await supabase
+    .from("transcript_turns")
+    .select("id, classifier_result")
+    .eq("session_id", id)
+    .eq("turn_index", body.turn_index)
+    .maybeSingle();
+
+  if (existingTurnError) {
+    return NextResponse.json({ error: existingTurnError.message }, { status: 500 });
+  }
+
+  if (!existingTurn) {
+    return NextResponse.json(
+      { error: `Transcript turn ${body.turn_index} not found for session ${id}` },
+      { status: 404 }
+    );
+  }
+
+  const mergedClassifierResult = mergeClassifierResult(
+    existingTurn.classifier_result,
+    body.classifier_result
+  );
+
+  const mergedDeliveryAnalysis = getPersistedDeliveryAnalysis(mergedClassifierResult);
+  if (mergedDeliveryAnalysis) {
+    console.info(
+      `[Transcript API] merged turn=${body.turn_index} trainee_audio_delivery markers=${mergedDeliveryAnalysis.markers.join(",") || "none"}`
+    );
+  }
+
   const snapshotUpdate = {
-    classifier_result: body.classifier_result || null,
+    classifier_result: mergedClassifierResult,
     trigger_type: body.trigger_type || null,
     state_after: body.state_after || null,
     patient_voice_profile_after: body.patient_voice_profile_after || null,
@@ -133,8 +205,7 @@ export async function PATCH(
   const { error } = await supabase
     .from("transcript_turns")
     .update(snapshotUpdate)
-    .eq("session_id", id)
-    .eq("turn_index", body.turn_index);
+    .eq("id", existingTurn.id);
 
   if (error) {
     if (isSnapshotColumnError(error.message)) {
