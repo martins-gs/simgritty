@@ -97,6 +97,7 @@ export function useRealtimeSession() {
   // Deduplication
   const lastTraineeTextRef = useRef("");
   const lastTraineeTimeRef = useRef(0);
+  const lastTraineeItemIdRef = useRef("");
   const traineeSpeechBoundariesRef = useRef(new Map<string, {
     audioStartMs: number | null;
     audioEndMs: number | null;
@@ -305,14 +306,20 @@ export function useRealtimeSession() {
         // Drop non-English hallucinations
         if (!isLikelyEnglish(transcript)) break;
 
-        // Deduplicate
+        // Deduplicate retransmissions of the same transcript item, but do not
+        // collapse distinct utterances that happen to have the same words.
         const now = Date.now();
+        if (itemId && itemId === lastTraineeItemIdRef.current) {
+          break;
+        }
         if (
+          !itemId &&
           transcript === lastTraineeTextRef.current &&
           now - lastTraineeTimeRef.current < 3000
         ) {
           break;
         }
+        lastTraineeItemIdRef.current = itemId;
         lastTraineeTextRef.current = transcript;
         lastTraineeTimeRef.current = now;
 
@@ -925,6 +932,7 @@ export function useRealtimeSession() {
     micForcedOffRef.current = false;
     lastTraineeTextRef.current = "";
     lastTraineeTimeRef.current = 0;
+    lastTraineeItemIdRef.current = "";
     traineeSpeechBoundariesRef.current.clear();
     setConnectionStatus("disconnected");
   }, [resetTraineeSegmentRecorder, setConnectionStatus]);
