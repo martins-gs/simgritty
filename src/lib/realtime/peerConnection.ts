@@ -53,3 +53,8 @@ export function summarizeSdpCandidates(sdp: string) {
   const types = [...new Set(candidateLines.map(extractCandidateType))];
   return `candidates=${candidateLines.length} types=${types.join(",")}`;
 }
+
+export function countSdpCandidates(sdp: string | null | undefined) {
+  if (!sdp) return 0;
+  return sdp.split(/\r?\n/).filter((line) => line.startsWith("a=candidate:")).length;
+}

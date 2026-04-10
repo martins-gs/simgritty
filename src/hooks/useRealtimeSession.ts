@@ -2,6 +2,7 @@
 
 import { useRef, useCallback, useEffect } from "react";
 import {
+  countSdpCandidates,
   normalizeIceServers,
   summarizeIceCandidate,
   summarizeSdpCandidates,
@@ -35,6 +36,7 @@ const DEFAULT_TURN_DETECTION = {
 
 /** Max time (ms) to wait for the data channel to open before treating as a failure. */
 const CONNECTION_TIMEOUT_MS = 20_000;
+const LOCAL_ICE_GATHERING_TIMEOUT_MS = 3_000;
 
 function isLikelyEnglish(text: string) {
   return /^[a-zA-Z0-9\s.,!?'";\-:()\/&@#$%+=\[\]{}*_~`<>]+$/.test(text);
@@ -340,6 +342,7 @@ export function useRealtimeSession() {
     let dc: RTCDataChannel | null = null;
     let audioEl: HTMLAudioElement | null = null;
     let stream: MediaStream | null = null;
+    let localIceCandidateCount = 0;
 
     const isStale = () =>
       disconnectedRef.current || connectAttemptRef.current !== attemptId;
@@ -493,6 +496,9 @@ export function useRealtimeSession() {
       };
 
       nextPc.onicecandidate = (event) => {
+        if (event.candidate) {
+          localIceCandidateCount += 1;
+        }
         console.info(`[Realtime] localIceCandidate → ${summarizeIceCandidate(event.candidate)}`);
       };
 
@@ -537,8 +543,35 @@ export function useRealtimeSession() {
         return;
       }
       await nextPc.setLocalDescription(offer);
+      if (countSdpCandidates(nextPc.localDescription?.sdp) === 0 && nextPc.iceGatheringState !== "complete") {
+        console.info(
+          `[Realtime] Waiting up to ${LOCAL_ICE_GATHERING_TIMEOUT_MS}ms for local ICE candidates…`
+        );
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            nextPc.removeEventListener("icecandidate", handleCandidate);
+            nextPc.removeEventListener("icegatheringstatechange", handleGatheringStateChange);
+            clearTimeout(timeout);
+            resolve();
+          };
+          const handleCandidate = (event: RTCPeerConnectionIceEvent) => {
+            if (event.candidate) finish();
+          };
+          const handleGatheringStateChange = () => {
+            if (nextPc.iceGatheringState === "complete") finish();
+          };
+          const timeout = setTimeout(finish, LOCAL_ICE_GATHERING_TIMEOUT_MS);
+          nextPc.addEventListener("icecandidate", handleCandidate);
+          nextPc.addEventListener("icegatheringstatechange", handleGatheringStateChange);
+        });
+      }
+      const localSdp = nextPc.localDescription?.sdp ?? offerSdp;
       console.info(
-        `[Realtime] Local description set (${summarizeSdpCandidates(nextPc.localDescription?.sdp ?? offerSdp)})`
+        `[Realtime] Local description set (${summarizeSdpCandidates(localSdp)}, ` +
+        `emitted_candidates=${localIceCandidateCount})`
       );
       if (isStale()) {
         cleanupAttempt();
@@ -555,7 +588,7 @@ export function useRealtimeSession() {
             Authorization: `Bearer ${ephemeralKey}`,
             "Content-Type": "application/sdp",
           },
-          body: offerSdp,
+          body: localSdp,
         }
       );
 
