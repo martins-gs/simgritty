@@ -152,18 +152,15 @@ function TimelineMomentCard({
   return (
     <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm">
       <div className="mb-2 flex items-start justify-between gap-4">
-        <div>
-          <span className="text-[11px] font-medium text-slate-400">{formatTime(time)}</span>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-              {DIMENSION_LABELS[moment.dimension] ?? moment.dimension} • Turn {moment.turnIndex + 1}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium text-slate-400">
+            {formatTime(time)} • Turn {moment.turnIndex + 1}
+          </span>
+          {showNow && (
+            <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
+              Now
             </span>
-            {showNow && (
-              <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
-                Now
-              </span>
-            )}
-          </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {moment.scoreImpact !== 0 && (
