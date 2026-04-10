@@ -45,7 +45,6 @@ interface KeyMomentEntry {
   moment: ScoreEvidence;
   time: number;
   turn: TranscriptTurn;
-  point: ChartPoint | null;
 }
 
 const CHART_MARGIN = { top: 8, right: 52, bottom: 6, left: 4 };
@@ -139,10 +138,12 @@ function TimelineMomentCard({
   entry: KeyMomentEntry;
   showNow: boolean;
 }) {
-  const { moment, turn, point, time } = entry;
+  const { moment, turn, time } = entry;
+  const cr = turn.classifier_result;
+  const sa = turn.state_after;
   const isPositive = moment.scoreImpact > 0;
   const isNegative = moment.scoreImpact < 0;
-  const level = point?.level ?? null;
+  const level = sa?.level ?? null;
   const levelColor = level !== null ? getLevelColor(level) : "#64748b";
   const supportDetail = getSupportDetail(moment);
   const impactLabel = supportDetail ? "Support" : "Impact";
@@ -207,9 +208,9 @@ function TimelineMomentCard({
       )}
 
       <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
-        {point?.reasoning && (
+        {cr?.reasoning && (
           <p className="text-[12px] leading-relaxed text-slate-600">
-            {point.reasoning}
+            {cr.reasoning}
           </p>
         )}
 
@@ -217,35 +218,35 @@ function TimelineMomentCard({
           <span className="font-medium text-slate-600">{impactLabel}:</span> {impactText}
         </p>
 
-        {(point?.technique || point?.effectiveness != null) && (
+        {(cr?.technique || cr?.effectiveness != null) && (
           <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
-          {point?.technique && (
+          {cr?.technique && (
             <p className="text-[12px] text-slate-700">
-              <span className="font-medium">Technique:</span> {point.technique}
+              <span className="font-medium">Technique:</span> {cr.technique}
             </p>
           )}
-          {point?.effectiveness !== null && (
+          {cr?.effectiveness != null && (
             <p className="mt-1 text-[12px] text-slate-700">
               <span className="font-medium">Effectiveness:</span>{" "}
               <span
                 className="font-bold"
-                style={{ color: getEffectivenessColor(point.effectiveness) }}
+                style={{ color: getEffectivenessColor(cr.effectiveness) }}
               >
-                {point.effectiveness > 0 ? "+" : ""}
-                {point.effectiveness.toFixed(2)}
+                {cr.effectiveness > 0 ? "+" : ""}
+                {cr.effectiveness.toFixed(2)}
               </span>
             </p>
           )}
           </div>
         )}
 
-        {(point?.trust != null || point?.listening != null) && (
+        {(sa?.trust != null || sa?.willingness_to_listen != null) && (
           <div className="flex flex-wrap gap-4 text-[11px]">
-          {point?.trust != null && (
-            <span className="font-medium text-blue-600">Trust: {point.trust}/10</span>
+          {sa?.trust != null && (
+            <span className="font-medium text-blue-600">Trust: {sa.trust}/10</span>
           )}
-          {point?.listening != null && (
-            <span className="font-medium text-violet-600">Listening: {point.listening}/10</span>
+          {sa?.willingness_to_listen != null && (
+            <span className="font-medium text-violet-600">Listening: {sa.willingness_to_listen}/10</span>
           )}
           </div>
         )}
@@ -479,7 +480,6 @@ export function EscalationTimeline({
         moment,
         time,
         turn,
-        point: getChartPointAtTime(data, time),
       };
     })
     .filter((entry): entry is KeyMomentEntry => entry !== null)
