@@ -70,6 +70,7 @@ export interface TranscriptTurn {
   content: string;
   audio_url: string | null;
   classifier_result: ClassifierResult | null;
+  trainee_delivery_analysis: TraineeDeliveryAnalysis | null;
   trigger_type: TurnTriggerType | null;
   state_after: EscalationState | null;
   patient_voice_profile_after: StructuredVoiceProfile | null;

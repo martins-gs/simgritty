@@ -100,7 +100,7 @@ export function TranscriptViewer({
         {turns.map((turn) => {
           const classifier = turn.classifier_result;
           const deliveryAnalysis = turn.speaker === "trainee"
-            ? classifier?.trainee_delivery_analysis ?? null
+            ? turn.trainee_delivery_analysis ?? classifier?.trainee_delivery_analysis ?? null
             : null;
           const stateAfter = turn.state_after;
           const clinicianAudio = turn.speaker === "system"

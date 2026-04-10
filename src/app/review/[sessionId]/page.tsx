@@ -89,6 +89,7 @@ function needsReviewRefresh(
     (turn) =>
       turn.speaker === "trainee" &&
       turn.classifier_result !== null &&
+      turn.trainee_delivery_analysis == null &&
       turn.classifier_result.trainee_delivery_analysis == null
   );
 
@@ -201,7 +202,8 @@ export default function ReviewPage() {
       setLoading(false);
 
       const audioDeliveryTurnIndexes = nextTurns.flatMap((turn) => (
-        turn.speaker === "trainee" && turn.classifier_result?.trainee_delivery_analysis
+        turn.speaker === "trainee" &&
+        (turn.trainee_delivery_analysis || turn.classifier_result?.trainee_delivery_analysis)
           ? [turn.turn_index]
           : []
       ));

@@ -333,6 +333,7 @@ export const transcriptTurnCreateRequestBodySchema = z.object({
   content: z.string(),
   audio_url: z.string().nullable().optional(),
   classifier_result: classifierResultSchema.nullable().optional(),
+  trainee_delivery_analysis: traineeDeliveryAnalysisSchema.nullable().optional(),
   trigger_type: turnTriggerTypeSchema.nullable().optional(),
   state_after: escalationStateSchema.nullable().optional(),
   patient_voice_profile_after: structuredVoiceProfileSchema.nullable().optional(),
@@ -344,6 +345,7 @@ export const transcriptTurnCreateRequestBodySchema = z.object({
 export const transcriptTurnPatchRequestBodySchema = z.object({
   turn_index: z.number().int().nonnegative(),
   classifier_result: classifierResultSchema.nullable().optional(),
+  trainee_delivery_analysis: traineeDeliveryAnalysisSchema.nullable().optional(),
   trigger_type: turnTriggerTypeSchema.nullable().optional(),
   state_after: escalationStateSchema.nullable().optional(),
   patient_voice_profile_after: structuredVoiceProfileSchema.nullable().optional(),
@@ -413,6 +415,7 @@ export const transcriptTurnSchema: z.ZodType<TranscriptTurn> = z.object({
   content: z.string(),
   audio_url: nullableStringSchema,
   classifier_result: classifierResultSchema.nullish().transform((value) => value ?? null).catch(null),
+  trainee_delivery_analysis: traineeDeliveryAnalysisSchema.nullish().transform((value) => value ?? null).catch(null),
   trigger_type: turnTriggerTypeSchema.nullish().transform((value) => value ?? null).catch(null),
   state_after: escalationStateSchema.nullish().transform((value) => value ?? null).catch(null),
   patient_voice_profile_after: structuredVoiceProfileSchema.nullish().transform((value) => value ?? null).catch(null),

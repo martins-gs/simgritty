@@ -2,18 +2,23 @@ import { NextResponse } from "next/server";
 import { createAdminClientIfAvailable, createClient } from "@/lib/supabase/server";
 import { parseRequestJson } from "@/lib/validation/http";
 import {
+  parseTraineeDeliveryAnalysis,
   transcriptTurnCreateRequestBodySchema,
   transcriptTurnPatchRequestBodySchema,
 } from "@/lib/validation/schemas";
 import type { ClassifierResult, TraineeDeliveryAnalysis } from "@/types/simulation";
 
-function isSnapshotColumnError(message: string) {
+function isLegacySnapshotColumnError(message: string) {
   return [
     "trigger_type",
     "state_after",
     "patient_voice_profile_after",
     "patient_prompt_after",
   ].some((column) => message.includes(column));
+}
+
+function isTraineeDeliveryColumnError(message: string) {
+  return message.includes("trainee_delivery_analysis");
 }
 
 function getPersistedDeliveryAnalysis(
@@ -29,6 +34,10 @@ function getPersistedDeliveryAnalysis(
   }
 
   return candidate as TraineeDeliveryAnalysis;
+}
+
+function parseDirectDeliveryAnalysis(value: unknown): TraineeDeliveryAnalysis | null {
+  return parseTraineeDeliveryAnalysis(value);
 }
 
 function mergeClassifierResult(
@@ -57,6 +66,17 @@ function mergeClassifierResult(
   };
 }
 
+function resolveTurnDeliveryAnalysis(
+  topLevelValue: unknown,
+  classifierResult: ClassifierResult | null | undefined
+): TraineeDeliveryAnalysis | null {
+  return (
+    parseDirectDeliveryAnalysis(topLevelValue) ??
+    classifierResult?.trainee_delivery_analysis ??
+    null
+  );
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -78,14 +98,10 @@ export async function GET(
   }
 
   const analysedTurnIndexes = (turns ?? []).flatMap((turn) => {
-    const classifier = turn.classifier_result;
-    if (
-      turn.speaker === "trainee" &&
-      classifier &&
-      typeof classifier === "object" &&
-      "trainee_delivery_analysis" in classifier &&
-      (classifier as Record<string, unknown>).trainee_delivery_analysis
-    ) {
+    const storedDeliveryAnalysis =
+      parseDirectDeliveryAnalysis(turn.trainee_delivery_analysis) ??
+      getPersistedDeliveryAnalysis(turn.classifier_result);
+    if (turn.speaker === "trainee" && storedDeliveryAnalysis) {
       return [turn.turn_index];
     }
     return [];
@@ -116,6 +132,10 @@ export async function POST(
   if (!parsed.success) return parsed.response;
 
   const body = parsed.data;
+  const traineeDeliveryAnalysis = resolveTurnDeliveryAnalysis(
+    body.trainee_delivery_analysis,
+    body.classifier_result ?? null
+  );
 
   const baseInsert = {
     session_id: id,
@@ -124,6 +144,7 @@ export async function POST(
     content: body.content,
     audio_url: body.audio_url || null,
     classifier_result: body.classifier_result || null,
+    trainee_delivery_analysis: traineeDeliveryAnalysis,
     started_at: body.started_at || undefined,
     duration_ms: body.duration_ms || null,
   };
@@ -135,10 +156,29 @@ export async function POST(
     patient_voice_profile_after: body.patient_voice_profile_after || null,
     patient_prompt_after: body.patient_prompt_after || null,
   };
+  const snapshotInsertWithoutDelivery = {
+    session_id: snapshotInsert.session_id,
+    turn_index: snapshotInsert.turn_index,
+    speaker: snapshotInsert.speaker,
+    content: snapshotInsert.content,
+    audio_url: snapshotInsert.audio_url,
+    classifier_result: snapshotInsert.classifier_result,
+    trigger_type: snapshotInsert.trigger_type,
+    state_after: snapshotInsert.state_after,
+    patient_voice_profile_after: snapshotInsert.patient_voice_profile_after,
+    patient_prompt_after: snapshotInsert.patient_prompt_after,
+    started_at: snapshotInsert.started_at,
+    duration_ms: snapshotInsert.duration_ms,
+  };
 
   let { error } = await supabase.from("transcript_turns").insert(snapshotInsert);
 
-  if (error && isSnapshotColumnError(error.message)) {
+  if (error && isTraineeDeliveryColumnError(error.message)) {
+    const retryWithoutDelivery = await supabase.from("transcript_turns").insert(snapshotInsertWithoutDelivery);
+    error = retryWithoutDelivery.error;
+  }
+
+  if (error && isLegacySnapshotColumnError(error.message)) {
     const retry = await supabase.from("transcript_turns").insert(baseInsert);
     error = retry.error;
   }
@@ -165,20 +205,31 @@ export async function PATCH(
 
   const body = parsed.data;
 
-  if (body.classifier_result?.trainee_delivery_analysis) {
+  const requestedTraineeDeliveryAnalysis = resolveTurnDeliveryAnalysis(
+    body.trainee_delivery_analysis,
+    body.classifier_result ?? null
+  );
+
+  if (requestedTraineeDeliveryAnalysis) {
     console.info(
-      `[Transcript API] patch turn=${body.turn_index} trainee_audio_delivery markers=${body.classifier_result.trainee_delivery_analysis.markers.join(",") || "none"}`
+      `[Transcript API] patch turn=${body.turn_index} trainee_audio_delivery markers=${requestedTraineeDeliveryAnalysis.markers.join(",") || "none"}`
     );
   }
 
   const { data: existingTurn, error: existingTurnError } = await supabase
     .from("transcript_turns")
-    .select("id, classifier_result")
+    .select("id, classifier_result, trainee_delivery_analysis")
     .eq("session_id", id)
     .eq("turn_index", body.turn_index)
     .maybeSingle();
 
   if (existingTurnError) {
+    if (isTraineeDeliveryColumnError(existingTurnError.message)) {
+      return NextResponse.json(
+        { error: "Database missing transcript_turns.trainee_delivery_analysis column" },
+        { status: 500 }
+      );
+    }
     return NextResponse.json({ error: existingTurnError.message }, { status: 500 });
   }
 
@@ -194,7 +245,10 @@ export async function PATCH(
     body.classifier_result
   );
 
-  const mergedDeliveryAnalysis = getPersistedDeliveryAnalysis(mergedClassifierResult);
+  const mergedDeliveryAnalysis =
+    requestedTraineeDeliveryAnalysis ??
+    parseDirectDeliveryAnalysis(existingTurn.trainee_delivery_analysis) ??
+    getPersistedDeliveryAnalysis(mergedClassifierResult);
   if (mergedDeliveryAnalysis) {
     console.info(
       `[Transcript API] merged turn=${body.turn_index} trainee_audio_delivery markers=${mergedDeliveryAnalysis.markers.join(",") || "none"}`
@@ -203,6 +257,7 @@ export async function PATCH(
 
   const snapshotUpdate = {
     classifier_result: mergedClassifierResult,
+    trainee_delivery_analysis: mergedDeliveryAnalysis,
     trigger_type: body.trigger_type || null,
     state_after: body.state_after || null,
     patient_voice_profile_after: body.patient_voice_profile_after || null,
@@ -213,12 +268,18 @@ export async function PATCH(
     .from("transcript_turns")
     .update(snapshotUpdate)
     .eq("id", existingTurn.id)
-    .select("turn_index, classifier_result")
+    .select("turn_index, classifier_result, trainee_delivery_analysis")
     .maybeSingle();
 
   if (error) {
-    if (isSnapshotColumnError(error.message)) {
+    if (isLegacySnapshotColumnError(error.message)) {
       return NextResponse.json({ success: true });
+    }
+    if (isTraineeDeliveryColumnError(error.message)) {
+      return NextResponse.json(
+        { error: "Database missing transcript_turns.trainee_delivery_analysis column" },
+        { status: 500 }
+      );
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -227,11 +288,17 @@ export async function PATCH(
   if (!resolvedUpdatedTurn) {
     const followUp = await supabase
       .from("transcript_turns")
-      .select("turn_index, classifier_result")
+      .select("turn_index, classifier_result, trainee_delivery_analysis")
       .eq("id", existingTurn.id)
       .maybeSingle();
 
     if (followUp.error) {
+      if (isTraineeDeliveryColumnError(followUp.error.message)) {
+        return NextResponse.json(
+          { error: "Database missing transcript_turns.trainee_delivery_analysis column" },
+          { status: 500 }
+        );
+      }
       return NextResponse.json({ error: followUp.error.message }, { status: 500 });
     }
 
@@ -245,7 +312,9 @@ export async function PATCH(
     );
   }
 
-  const storedDeliveryAnalysis = getPersistedDeliveryAnalysis(resolvedUpdatedTurn.classifier_result);
+  const storedDeliveryAnalysis =
+    parseDirectDeliveryAnalysis(resolvedUpdatedTurn.trainee_delivery_analysis) ??
+    getPersistedDeliveryAnalysis(resolvedUpdatedTurn.classifier_result);
   console.info(
     `[Transcript API] stored turn=${resolvedUpdatedTurn.turn_index} trainee_audio_delivery=${storedDeliveryAnalysis ? "present" : "absent"}`
   );

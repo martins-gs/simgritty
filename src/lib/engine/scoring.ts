@@ -104,6 +104,10 @@ interface DeliveryScoreDelta {
   markers: TraineeDeliveryMarker[];
 }
 
+function getTurnDeliveryAnalysis(turn: TranscriptTurn): TraineeDeliveryAnalysis | null {
+  return turn.trainee_delivery_analysis ?? turn.classifier_result?.trainee_delivery_analysis ?? null;
+}
+
 function getDeliveryScoreDelta(
   analysis: TraineeDeliveryAnalysis | null | undefined,
   markerScoreDeltas: Record<TraineeDeliveryMarker, number>,
@@ -204,6 +208,7 @@ function computeComposure(
 
   for (const turn of traineeTurns) {
     const cr = turn.classifier_result;
+    const deliveryAnalysis = getTurnDeliveryAnalysis(turn);
     const markers: ComposureMarker[] = cr?.composure_markers ?? [];
     const levelBefore = findLevelBeforeTurn(turn.turn_index, allTurns);
 
@@ -240,7 +245,7 @@ function computeComposure(
     }
 
     const deliveryDelta = getDeliveryScoreDelta(
-      cr?.trainee_delivery_analysis,
+      deliveryAnalysis,
       COMPOSURE_DELIVERY_MARKER_SCORE_DELTAS
     );
     if (!deliveryDelta) continue;
@@ -249,15 +254,15 @@ function computeComposure(
     evidence.push({
       dimension: "composure",
       turnIndex: turn.turn_index,
-      evidenceType: "delivery_marker",
-      evidenceData: {
-        markers: deliveryDelta.markers,
-        confidence: cr?.trainee_delivery_analysis?.confidence ?? null,
-        summary: cr?.trainee_delivery_analysis?.summary ?? null,
-        source: cr?.trainee_delivery_analysis?.source ?? null,
-      },
-      scoreImpact: deliveryDelta.delta,
-    });
+        evidenceType: "delivery_marker",
+        evidenceData: {
+          markers: deliveryDelta.markers,
+          confidence: deliveryAnalysis?.confidence ?? null,
+          summary: deliveryAnalysis?.summary ?? null,
+          source: deliveryAnalysis?.source ?? null,
+        },
+        scoreImpact: deliveryDelta.delta,
+      });
   }
 
   return Math.max(0, Math.min(100, Math.round(100 - totalPenalty + totalDeliveryDelta)));
@@ -292,9 +297,10 @@ function computeDeEscalation(
 
   for (const turn of scoreableTurns) {
     const cr = turn.classifier_result;
+    const deliveryAnalysis = getTurnDeliveryAnalysis(turn);
     const levelBefore = findLevelBeforeTurn(turn.turn_index, allTurns);
     const turnDeliveryDelta = getDeliveryScoreDelta(
-      cr?.trainee_delivery_analysis,
+      deliveryAnalysis,
       DE_ESCALATION_DELIVERY_MARKER_SCORE_DELTAS,
       {
         allowPositive: Boolean(cr?.de_escalation_attempt),
@@ -310,9 +316,9 @@ function computeDeEscalation(
         evidenceType: "delivery_marker",
         evidenceData: {
           markers: turnDeliveryDelta.markers,
-          confidence: cr?.trainee_delivery_analysis?.confidence ?? null,
-          summary: cr?.trainee_delivery_analysis?.summary ?? null,
-          source: cr?.trainee_delivery_analysis?.source ?? null,
+          confidence: deliveryAnalysis?.confidence ?? null,
+          summary: deliveryAnalysis?.summary ?? null,
+          source: deliveryAnalysis?.source ?? null,
           pairedWithAttempt: Boolean(cr?.de_escalation_attempt),
           levelBefore,
         },
