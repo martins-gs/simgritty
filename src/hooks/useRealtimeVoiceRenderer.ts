@@ -3,9 +3,12 @@
 import { useCallback, useEffect, useRef } from "react";
 import {
   countSdpCandidates,
-  normalizeIceServers,
+  mergeIceCandidatesIntoSdp,
+  resolveIceServers,
+  selectBestLocalSdp,
   summarizeIceCandidate,
   summarizeSdpCandidates,
+  type GatheredIceCandidate,
 } from "@/lib/realtime/peerConnection";
 
 interface RealtimeVoiceRendererConfig {
@@ -50,7 +53,7 @@ function teardownRendererResources(
     }
     audioEl.pause();
     audioEl.srcObject = null;
-    audioEl.src = "";
+    audioEl.removeAttribute("src");
     audioEl.load();
     audioEl.remove();
   }
@@ -135,6 +138,7 @@ export function useRealtimeVoiceRenderer() {
     let dc: RTCDataChannel | null = null;
     let audioEl: HTMLAudioElement | null = null;
     let localIceCandidateCount = 0;
+    const emittedLocalIceCandidates: GatheredIceCandidate[] = [];
 
     const isStale = () =>
       disconnectedRef.current || connectAttemptRef.current !== attemptId;
@@ -180,16 +184,14 @@ export function useRealtimeVoiceRenderer() {
         return false;
       }
 
-      const iceServers = normalizeIceServers(sessionData.ice_servers);
-      if (iceServers) {
+      const { iceServers, source: iceServerSource } = resolveIceServers(sessionData.ice_servers);
+      if (iceServerSource === "openai") {
         console.info(`[Clinician Audio] Using OpenAI ICE servers (${iceServers.length})`);
       } else {
-        console.info("[Clinician Audio] No OpenAI ICE servers provided — using browser default ICE config");
+        console.info("[Clinician Audio] No OpenAI ICE servers provided — using STUN fallback");
       }
 
-      const nextPc = iceServers
-        ? new RTCPeerConnection({ iceServers })
-        : new RTCPeerConnection();
+      const nextPc = new RTCPeerConnection({ iceServers });
       pc = nextPc;
       pcRef.current = nextPc;
       nextPc.addTransceiver("audio", { direction: "recvonly" });
@@ -402,6 +404,11 @@ export function useRealtimeVoiceRenderer() {
       nextPc.onicecandidate = (event) => {
         if (event.candidate) {
           localIceCandidateCount += 1;
+          emittedLocalIceCandidates.push({
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+          });
         }
         console.info(`[Clinician Audio] localIceCandidate → ${summarizeIceCandidate(event.candidate)}`);
       };
@@ -466,10 +473,22 @@ export function useRealtimeVoiceRenderer() {
           nextPc.addEventListener("icegatheringstatechange", handleGatheringStateChange);
         });
       }
-      const localSdp = nextPc.localDescription?.sdp ?? offerSdp;
+      const baseLocalSdp = selectBestLocalSdp(
+        offerSdp,
+        nextPc.pendingLocalDescription,
+        nextPc.localDescription,
+      );
+      const localSdp = mergeIceCandidatesIntoSdp(baseLocalSdp, emittedLocalIceCandidates);
+      const sdpSource =
+        countSdpCandidates(baseLocalSdp) > 0
+          ? "localDescription"
+          : countSdpCandidates(localSdp) > 0
+            ? "injectedCandidates"
+            : "offer";
       console.info(
         `[Clinician Audio] Local description set (${summarizeSdpCandidates(localSdp)}, ` +
-        `emitted_candidates=${localIceCandidateCount})`
+        `emitted_candidates=${localIceCandidateCount}, ` +
+        `sdp_source=${sdpSource})`
       );
       if (isStale()) {
         cleanupAttempt();

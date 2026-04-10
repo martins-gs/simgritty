@@ -3,9 +3,12 @@
 import { useRef, useCallback, useEffect } from "react";
 import {
   countSdpCandidates,
-  normalizeIceServers,
+  mergeIceCandidatesIntoSdp,
+  resolveIceServers,
+  selectBestLocalSdp,
   summarizeIceCandidate,
   summarizeSdpCandidates,
+  type GatheredIceCandidate,
 } from "@/lib/realtime/peerConnection";
 import { useSimulationStore } from "@/store/simulationStore";
 
@@ -112,7 +115,7 @@ export function useRealtimeSession() {
       }
       audioEl.pause();
       audioEl.srcObject = null;
-      audioEl.src = "";
+      audioEl.removeAttribute("src");
       audioEl.load();
       audioEl.remove();
     }
@@ -343,6 +346,7 @@ export function useRealtimeSession() {
     let audioEl: HTMLAudioElement | null = null;
     let stream: MediaStream | null = null;
     let localIceCandidateCount = 0;
+    const emittedLocalIceCandidates: GatheredIceCandidate[] = [];
 
     const isStale = () =>
       disconnectedRef.current || connectAttemptRef.current !== attemptId;
@@ -386,16 +390,14 @@ export function useRealtimeSession() {
         return;
       }
 
-      const iceServers = normalizeIceServers(sessionData.ice_servers);
-      if (iceServers) {
+      const { iceServers, source: iceServerSource } = resolveIceServers(sessionData.ice_servers);
+      if (iceServerSource === "openai") {
         console.info(`[Realtime] Using OpenAI ICE servers (${iceServers.length})`);
       } else {
-        console.info("[Realtime] No OpenAI ICE servers provided — using browser default ICE config");
+        console.info("[Realtime] No OpenAI ICE servers provided — using STUN fallback");
       }
 
-      const nextPc = iceServers
-        ? new RTCPeerConnection({ iceServers })
-        : new RTCPeerConnection();
+      const nextPc = new RTCPeerConnection({ iceServers });
       pc = nextPc;
       pcRef.current = nextPc;
 
@@ -498,6 +500,11 @@ export function useRealtimeSession() {
       nextPc.onicecandidate = (event) => {
         if (event.candidate) {
           localIceCandidateCount += 1;
+          emittedLocalIceCandidates.push({
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+          });
         }
         console.info(`[Realtime] localIceCandidate → ${summarizeIceCandidate(event.candidate)}`);
       };
@@ -568,10 +575,22 @@ export function useRealtimeSession() {
           nextPc.addEventListener("icegatheringstatechange", handleGatheringStateChange);
         });
       }
-      const localSdp = nextPc.localDescription?.sdp ?? offerSdp;
+      const baseLocalSdp = selectBestLocalSdp(
+        offerSdp,
+        nextPc.pendingLocalDescription,
+        nextPc.localDescription,
+      );
+      const localSdp = mergeIceCandidatesIntoSdp(baseLocalSdp, emittedLocalIceCandidates);
+      const sdpSource =
+        countSdpCandidates(baseLocalSdp) > 0
+          ? "localDescription"
+          : countSdpCandidates(localSdp) > 0
+            ? "injectedCandidates"
+            : "offer";
       console.info(
         `[Realtime] Local description set (${summarizeSdpCandidates(localSdp)}, ` +
-        `emitted_candidates=${localIceCandidateCount})`
+        `emitted_candidates=${localIceCandidateCount}, ` +
+        `sdp_source=${sdpSource})`
       );
       if (isStale()) {
         cleanupAttempt();
