@@ -221,8 +221,14 @@ function TimelineMomentCard({
       )}
 
       <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
-        <p className="text-[12px] leading-relaxed text-slate-600">
-          <span className="font-medium text-slate-700">{impactLabel}:</span> {impactText}
+        {point?.reasoning && (
+          <p className="text-[12px] leading-relaxed text-slate-600">
+            {point.reasoning}
+          </p>
+        )}
+
+        <p className="text-[12px] leading-relaxed text-slate-500">
+          <span className="font-medium text-slate-600">{impactLabel}:</span> {impactText}
         </p>
 
         {(point?.technique || point?.effectiveness != null) && (
@@ -245,12 +251,6 @@ function TimelineMomentCard({
             </p>
           )}
           </div>
-        )}
-
-        {point?.reasoning && (
-          <p className="text-[12px] italic leading-relaxed text-slate-500">
-            {point.reasoning}
-          </p>
         )}
 
         {(point?.trust != null || point?.listening != null) && (
@@ -865,12 +865,18 @@ export function EscalationTimeline({
 
       {(reserveCardSpace || displayedKeyMomentEntry) && (
         <div className={cn("transition-[min-height] duration-200", reserveCardSpace && "min-h-56")}>
-          {displayedKeyMomentEntry && (
+          {displayedKeyMomentEntry ? (
             <TimelineMomentCard
               entry={displayedKeyMomentEntry}
               showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
             />
-          )}
+          ) : reserveCardSpace ? (
+            <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50">
+              <p className="text-[12px] text-slate-400">
+                Feedback on key moments will appear here automatically during playback
+              </p>
+            </div>
+          ) : null}
         </div>
       )}
 
