@@ -228,9 +228,7 @@ export function EscalationTimeline({
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const overlayIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevOverlayIndexRef = useRef<number | null | undefined>(undefined);
-  const keyMomentEntriesRef = useRef<KeyMomentEntry[]>([]);
   const [chartSize, setChartSize] = useState<{ width: number; height: number } | null>(null);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -370,9 +368,6 @@ export function EscalationTimeline({
     .filter((entry): entry is KeyMomentEntry => entry !== null)
     .sort((a, b) => a.time - b.time || a.index - b.index);
 
-  // Keep ref current so the overlay interval can read the latest value without stale closures
-  keyMomentEntriesRef.current = keyMomentEntries;
-
   const lastTurn = turns[turns.length - 1];
   const lastTurnTime = lastTurn ? getRelativeTime(lastTurn.started_at, startTime) : 0;
   const resolvedPlaybackTime = recordingUrl ? playbackTime : 0;
@@ -402,46 +397,30 @@ export function EscalationTimeline({
     onActiveKeyMomentChange?.(activeKeyMoment?.index ?? null);
   }, [activeKeyMoment?.index, onActiveKeyMomentChange]);
 
-  // Poll audio.currentTime directly so we never miss a key moment due to React
-  // batching or dep-array ordering. Runs every 250 ms while playing.
+  // Show overlay card when the active key moment changes during playback.
+  // Uses the same `activeKeyMoment` that drives sidebar highlighting, so the
+  // overlay stays in sync with what the user sees in the Key Moments panel.
+  const activeKeyMomentIndex = activeKeyMoment?.index ?? null;
+
   useEffect(() => {
     if (!playbackActive) {
-      // Clear the polling interval and reset state for next play session
-      if (overlayIntervalRef.current) {
-        clearInterval(overlayIntervalRef.current);
-        overlayIntervalRef.current = null;
-      }
       prevOverlayIndexRef.current = undefined;
+      setOverlayMomentIndex(null);
+      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
       return;
     }
 
-    overlayIntervalRef.current = setInterval(() => {
-      const audio = audioRef.current;
-      if (!audio) return;
+    if (activeKeyMomentIndex === null || activeKeyMomentIndex === prevOverlayIndexRef.current) return;
+    prevOverlayIndexRef.current = activeKeyMomentIndex;
 
-      const entry = getKeyMomentAtTime(keyMomentEntriesRef.current, audio.currentTime);
-      const newIndex = entry?.index ?? null;
-
-      if (newIndex === null || newIndex === prevOverlayIndexRef.current) return;
-      prevOverlayIndexRef.current = newIndex;
-
-      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
-      setOverlayMomentIndex(newIndex);
-      overlayTimerRef.current = setTimeout(() => setOverlayMomentIndex(null), 15_000);
-    }, 250);
-
-    return () => {
-      if (overlayIntervalRef.current) {
-        clearInterval(overlayIntervalRef.current);
-        overlayIntervalRef.current = null;
-      }
-    };
-  }, [playbackActive]);
+    if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+    setOverlayMomentIndex(activeKeyMomentIndex);
+    overlayTimerRef.current = setTimeout(() => setOverlayMomentIndex(null), 15_000);
+  }, [playbackActive, activeKeyMomentIndex]);
 
   useEffect(() => {
     return () => {
       if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
-      if (overlayIntervalRef.current) clearInterval(overlayIntervalRef.current);
     };
   }, []);
 
