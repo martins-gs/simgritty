@@ -50,7 +50,6 @@ interface KeyMomentEntry {
 
 const CHART_MARGIN = { top: 8, right: 52, bottom: 6, left: 4 };
 const PLAYBACK_CARD_DURATION_MS = 15_000;
-const AI_RESPONSE_BUFFER_S = 3;
 
 function getLevelColor(level: number): string {
   if (level <= 2) return "#10b981";
@@ -129,21 +128,8 @@ function getSupportDetail(moment: ScoreEvidence) {
   return `Support was indicated at level ${level}.`;
 }
 
-function estimateTurnCueTime(turnPosition: number, turns: TranscriptTurn[], startTime: number) {
-  const turn = turns[turnPosition];
-  const turnTime = getRelativeTime(turn.started_at, startTime);
-  const previousTurn = turnPosition > 0 ? turns[turnPosition - 1] : null;
-  if (!previousTurn) return turnTime;
-
-  const previousTurnTime = getRelativeTime(previousTurn.started_at, startTime);
-  if (turn.speaker === "trainee") {
-    return Math.min(turnTime, Math.max(0, previousTurnTime));
-  }
-  if (turn.speaker === "ai" || turn.speaker === "system") {
-    return Math.min(turnTime, Math.max(0, previousTurnTime - AI_RESPONSE_BUFFER_S));
-  }
-
-  return turnTime;
+function getTurnCueTime(turn: TranscriptTurn, startTime: number) {
+  return getRelativeTime(turn.started_at, startTime);
 }
 
 function TimelineMomentCard({
@@ -487,7 +473,7 @@ export function EscalationTimeline({
       if (turnPosition === undefined) return null;
 
       const turn = turns[turnPosition];
-      const time = estimateTurnCueTime(turnPosition, turns, startTime);
+      const time = getTurnCueTime(turn, startTime);
       return {
         index,
         moment,
