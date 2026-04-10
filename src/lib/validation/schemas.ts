@@ -234,6 +234,13 @@ export const patientVoiceProfileRequestBodySchema = z.object({
   latestClinicianVoiceProfile: structuredVoiceProfileSchema.nullable().optional(),
 });
 
+export const traineeVoiceProfileRequestBodySchema = z.object({
+  utterance: z.string().min(1),
+  scenarioContext: z.string().default("NHS communication scenario"),
+  currentEscalation: z.number().min(0).max(10).default(3),
+  recentTurns: z.array(recentTurnSchema).default([]),
+});
+
 const clinicianStateSnapshotSchema = escalationStateSchema
   .pick({
     level: true,

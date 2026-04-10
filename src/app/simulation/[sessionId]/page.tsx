@@ -1240,9 +1240,29 @@ export default function SimulationPage() {
     let prevState: EscalationState | null = null;
 
     try {
+      const scenarioContext = `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`;
+      const currentEscalation = engineRef.current.getLevel();
+
+      // Fetch trainee voice profile first so the classifier can assess tone
+      const traineeVoiceProfile = await fetch("/api/voice-profile/trainee", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ utterance: text, scenarioContext, currentEscalation, recentTurns }),
+      }).then(async (res) => {
+        if (!res.ok) return null;
+        return readJsonSafely<StructuredVoiceProfile | null>(
+          res,
+          (raw) => {
+            if (typeof raw !== "object" || raw === null || !("voiceProfile" in raw)) return null;
+            return parseStructuredVoiceProfile((raw as Record<string, unknown>).voiceProfile);
+          },
+          null,
+          "trainee voice profile"
+        );
+      }).catch(() => null);
+
       const classifyRes = await fetch("/api/classify", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ utterance: text, context: { recentTurns, scenarioContext: `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`, currentEscalation: engineRef.current.getLevel(), milestones: snapshot.scenario_milestones.filter((m) => m.id && !completedMilestonesRef.current.has(m.id)).map((m) => ({ id: m.id!, description: m.description, classifier_hint: m.classifier_hint })) } }),
+        body: JSON.stringify({ utterance: text, context: { recentTurns, scenarioContext, currentEscalation, speakerVoiceProfile: traineeVoiceProfile, milestones: snapshot.scenario_milestones.filter((m) => m.id && !completedMilestonesRef.current.has(m.id)).map((m) => ({ id: m.id!, description: m.description, classifier_hint: m.classifier_hint })) } }),
       });
       if (!classifyRes.ok) {
         console.error("[Escalation] Classify API failed:", classifyRes.status);

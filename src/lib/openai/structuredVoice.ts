@@ -216,6 +216,51 @@ Additional delivery guidance:
   });
 }
 
+interface TraineeVoiceProfileInput {
+  utterance: string;
+  scenarioContext: string;
+  currentEscalation: number;
+  recentTurns: { speaker: string; content: string }[];
+}
+
+export async function generateTraineeVoiceProfile(
+  input: TraineeVoiceProfileInput
+): Promise<StructuredVoiceProfile | null> {
+  const systemPrompt = `You are analysing how a trainee clinician sounds in a live NHS communication training simulation.
+
+Given the trainee's latest utterance and recent conversation context, produce a structured voice profile describing how the trainee likely sounded when delivering this line.
+
+Focus on:
+- tone (e.g. dismissive, sarcastic, empathetic, defensive, calm, anxious)
+- emotional state (e.g. frustrated, composed, flustered, detached)
+- delivery style (e.g. clipped, measured, hesitant, rushed, blunt)
+- pacing (e.g. fast, slow, uneven)
+- voice affect (e.g. flat, warm, tense, aggressive)
+
+Use concrete, specific descriptors. Be honest — if the words sound dismissive or sarcastic in context, say so. If they sound calm and professional, say that.
+Use British English.`;
+
+  const userPrompt = `Scenario: ${input.scenarioContext}
+Current escalation level: ${input.currentEscalation}/10
+
+Recent conversation:
+${formatRecentTurns(input.recentTurns)}
+
+Trainee's latest utterance to profile:
+"${input.utterance}"
+
+Describe how this utterance likely sounded based on the words, the conversational context, and the current emotional dynamics.`;
+
+  return requestStructuredOutput<StructuredVoiceProfile>({
+    systemPrompt,
+    userPrompt,
+    schemaName: "trainee_voice_profile",
+    schema: VOICE_PROFILE_SCHEMA,
+    maxTokens: 300,
+    reasoningEffort: "minimal",
+  });
+}
+
 export async function generateClinicianTurn(
   input: ClinicianTurnInput
 ): Promise<StructuredClinicianTurn | null> {
