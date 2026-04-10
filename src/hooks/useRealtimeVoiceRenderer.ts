@@ -400,6 +400,14 @@ export function useRealtimeVoiceRenderer() {
         console.info(`[Clinician Audio] localIceCandidate → ${summarizeIceCandidate(event.candidate)}`);
       };
 
+      nextPc.onicecandidateerror = (event) => {
+        console.error(
+          `[Clinician Audio] iceCandidateError → address=${event.address || "unknown"} ` +
+          `port=${event.port || "unknown"} url=${event.url || "unknown"} ` +
+          `errorCode=${event.errorCode} errorText=${event.errorText}`
+        );
+      };
+
       // Safety timeout: if the data channel hasn't opened within
       // CONNECTION_TIMEOUT_MS, treat this as a failure.
       if (connectionTimeoutRef.current) {
@@ -423,14 +431,17 @@ export function useRealtimeVoiceRenderer() {
         return false;
       }
       await nextPc.setLocalDescription(offer);
+      console.info(
+        `[Clinician Audio] Local description set (${summarizeSdpCandidates(nextPc.localDescription?.sdp ?? offer.sdp)})`
+      );
       if (isStale()) {
         cleanupAttempt();
         return false;
       }
 
-      console.info(`[Clinician Audio] Sending SDP offer (model=${realtimeModel})…`);
+      console.info(`[Clinician Audio] Sending SDP offer to OpenAI Calls API (model=${realtimeModel})…`);
       const sdpRes = await fetch(
-        `https://api.openai.com/v1/realtime?model=${encodeURIComponent(realtimeModel)}`,
+        "https://api.openai.com/v1/realtime/calls",
         {
           method: "POST",
           headers: {

@@ -183,7 +183,8 @@ export function useRealtimeSession() {
         break;
       }
 
-      case "response.audio_transcript.delta": {
+      case "response.audio_transcript.delta":
+      case "response.output_audio_transcript.delta": {
         const responseId = msg.response_id as string | undefined;
         if (responseId && responseId !== activeResponseIdRef.current) break;
         const delta = msg.delta as string;
@@ -191,7 +192,8 @@ export function useRealtimeSession() {
         break;
       }
 
-      case "response.audio_transcript.done": {
+      case "response.audio_transcript.done":
+      case "response.output_audio_transcript.done": {
         const responseId = msg.response_id as string | undefined;
         if (responseId && responseId !== activeResponseIdRef.current) break;
         activeResponseTranscriptDoneRef.current = true;
@@ -494,6 +496,14 @@ export function useRealtimeSession() {
         console.info(`[Realtime] localIceCandidate → ${summarizeIceCandidate(event.candidate)}`);
       };
 
+      nextPc.onicecandidateerror = (event) => {
+        console.error(
+          `[Realtime] iceCandidateError → address=${event.address || "unknown"} ` +
+          `port=${event.port || "unknown"} url=${event.url || "unknown"} ` +
+          `errorCode=${event.errorCode} errorText=${event.errorText}`
+        );
+      };
+
       // Safety timeout: if the data channel hasn't opened within
       // CONNECTION_TIMEOUT_MS, treat this as a failure.
       if (connectionTimeoutRef.current) {
@@ -523,18 +533,18 @@ export function useRealtimeSession() {
         return;
       }
       await nextPc.setLocalDescription(offer);
+      console.info(
+        `[Realtime] Local description set (${summarizeSdpCandidates(nextPc.localDescription?.sdp ?? offer.sdp)})`
+      );
       if (isStale()) {
         cleanupAttempt();
         return;
       }
 
-      // Send the offer SDP to OpenAI's Realtime WebRTC endpoint.
-      // IMPORTANT: send offer.sdp (without ICE candidates), NOT
-      // pc.localDescription.sdp.  OpenAI's API expects a candidate-free
-      // offer and embeds its own candidates in the answer.
-      console.info(`[Realtime] Sending SDP offer to OpenAI (model=${realtimeModel})…`);
+      // GA Realtime WebRTC now exchanges SDP via /v1/realtime/calls.
+      console.info(`[Realtime] Sending SDP offer to OpenAI Calls API (model=${realtimeModel})…`);
       const sdpRes = await fetch(
-        `https://api.openai.com/v1/realtime?model=${encodeURIComponent(realtimeModel)}`,
+        "https://api.openai.com/v1/realtime/calls",
         {
           method: "POST",
           headers: {
@@ -601,7 +611,10 @@ export function useRealtimeSession() {
   const updateSession = useCallback((instructions: string) => {
     sendEvent({
       type: "session.update",
-      session: { instructions },
+      session: {
+        type: "realtime",
+        instructions,
+      },
     });
   }, [sendEvent]);
 
@@ -609,7 +622,12 @@ export function useRealtimeSession() {
     sendEvent({
       type: "session.update",
       session: {
-        turn_detection: enabled ? { ...DEFAULT_TURN_DETECTION } : null,
+        type: "realtime",
+        audio: {
+          input: {
+            turn_detection: enabled ? { ...DEFAULT_TURN_DETECTION } : null,
+          },
+        },
       },
     });
   }, [sendEvent]);
