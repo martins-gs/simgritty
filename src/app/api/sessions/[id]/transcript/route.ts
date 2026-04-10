@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClientIfAvailable, createClient } from "@/lib/supabase/server";
 import { parseRequestJson } from "@/lib/validation/http";
 import {
   transcriptTurnCreateRequestBodySchema,
@@ -62,9 +62,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const authSupabase = await createClient();
+  const { data: { user } } = await authSupabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const supabase = createAdminClientIfAvailable() ?? authSupabase;
 
   const { data: turns, error } = await supabase
     .from("transcript_turns")
@@ -106,9 +107,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const authSupabase = await createClient();
+  const { data: { user } } = await authSupabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const supabase = createAdminClientIfAvailable() ?? authSupabase;
 
   const parsed = await parseRequestJson(request, transcriptTurnCreateRequestBodySchema);
   if (!parsed.success) return parsed.response;
@@ -153,9 +155,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const authSupabase = await createClient();
+  const { data: { user } } = await authSupabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const supabase = createAdminClientIfAvailable() ?? authSupabase;
 
   const parsed = await parseRequestJson(request, transcriptTurnPatchRequestBodySchema);
   if (!parsed.success) return parsed.response;
@@ -220,21 +223,36 @@ export async function PATCH(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  if (!updatedTurn) {
+  let resolvedUpdatedTurn = updatedTurn;
+  if (!resolvedUpdatedTurn) {
+    const followUp = await supabase
+      .from("transcript_turns")
+      .select("turn_index, classifier_result")
+      .eq("id", existingTurn.id)
+      .maybeSingle();
+
+    if (followUp.error) {
+      return NextResponse.json({ error: followUp.error.message }, { status: 500 });
+    }
+
+    resolvedUpdatedTurn = followUp.data;
+  }
+
+  if (!resolvedUpdatedTurn) {
     return NextResponse.json(
       { error: `Transcript turn ${body.turn_index} update returned no row` },
       { status: 500 }
     );
   }
 
-  const storedDeliveryAnalysis = getPersistedDeliveryAnalysis(updatedTurn.classifier_result);
+  const storedDeliveryAnalysis = getPersistedDeliveryAnalysis(resolvedUpdatedTurn.classifier_result);
   console.info(
-    `[Transcript API] stored turn=${updatedTurn.turn_index} trainee_audio_delivery=${storedDeliveryAnalysis ? "present" : "absent"}`
+    `[Transcript API] stored turn=${resolvedUpdatedTurn.turn_index} trainee_audio_delivery=${storedDeliveryAnalysis ? "present" : "absent"}`
   );
 
   return NextResponse.json({
     success: true,
-    turnIndex: updatedTurn.turn_index,
+    turnIndex: resolvedUpdatedTurn.turn_index,
     hasTraineeDeliveryAnalysis: !!storedDeliveryAnalysis,
     markers: storedDeliveryAnalysis?.markers ?? [],
   });
