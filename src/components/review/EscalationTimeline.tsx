@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   AreaChart,
   Area,
@@ -236,6 +236,9 @@ export function EscalationTimeline({
   const [hoveredTime, setHoveredTime] = useState<number | null>(null);
   const [overlayMomentIndex, setOverlayMomentIndex] = useState<number | null>(null);
   const startTime = new Date(sessionStartedAt).getTime();
+  const syncOverlayMomentIndex = useEffectEvent((index: number | null) => {
+    setOverlayMomentIndex(index);
+  });
 
   useEffect(() => {
     const container = chartContainerRef.current;
@@ -391,7 +394,7 @@ export function EscalationTimeline({
     ? hoveredSecond
     : playbackSecond;
   const markerPoint = getChartPointAtTime(data, markerTime);
-  const activeKeyMoment = getKeyMomentAtTime(keyMomentEntries, hoveredSecond ?? playbackSecond);
+  const activeKeyMoment = getKeyMomentAtTime(keyMomentEntries, markerTime);
 
   useEffect(() => {
     onActiveKeyMomentChange?.(activeKeyMoment?.index ?? null);
@@ -405,7 +408,7 @@ export function EscalationTimeline({
   useEffect(() => {
     if (!playbackActive) {
       prevOverlayIndexRef.current = undefined;
-      setOverlayMomentIndex(null);
+      syncOverlayMomentIndex(null);
       if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
       return;
     }
@@ -414,8 +417,8 @@ export function EscalationTimeline({
     prevOverlayIndexRef.current = activeKeyMomentIndex;
 
     if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
-    setOverlayMomentIndex(activeKeyMomentIndex);
-    overlayTimerRef.current = setTimeout(() => setOverlayMomentIndex(null), 15_000);
+    syncOverlayMomentIndex(activeKeyMomentIndex);
+    overlayTimerRef.current = setTimeout(() => syncOverlayMomentIndex(null), 15_000);
   }, [playbackActive, activeKeyMomentIndex]);
 
   useEffect(() => {
