@@ -168,7 +168,14 @@ export function useRealtimeVoiceRenderer() {
         return false;
       }
 
-      const nextPc = new RTCPeerConnection();
+      // Use ICE servers from OpenAI session response (includes TURN for
+      // reliable NAT traversal).  Fall back to a public STUN server.
+      const iceServers: RTCIceServer[] =
+        Array.isArray(sessionData.ice_servers) && sessionData.ice_servers.length > 0
+          ? sessionData.ice_servers
+          : [{ urls: "stun:stun.l.google.com:19302" }];
+
+      const nextPc = new RTCPeerConnection({ iceServers });
       pc = nextPc;
       pcRef.current = nextPc;
       nextPc.addTransceiver("audio", { direction: "recvonly" });
@@ -402,6 +409,29 @@ export function useRealtimeVoiceRenderer() {
         return false;
       }
 
+      // Wait for ICE gathering so the offer SDP includes all local candidates.
+      if (nextPc.iceGatheringState !== "complete") {
+        await new Promise<void>((resolve) => {
+          const onGatheringChange = () => {
+            if (nextPc.iceGatheringState === "complete") {
+              nextPc.removeEventListener("icegatheringstatechange", onGatheringChange);
+              resolve();
+            }
+          };
+          nextPc.addEventListener("icegatheringstatechange", onGatheringChange);
+          setTimeout(() => {
+            nextPc.removeEventListener("icegatheringstatechange", onGatheringChange);
+            resolve();
+          }, 5_000);
+        });
+        if (isStale()) {
+          cleanupAttempt();
+          return false;
+        }
+      }
+
+      const localSdp = nextPc.localDescription?.sdp ?? offer.sdp;
+
       const sdpRes = await fetch(
         `https://api.openai.com/v1/realtime?model=${encodeURIComponent(realtimeModel)}`,
         {
@@ -410,7 +440,7 @@ export function useRealtimeVoiceRenderer() {
             Authorization: `Bearer ${ephemeralKey}`,
             "Content-Type": "application/sdp",
           },
-          body: offer.sdp,
+          body: localSdp,
         }
       );
 

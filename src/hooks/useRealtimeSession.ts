@@ -367,7 +367,14 @@ export function useRealtimeSession() {
         return;
       }
 
-      const nextPc = new RTCPeerConnection();
+      // Use ICE servers from OpenAI session response (includes TURN for
+      // reliable NAT traversal).  Fall back to a public STUN server.
+      const iceServers: RTCIceServer[] =
+        Array.isArray(sessionData.ice_servers) && sessionData.ice_servers.length > 0
+          ? sessionData.ice_servers
+          : [{ urls: "stun:stun.l.google.com:19302" }];
+
+      const nextPc = new RTCPeerConnection({ iceServers });
       pc = nextPc;
       pcRef.current = nextPc;
 
@@ -490,6 +497,34 @@ export function useRealtimeSession() {
         return;
       }
 
+      // Wait for ICE gathering so the offer SDP includes all local
+      // candidates.  Without this the offer is sent with zero candidates
+      // and the remote peer may be unable to reach us.
+      if (nextPc.iceGatheringState !== "complete") {
+        await new Promise<void>((resolve) => {
+          const onGatheringChange = () => {
+            if (nextPc.iceGatheringState === "complete") {
+              nextPc.removeEventListener("icegatheringstatechange", onGatheringChange);
+              resolve();
+            }
+          };
+          nextPc.addEventListener("icegatheringstatechange", onGatheringChange);
+          // Don't wait forever — 5 s is generous for STUN/TURN gathering.
+          setTimeout(() => {
+            nextPc.removeEventListener("icegatheringstatechange", onGatheringChange);
+            resolve();
+          }, 5_000);
+        });
+        if (isStale()) {
+          cleanupAttempt();
+          return;
+        }
+      }
+
+      // Use the gathered local description (includes ICE candidates),
+      // NOT the original offer which has none.
+      const localSdp = nextPc.localDescription?.sdp ?? offer.sdp;
+
       const sdpRes = await fetch(
         `https://api.openai.com/v1/realtime?model=${encodeURIComponent(realtimeModel)}`,
         {
@@ -498,7 +533,7 @@ export function useRealtimeSession() {
             Authorization: `Bearer ${ephemeralKey}`,
             "Content-Type": "application/sdp",
           },
-          body: offer.sdp,
+          body: localSdp,
         }
       );
 
