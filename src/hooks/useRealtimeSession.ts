@@ -390,6 +390,23 @@ export function useRealtimeSession() {
         return;
       }
 
+      console.info("[Realtime] Requesting microphone…");
+      const nextStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      console.info("[Realtime] Microphone acquired");
+      if (isStale()) {
+        stream = nextStream;
+        cleanupAttempt();
+        return;
+      }
+      stream = nextStream;
+      localStreamRef.current = nextStream;
+
       const { iceServers, source: iceServerSource } = resolveIceServers(sessionData.ice_servers);
       if (iceServerSource === "openai") {
         console.info(`[Realtime] Using OpenAI ICE servers (${iceServers.length})`);
@@ -413,22 +430,6 @@ export function useRealtimeSession() {
         nextAudioEl.srcObject = event.streams[0];
       };
 
-      console.info("[Realtime] Requesting microphone…");
-      const nextStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-      console.info("[Realtime] Microphone acquired");
-      if (isStale()) {
-        stream = nextStream;
-        cleanupAttempt();
-        return;
-      }
-      stream = nextStream;
-      localStreamRef.current = nextStream;
       nextStream.getTracks().forEach((track) => nextPc.addTrack(track, nextStream));
 
       const nextDc = nextPc.createDataChannel("oai-events");
