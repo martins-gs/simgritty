@@ -9,6 +9,7 @@ Built with Next.js 16, OpenAI Realtime API (WebRTC), and Supabase.
 - **Live voice simulation** — speak to an AI counterpart (patient, relative, or staff member) via your laptop or mobile microphone and speakers; the simulated person responds in real time with emotionally adaptive voice, stronger abusive language at high patient state, and authored bias behaviour when configured
 - **Escalation engine** — 10-level state machine tracks trust, anger, frustration, and willingness to listen across every turn
 - **Dual classifier pipeline** — assesses trainee communication technique (effectiveness -1.0 to +1.0) and patient state shifts independently
+- **Trainee audio delivery analysis** — each trainee utterance can be analysed asynchronously from the actual microphone audio for delivery markers such as `warm_empathic`, `flat_detached`, `tense_hurried`, or `defensive_tone`
 - **AI clinician support** — press "Ask AI clinician for help" to hand off temporarily to an expert bot that models best practice, then "Resume conversation" when ready
 - **Session forking** — restart from any turn in a completed session to try a different approach
 - **Performance scoring** — 0-100 score across four dimensions (composure, de-escalation, clinical task maintenance, support seeking) with scenario-defined weights and qualitative labels (Strong / Developing / Needs practice)
@@ -35,6 +36,7 @@ Built with Next.js 16, OpenAI Realtime API (WebRTC), and Supabase.
 │                                API Routes                                    │
 │                                                                              │
 │  /api/realtime/session        /api/classify          /api/voice-profile/patient │
+│  /api/analysis/trainee-delivery                                         │
 │  /api/deescalate              /api/tts               /api/sessions/* /api/scenarios/* │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                         Domain / Orchestration Layer                         │
@@ -46,7 +48,8 @@ Built with Next.js 16, OpenAI Realtime API (WebRTC), and Supabase.
 │ - patient conversation       │ - gpt-5.4-mini classify      │ - auth         │
 │ - clinician voice renderer   │ - gpt-5.4-mini voice profile │ - scenarios    │
 │ - gpt-4o-mini-transcribe     │ - gpt-5.4-mini clinician turn│ - sessions     │
-│                              │ - gpt-4o-mini-tts fallback   │ - transcript   │
+│                              │ - gpt-audio trainee delivery │ - transcript   │
+│                              │ - gpt-4o-mini-tts fallback   │ - events       │
 └──────────────────────────────┴──────────────────────────────┴────────────────┘
 ```
 
@@ -84,8 +87,12 @@ cp .env.local.example .env.local
 | `OPENAI_API_KEY` | Yes | OpenAI API key |
 | `OPENAI_CLASSIFIER_MODEL` | No | Classification model (default: `gpt-5.4-mini`) |
 | `OPENAI_VOICE_PROFILE_MODEL` | No | Voice profile generation model (default: `gpt-5.4-mini`) |
+| `OPENAI_TRAINEE_AUDIO_ANALYSIS_MODEL` | No | Background audio-analysis model for trainee delivery (default: `gpt-audio`) |
+| `OPENAI_TRAINEE_AUDIO_STRUCTURER_MODEL` | No | Text model used to re-structure weak audio-model JSON when needed (default: `gpt-5.4-mini`) |
 | `OPENAI_REALTIME_MODEL` | No | Realtime voice model (default: `gpt-realtime-1.5`) |
 | `OPENAI_REALTIME_DEFAULT_VOICE` | No | Default patient voice (default: `marin`) |
+
+For Vercel deployments, the server-side Supabase variables must be present in **Preview** as well as **Production**. In particular, `SUPABASE_SERVICE_ROLE_KEY` is required for the direct transcript-row persistence path.
 
 ### Running
 
@@ -114,8 +121,8 @@ PROLOG uses Supabase Postgres. Apply migrations from `supabase/migrations/` or c
 | `escalation_rules` | Initial level, ceiling, auto-end threshold, custom triggers |
 | `scenario_milestones` | Optional clinical milestones per scenario (description + classifier hint, max 10) |
 | `simulation_sessions` | Individual runs with scenario snapshot, escalation tracking, fork lineage |
-| `transcript_turns` | Each utterance with classifier result, state snapshot, voice profile |
-| `simulation_state_events` | All state changes: escalation, de-escalation, ceiling, session lifecycle |
+| `transcript_turns` | Each utterance with classifier result, state snapshot, voice profile, and optional trainee audio-delivery analysis |
+| `simulation_state_events` | All state changes: escalation, de-escalation, ceiling, session lifecycle, plus fallback per-turn delivery events when direct transcript persistence is unavailable |
 | `session_scores` | Legacy/optional table for persisted scoring snapshots; current review UI computes scores on demand |
 | `session_score_evidence` | Legacy/optional table for persisted score evidence; current review UI derives evidence from transcript turns and events |
 | `session_reflections` | Trainee self-reflection (tags + free text, separate from performance record) |
@@ -134,9 +141,12 @@ hostility, frustration, impatience, trust, willingness_to_listen, sarcasm, bias_
 
 **`transcript_turns`** stores per-turn snapshots:
 - `classifier_result` (JSONB) — `{technique, effectiveness, tags, confidence, reasoning}` plus scoring fields for trainee turns: `composure_markers`, `de_escalation_attempt`, `de_escalation_technique`, `clinical_milestone_completed`
+- `trainee_delivery_analysis` (JSONB) — optional audio-derived delivery assessment for trainee turns: `{source, confidence, summary, markers[], acousticEvidence[], duration_ms, voiceProfile}`
 - `state_after` (JSONB) — full `EscalationState` after this turn
 - `patient_voice_profile_after` (JSONB) — voice delivery profile for the next patient response
 - `patient_prompt_after` — the regenerated 4-layer system prompt
+
+The trainee audio-delivery payload supports multiple markers per utterance. `confidence` means confidence in the system's audio reading, not how "confident" the trainee sounded.
 
 ## Project Structure
 
@@ -222,6 +232,7 @@ src/
 |--------|-------|---------|
 | POST | `/api/realtime/session` | Create ephemeral OpenAI Realtime token (WebRTC) |
 | POST | `/api/classify` | Classify utterance → effectiveness score (-1.0 to +1.0) |
+| POST | `/api/analysis/trainee-delivery` | Analyse trainee microphone audio into structured delivery markers |
 | POST | `/api/deescalate` | Generate bot clinician turn + voice profile |
 | POST | `/api/voice-profile/patient` | Generate structured patient voice profile |
 | POST | `/api/tts` | Text-to-speech fallback (clinician audio) |
@@ -332,6 +343,12 @@ Each trainee utterance is classified for effectiveness:
 
 The trainee utterance classifier also returns scoring fields: `composure_markers` (defensive language, dismissiveness, hostility mirroring, sarcasm, interruption), `de_escalation_attempt` with technique label, and `clinical_milestone_completed` when milestones are defined.
 
+Separately, the app can analyse the **actual trainee audio** after each utterance and return an audio-derived `trainee_delivery_analysis` object. That payload can carry **multiple** delivery markers per utterance, for example:
+
+- `calm_measured` + `warm_empathic`
+- `defensive_tone` + `tense_hurried`
+- `flat_detached`
+
 ### Level Change Rules
 
 - **Escalation**: effectiveness < -0.15 → +1 to +3 level jump, amplified by volatility, anger reactivity, and impatience
@@ -358,6 +375,8 @@ Post-session performance is scored 0-100 across four dimensions, each scored 0-1
 **Session validity gate**: sessions under 3 trainee turns are not scored. Sessions of 3-6 trainee turns show scores with a "preliminary" caveat.
 
 **Score evidence**: every point earned or lost links to a specific transcript turn and classifier output. The review page shows either a score card or a short-session placeholder at the top, keeps the reflection panel visible near the top of the page, and shows "key moments" (2-3 highest-impact events) plus a technique suggestion when scoring is available.
+
+When trainee audio delivery is available, composure and de-escalation scoring also apply small, confidence-gated adjustments from the audio-derived markers. Low-confidence audio readings are deliberately down-weighted.
 
 ## Prompt Architecture
 
@@ -409,6 +428,20 @@ A **structured voice profile** is regenerated by LLM after each turn to reflect 
 ### Clinician Voice
 
 The bot clinician uses the `cedar` voice via an independent WebRTC connection. Each turn generates a voice profile describing how the clinician should sound (calm, firm, warm, etc.) based on the patient's current state.
+
+### Trainee Audio Delivery
+
+Trainee delivery analysis is intentionally **off the live critical path**. After a trainee utterance finishes, the app captures the trainee-only mic segment, posts it to `/api/analysis/trainee-delivery`, and stores the structured result for review and scoring.
+
+Important current behaviour:
+
+- analysis is attempted **per trainee utterance**, not once per session
+- a single utterance can produce **multiple** markers
+- the result is audio-derived and uses the transcript/context only to interpret the sound correctly
+- `confidence` is the system's confidence in its audio reading, not a personality score for the trainee
+- if direct persistence to `transcript_turns` fails, the result is also written to `simulation_state_events` as a fallback and merged back onto the review transcript
+
+Not every utterance is guaranteed to show audio delivery. Missing entries usually mean either audio capture failed for that turn or the model did not return a usable structured result.
 
 ## WebRTC & Microphone Management
 

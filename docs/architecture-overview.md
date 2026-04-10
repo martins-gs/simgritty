@@ -18,6 +18,7 @@ flowchart LR
   Sim --> Classify["/api/classify\nResponses API + structured output\nmodel: gpt-5.4-mini"]
   Sim --> VoiceProfile["/api/voice-profile/patient\nResponses API + structured output\nmodel: gpt-5.4-mini"]
   Sim --> Deescalate["/api/deescalate\nResponses API + structured output\nmodel: gpt-5.4-mini"]
+  Sim --> TraineeAudio["/api/analysis/trainee-delivery\nbackground audio analysis\nmodel: gpt-audio (+ gpt-5.4-mini structurer fallback)"]
   Sim --> TTS["/api/tts\nAudio Speech API fallback\nmodel: gpt-4o-mini-tts"]
 
   Sim --> Domain["promptBuilder\nescalationEngine\nclassifierPipeline\nstructuredVoice\nclinicianVoiceBuilder"]
@@ -104,7 +105,41 @@ Clinician turn generation returns:
 - a technique label
 - a structured clinician voice profile
 
-## 4. Escalation Engine
+## 4. Trainee Audio Delivery Analysis
+
+Phase 1 trainee audio delivery is implemented as an asynchronous, post-utterance pipeline. It is intended for review and scoring, not for changing the patient's next live reply.
+
+Current flow:
+
+1. `useRealtimeSession` captures trainee-only mic segments from the Realtime speech-boundary events.
+2. The simulation page matches each segment to the corresponding Realtime transcript `itemId`.
+3. `/api/analysis/trainee-delivery` sends the audio clip, transcript, scenario context, escalation level, and recent turns to the audio-analysis pipeline.
+4. The audio model returns a structured `TraineeDeliveryAnalysis` object when it can, or a raw text analysis that is then re-structured through `gpt-5.4-mini`.
+5. The simulation page tries to persist the result directly onto `transcript_turns.trainee_delivery_analysis`.
+6. It also writes a fallback `classification_result` event with `__event_kind: "trainee_audio_delivery"` into `simulation_state_events`.
+7. The review page merges fallback event payloads back onto trainee turns before rendering and scoring.
+
+The payload supports multiple markers per utterance. Allowed markers are:
+
+- `calm_measured`
+- `warm_empathic`
+- `tense_hurried`
+- `flat_detached`
+- `defensive_tone`
+- `sarcastic_tone`
+- `irritated_tone`
+- `hostile_tone`
+- `anxious_unsteady`
+
+`confidence` is confidence in the system's reading of the audio, not a measure of how confident the trainee sounded.
+
+Per-utterance analysis is the intended behaviour, but it is not guaranteed on every turn. Missing analyses can still happen when:
+
+- the browser fails to produce a clean trainee-only segment
+- the audio model returns no usable structured result
+- neither direct transcript persistence nor the fallback event path succeeds
+
+## 5. Escalation Engine
 
 `src/lib/engine/escalationEngine.ts` holds the live state:
 
@@ -129,7 +164,7 @@ Important current behaviour from the code:
 - **Per-turn caps**: escalation can rise by at most +3 and fall by at most −2 in a single turn.
 - **Dynamic discrimination flag**: `discrimination_active` is recalculated as the conversation evolves. High-intensity bias can surface early; milder configured bias stays latent until the patient state is more escalated.
 
-## 5. Bot Clinician Flow
+## 6. Bot Clinician Flow
 
 Bot mode is not just “generate text and play audio”. The current flow is:
 
@@ -179,7 +214,7 @@ Sessions that are not explicitly ended by the trainee (tab close, hard refresh, 
 
 Both paths are no-ops if `endingRef.current` is already true, preventing double-end when the trainee uses the normal End Session button or when max-duration auto-end fires.
 
-## 6. Scoring
+## 7. Scoring
 
 `src/lib/engine/scoring.ts` computes a post-session performance breakdown across four dimensions, each scored 0–100:
 
@@ -190,6 +225,8 @@ Both paths are no-ops if `endingRef.current` is already true, preventing double-
 
 The overall score is a weighted average using scenario-defined weights (or equal defaults). When clinical task is excluded, weights are renormalized across the remaining three dimensions.
 
+When `trainee_delivery_analysis` is present, composure and de-escalation also receive small, confidence-gated adjustments from the audio-derived markers. For example, `warm_empathic` can help slightly, while `defensive_tone`, `flat_detached`, or `tense_hurried` can subtract from the score. Low-confidence audio readings are deliberately damped.
+
 **Qualitative labels**: Strong (80–100), Developing (60–79), Needs practice (0–59).
 
 **Session validity gate**: sessions under 3 trainee turns show no score. Sessions of 3–6 trainee turns display scores with a "preliminary" caveat.
@@ -198,7 +235,7 @@ The overall score is a weighted average using scenario-defined weights (or equal
 
 The current review flow computes score and evidence on demand from transcript turns, events, and scenario snapshot data. `session_scores` and `session_score_evidence` may exist in the schema as legacy or future-use tables, but the current app flow does not write them.
 
-## 7. Scenario Authoring: Traits And Archetypes
+## 8. Scenario Authoring: Traits And Archetypes
 
 `src/lib/engine/traitDials.ts` defines 15 scenario trait dials across three categories:
 
@@ -218,15 +255,15 @@ Each trait has a 0–10 range with human-readable low/high labels and is paired 
 
 Each preset bundles scenario defaults, a full trait profile, voice configuration, and escalation rules.
 
-## 8. Persistence, Review, And Forking
+## 9. Persistence, Review, And Forking
 
 Supabase stores:
 
 - authored scenarios (`scenario_templates`, `scenario_traits`, `scenario_voice_config`, `escalation_rules`, `scenario_milestones`)
 - live and completed sessions (`simulation_sessions` with frozen `scenario_snapshot`, `recording_path`, `recording_started_at`)
 - session audio recordings (Supabase Storage bucket `simulation-audio`, private, one `.webm` file per session)
-- transcript turns (`transcript_turns` with per-turn snapshots: `classifier_result`, `trigger_type`, `state_after`, `patient_voice_profile_after`, `patient_prompt_after`)
-- simulation state events (`simulation_state_events` — event types: `session_started`, `session_ended`, `escalation_change`, `de_escalation_change`, `ceiling_reached`, `trainee_exit`, `classification_result`, `clinician_audio`, `prompt_update`, `error`)
+- transcript turns (`transcript_turns` with per-turn snapshots: `classifier_result`, `trainee_delivery_analysis`, `trigger_type`, `state_after`, `patient_voice_profile_after`, `patient_prompt_after`)
+- simulation state events (`simulation_state_events` — event types: `session_started`, `session_ended`, `escalation_change`, `de_escalation_change`, `ceiling_reached`, `trainee_exit`, `classification_result`, `clinician_audio`, `prompt_update`, `error`; trainee audio delivery fallback events are stored as `classification_result` with `__event_kind: "trainee_audio_delivery"`)
 - optional legacy scoring tables (`session_scores`, `session_score_evidence`) that are not used by the current review flow
 - trainee reflections (`session_reflections`)
 - educator notes
@@ -235,7 +272,7 @@ The session APIs persist transcript turns and state events during the live run, 
 
 ### Review Page
 
-The review page (`src/app/review/[sessionId]/page.tsx`) loads session, transcript, events, and educator notes in parallel. It includes a retry mechanism (up to 8 attempts at 750 ms intervals) that re-fetches if the session data appears incomplete — specifically if `exit_type`, `peak_escalation_level`, or `ended_at` are missing, or if clinician turns are present but no `clinician_audio` events have arrived yet. This handles the race between the simulation page's final persistence flush and the review page load.
+The review page (`src/app/review/[sessionId]/page.tsx`) loads session, transcript, events, and educator notes in parallel. It includes a retry mechanism (up to 8 attempts at 750 ms intervals) that re-fetches if the session data appears incomplete — specifically if `exit_type`, `peak_escalation_level`, or `ended_at` are missing, if clinician turns are present but no `clinician_audio` events have arrived yet, or if trainee turns exist but audio-delivery results have not arrived yet. This handles the race between the simulation page's final persistence flush and the review page load.
 
 Valid `exit_type` values: `normal`, `instant_exit` (early exit button or abandoned session), `educator_ended`, `timeout`, `auto_ceiling` (escalation ceiling reached), `max_duration` (org session duration limit reached).
 
@@ -257,6 +294,8 @@ The review page displays:
 - **Summary cards**: turns, events, peak level, exit type, and a **Supervisor intervention** card that summarises AI clinician usage and whether audio telemetry was captured.
 - **Section switcher**: Transcript, Event Log, and Educator Notes are shown one panel at a time using a segmented control rather than the previous tabs primitive.
 - **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data and kept near the top of the review page even for short sessions. If saved reflection data cannot be loaded, the component stays visible and shows an inline error state rather than disappearing.
+- **Audio delivery badges**: trainee turns can show a separate `Audio delivery` row with 0-3 markers and an assessment-confidence label. The confidence label refers to confidence in the audio reading itself, not the trainee's self-confidence.
+- **Fallback merge**: if `trainee_delivery_analysis` is missing on the transcript row but present in fallback events, the review page merges the fallback payload onto the turn before rendering and scoring.
 
 ### Live Simulation Copy
 
@@ -268,7 +307,7 @@ The simulation page intentionally exposes trainee-facing copy rather than engine
 - while bot mode is active, status text explains that the AI clinician is speaking on the trainee's behalf or that the patient/relative is responding to the AI clinician
 - the live classifier summary is hidden from the trainee; technique labels and effectiveness remain part of scoring/review, not the in-session UI
 
-The `TranscriptViewer` displays per-turn audio delivery badges, and the `EventLog` renders clinician audio events with path, timing, and error details. When a session has a recording, each trainee and patient turn shows a play button that seeks to the correct offset in the full session recording and plays the audio for that utterance.
+The `TranscriptViewer` displays per-turn audio delivery badges, including multiple markers when present, and the `EventLog` renders clinician audio events with path, timing, and error details. When a session has a recording, each trainee and patient turn shows a play button that seeks to the correct offset in the full session recording and plays the audio for that utterance.
 
 ### Session Audio Recording And Playback
 
@@ -281,7 +320,7 @@ On the review page, `GET /api/sessions/:id/audio` returns a time-limited signed 
 
 Forking is session-based rather than template-based: a new session can be created from an earlier session and turn index, reusing the frozen scenario snapshot and the saved turn/state history. Fork metadata tracks `parent_session_id`, `forked_from_session_id`, `forked_from_turn_index`, `fork_label`, and `branch_depth`.
 
-## 9. Access Control
+## 10. Access Control
 
 ### Authentication
 
@@ -316,7 +355,7 @@ Read access to sessions, transcripts, events, educator notes, audio, and scenari
 
 `user_profiles` stores `display_name` and `email` (added via migration, backfilled from `auth.users`, and kept in sync by the `handle_new_user` trigger). The dashboard displays the user's name as a greeting, session lists show the trainee's full identity as "Display Name (email)", and the scenario edit page shows the creator's name. A lightweight profile API (`GET /api/profile`) returns the current user's profile for client-side identity checks.
 
-## 10. Dashboard
+## 11. Dashboard
 
 The dashboard (`src/app/dashboard/page.tsx`) currently has a welcome header plus two main content sections:
 
