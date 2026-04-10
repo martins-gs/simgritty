@@ -426,13 +426,17 @@ export function useRealtimeVoiceRenderer() {
       }, CONNECTION_TIMEOUT_MS);
 
       const offer = await nextPc.createOffer();
+      const offerSdp = offer.sdp;
+      if (!offerSdp) {
+        throw new Error("Clinician WebRTC offer did not contain SDP");
+      }
       if (isStale()) {
         cleanupAttempt();
         return false;
       }
       await nextPc.setLocalDescription(offer);
       console.info(
-        `[Clinician Audio] Local description set (${summarizeSdpCandidates(nextPc.localDescription?.sdp ?? offer.sdp)})`
+        `[Clinician Audio] Local description set (${summarizeSdpCandidates(nextPc.localDescription?.sdp ?? offerSdp)})`
       );
       if (isStale()) {
         cleanupAttempt();
@@ -448,7 +452,7 @@ export function useRealtimeVoiceRenderer() {
             Authorization: `Bearer ${ephemeralKey}`,
             "Content-Type": "application/sdp",
           },
-          body: offer.sdp,
+          body: offerSdp,
         }
       );
 

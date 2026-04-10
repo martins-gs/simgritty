@@ -528,13 +528,17 @@ export function useRealtimeSession() {
       }, CONNECTION_TIMEOUT_MS);
 
       const offer = await nextPc.createOffer();
+      const offerSdp = offer.sdp;
+      if (!offerSdp) {
+        throw new Error("WebRTC offer did not contain SDP");
+      }
       if (isStale()) {
         cleanupAttempt();
         return;
       }
       await nextPc.setLocalDescription(offer);
       console.info(
-        `[Realtime] Local description set (${summarizeSdpCandidates(nextPc.localDescription?.sdp ?? offer.sdp)})`
+        `[Realtime] Local description set (${summarizeSdpCandidates(nextPc.localDescription?.sdp ?? offerSdp)})`
       );
       if (isStale()) {
         cleanupAttempt();
@@ -551,7 +555,7 @@ export function useRealtimeSession() {
             Authorization: `Bearer ${ephemeralKey}`,
             "Content-Type": "application/sdp",
           },
-          body: offer.sdp,
+          body: offerSdp,
         }
       );
 
