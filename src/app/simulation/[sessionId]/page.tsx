@@ -37,6 +37,7 @@ import type {
   SimulationSession,
   SimulationStateEvent,
   Speaker,
+  TraineeDeliveryAnalysis,
   TranscriptTurn,
   TurnTriggerType,
 } from "@/types/simulation";
@@ -86,6 +87,7 @@ interface BotTurnRequestOptions {
 
 interface PersistedTurnSnapshot {
   classifierResult: ClassifierResult | null;
+  traineeDeliveryAnalysis: TraineeDeliveryAnalysis | null;
   triggerType: TurnTriggerType | null;
   stateAfter: EscalationState;
   patientVoiceProfileAfter: StructuredVoiceProfile | null;
@@ -531,6 +533,7 @@ export default function SimulationPage() {
             speaker,
             content,
             classifier_result: snapshot.classifierResult,
+            trainee_delivery_analysis: snapshot.traineeDeliveryAnalysis,
             trigger_type: snapshot.triggerType,
             state_after: snapshot.stateAfter,
             patient_voice_profile_after: snapshot.patientVoiceProfileAfter,
@@ -558,6 +561,7 @@ export default function SimulationPage() {
           body: JSON.stringify({
             turn_index: turnIndex,
             classifier_result: snapshot.classifierResult,
+            trainee_delivery_analysis: snapshot.traineeDeliveryAnalysis,
             trigger_type: snapshot.triggerType,
             state_after: snapshot.stateAfter,
             patient_voice_profile_after: snapshot.patientVoiceProfileAfter,
@@ -576,6 +580,10 @@ export default function SimulationPage() {
 
     return {
       classifierResult: overrides.classifierResult ?? null,
+      traineeDeliveryAnalysis:
+        overrides.traineeDeliveryAnalysis
+        ?? overrides.classifierResult?.trainee_delivery_analysis
+        ?? null,
       triggerType: overrides.triggerType ?? null,
       stateAfter: currentState,
       patientVoiceProfileAfter:
@@ -589,6 +597,7 @@ export default function SimulationPage() {
 
     return {
       classifierResult: turn.classifier_result,
+      traineeDeliveryAnalysis: turn.trainee_delivery_analysis,
       triggerType: turn.trigger_type,
       stateAfter: turn.state_after,
       patientVoiceProfileAfter: turn.patient_voice_profile_after,
@@ -673,6 +682,7 @@ export default function SimulationPage() {
 
         const nextSnapshot: PersistedTurnSnapshot = {
           ...turn.snapshot,
+          traineeDeliveryAnalysis: deliveryAnalysis,
           classifierResult: {
             ...turn.classifierResult,
             trainee_delivery_analysis: deliveryAnalysis,
