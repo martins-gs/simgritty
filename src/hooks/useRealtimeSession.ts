@@ -1,6 +1,11 @@
 "use client";
 
 import { useRef, useCallback, useEffect } from "react";
+import {
+  normalizeIceServers,
+  summarizeIceCandidate,
+  summarizeSdpCandidates,
+} from "@/lib/realtime/peerConnection";
 import { useSimulationStore } from "@/store/simulationStore";
 
 interface RealtimeSessionConfig {
@@ -29,7 +34,7 @@ const DEFAULT_TURN_DETECTION = {
 };
 
 /** Max time (ms) to wait for the data channel to open before treating as a failure. */
-const CONNECTION_TIMEOUT_MS = 15_000;
+const CONNECTION_TIMEOUT_MS = 20_000;
 
 function isLikelyEnglish(text: string) {
   return /^[a-zA-Z0-9\s.,!?'";\-:()\/&@#$%+=\[\]{}*_~`<>]+$/.test(text);
@@ -376,22 +381,16 @@ export function useRealtimeSession() {
         return;
       }
 
-      // Use ICE servers from OpenAI session response if provided.
-      // Fall back to a public STUN server so the ICE agent can discover
-      // server-reflexive candidates for NAT traversal.
-      const rawIceServers: RTCIceServer[] | undefined =
-        Array.isArray(sessionData.ice_servers) && sessionData.ice_servers.length > 0
-          ? sessionData.ice_servers.map((s: Record<string, unknown>) => ({
-              urls: s.urls ?? s.url,
-              ...(s.username ? { username: s.username as string } : {}),
-              ...(s.credential ? { credential: s.credential as string } : {}),
-            }))
-          : undefined;
-      const iceServers: RTCIceServer[] = rawIceServers ?? [
-        { urls: "stun:stun.l.google.com:19302" },
-      ];
+      const iceServers = normalizeIceServers(sessionData.ice_servers);
+      if (iceServers) {
+        console.info(`[Realtime] Using OpenAI ICE servers (${iceServers.length})`);
+      } else {
+        console.info("[Realtime] No OpenAI ICE servers provided — using browser default ICE config");
+      }
 
-      const nextPc = new RTCPeerConnection({ iceServers, bundlePolicy: "max-bundle" });
+      const nextPc = iceServers
+        ? new RTCPeerConnection({ iceServers })
+        : new RTCPeerConnection();
       pc = nextPc;
       pcRef.current = nextPc;
 
@@ -491,6 +490,10 @@ export function useRealtimeSession() {
         console.info(`[Realtime] iceGatheringState → ${nextPc.iceGatheringState}`);
       };
 
+      nextPc.onicecandidate = (event) => {
+        console.info(`[Realtime] localIceCandidate → ${summarizeIceCandidate(event.candidate)}`);
+      };
+
       // Safety timeout: if the data channel hasn't opened within
       // CONNECTION_TIMEOUT_MS, treat this as a failure.
       if (connectionTimeoutRef.current) {
@@ -554,7 +557,8 @@ export function useRealtimeSession() {
       const answerSdp = await sdpRes.text();
       console.info(
         `[Realtime] SDP answer received (${answerSdp.length} bytes, ` +
-        `starts_with_v=${answerSdp.startsWith("v=")})`
+        `starts_with_v=${answerSdp.startsWith("v=")}, ` +
+        `${summarizeSdpCandidates(answerSdp)})`
       );
 
       if (!answerSdp.startsWith("v=")) {

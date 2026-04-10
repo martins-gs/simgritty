@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import {
+  normalizeIceServers,
+  summarizeIceCandidate,
+  summarizeSdpCandidates,
+} from "@/lib/realtime/peerConnection";
 
 interface RealtimeVoiceRendererConfig {
   voice: string;
@@ -16,7 +21,7 @@ interface SpeakOptions {
 type RealtimeSpeakResult = "completed" | "partial" | "failed";
 
 /** Max time (ms) to wait for the data channel to open before treating as a failure. */
-const CONNECTION_TIMEOUT_MS = 15_000;
+const CONNECTION_TIMEOUT_MS = 20_000;
 
 const MIN_SPEECH_TIMEOUT_MS = 15000;
 const MAX_SPEECH_TIMEOUT_MS = 30000;
@@ -172,19 +177,16 @@ export function useRealtimeVoiceRenderer() {
         return false;
       }
 
-      const rawIceServers: RTCIceServer[] | undefined =
-        Array.isArray(sessionData.ice_servers) && sessionData.ice_servers.length > 0
-          ? sessionData.ice_servers.map((s: Record<string, unknown>) => ({
-              urls: s.urls ?? s.url,
-              ...(s.username ? { username: s.username as string } : {}),
-              ...(s.credential ? { credential: s.credential as string } : {}),
-            }))
-          : undefined;
-      const iceServers: RTCIceServer[] = rawIceServers ?? [
-        { urls: "stun:stun.l.google.com:19302" },
-      ];
+      const iceServers = normalizeIceServers(sessionData.ice_servers);
+      if (iceServers) {
+        console.info(`[Clinician Audio] Using OpenAI ICE servers (${iceServers.length})`);
+      } else {
+        console.info("[Clinician Audio] No OpenAI ICE servers provided — using browser default ICE config");
+      }
 
-      const nextPc = new RTCPeerConnection({ iceServers, bundlePolicy: "max-bundle" });
+      const nextPc = iceServers
+        ? new RTCPeerConnection({ iceServers })
+        : new RTCPeerConnection();
       pc = nextPc;
       pcRef.current = nextPc;
       nextPc.addTransceiver("audio", { direction: "recvonly" });
@@ -394,6 +396,10 @@ export function useRealtimeVoiceRenderer() {
         console.info(`[Clinician Audio] iceConnectionState → ${nextPc.iceConnectionState}`);
       };
 
+      nextPc.onicecandidate = (event) => {
+        console.info(`[Clinician Audio] localIceCandidate → ${summarizeIceCandidate(event.candidate)}`);
+      };
+
       // Safety timeout: if the data channel hasn't opened within
       // CONNECTION_TIMEOUT_MS, treat this as a failure.
       if (connectionTimeoutRef.current) {
@@ -447,7 +453,8 @@ export function useRealtimeVoiceRenderer() {
       const answerSdp = await sdpRes.text();
       console.info(
         `[Clinician Audio] SDP answer received (${answerSdp.length} bytes, ` +
-        `starts_with_v=${answerSdp.startsWith("v=")})`
+        `starts_with_v=${answerSdp.startsWith("v=")}, ` +
+        `${summarizeSdpCandidates(answerSdp)})`
       );
       if (!answerSdp.startsWith("v=")) {
         throw new Error(
