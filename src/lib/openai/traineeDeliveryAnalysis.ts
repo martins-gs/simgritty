@@ -1,8 +1,11 @@
+import { zodTextFormat } from "openai/helpers/zod";
 import { traineeDeliveryAnalysisSchema } from "@/lib/validation/schemas";
 import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
 import type { TraineeDeliveryAnalysis } from "@/types/simulation";
 
 const AUDIO_ANALYSIS_MODEL = process.env.OPENAI_TRAINEE_AUDIO_ANALYSIS_MODEL || "gpt-audio";
+const AUDIO_ANALYSIS_STRUCTURER_MODEL =
+  process.env.OPENAI_TRAINEE_AUDIO_STRUCTURER_MODEL || "gpt-5.4-mini";
 
 interface TraineeDeliveryAnalysisInput {
   utterance: string;
@@ -47,6 +50,102 @@ function extractAssistantText(content: unknown): string {
     .trim();
 }
 
+function extractLikelyJSONObject(raw: string): string {
+  const trimmed = raw.trim();
+  const withoutCodeFences = trimmed
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  if (withoutCodeFences.startsWith("{") && withoutCodeFences.endsWith("}")) {
+    return withoutCodeFences;
+  }
+
+  const firstBrace = withoutCodeFences.indexOf("{");
+  const lastBrace = withoutCodeFences.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return withoutCodeFences.slice(firstBrace, lastBrace + 1);
+  }
+
+  return withoutCodeFences;
+}
+
+function normalizeVoiceProfile(profile: unknown): Record<string, unknown> | null {
+  if (typeof profile !== "object" || profile === null) {
+    return null;
+  }
+
+  const record = profile as Record<string, unknown>;
+  return {
+    accent: record.accent ?? "",
+    voiceAffect: record.voiceAffect ?? record.voice_affect ?? "",
+    tone: record.tone ?? "",
+    pacing: record.pacing ?? "",
+    emotion: record.emotion ?? "",
+    delivery: record.delivery ?? "",
+    variety: record.variety ?? "",
+  };
+}
+
+function normalizeAnalysisCandidate(candidate: unknown): unknown {
+  if (typeof candidate !== "object" || candidate === null) {
+    return candidate;
+  }
+
+  const record = candidate as Record<string, unknown>;
+  const markers = Array.isArray(record.markers)
+    ? record.markers
+    : typeof record.markers === "string"
+      ? record.markers.split(",").map((marker) => marker.trim()).filter(Boolean)
+      : [];
+
+  const acousticEvidence = Array.isArray(record.acousticEvidence)
+    ? record.acousticEvidence
+    : Array.isArray(record.acoustic_evidence)
+      ? record.acoustic_evidence
+      : typeof record.acousticEvidence === "string"
+        ? [record.acousticEvidence]
+        : typeof record.acoustic_evidence === "string"
+          ? [record.acoustic_evidence]
+          : [];
+
+  const normalized = {
+    source: "audio",
+    confidence:
+      typeof record.confidence === "number"
+        ? record.confidence
+        : Number(record.confidence ?? 0),
+    summary:
+      typeof record.summary === "string"
+        ? record.summary
+        : typeof record.overall_summary === "string"
+          ? record.overall_summary
+          : "",
+    markers,
+    acousticEvidence,
+    duration_ms:
+      typeof record.duration_ms === "number" || record.duration_ms === null
+        ? record.duration_ms
+        : typeof record.durationMs === "number" || record.durationMs === null
+          ? record.durationMs
+          : null,
+    voiceProfile: normalizeVoiceProfile(record.voiceProfile ?? record.voice_profile),
+  };
+
+  return normalized;
+}
+
+function tryParseStructuredAnalysis(raw: string): TraineeDeliveryAnalysis | null {
+  try {
+    const parsedJson = JSON.parse(extractLikelyJSONObject(raw));
+    const normalized = normalizeAnalysisCandidate(parsedJson);
+    const parsed = traineeDeliveryAnalysisSchema.safeParse(normalized);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 async function requestAnalysis(
   input: TraineeDeliveryAnalysisInput,
   responseFormat?: { type: "json_object" }
@@ -74,6 +173,7 @@ Use the ACTUAL AUDIO as the primary evidence. Use the transcript and conversatio
 Your job is to decide how the trainee truly sounded, not how the words might sound on paper.
 Be careful with sarcasm, irritation, clipped delivery, tension, defensiveness, warmth, and vocal steadiness.
 If the audio quality is weak or the evidence is ambiguous, reduce confidence and say so.
+Return valid JSON only. Do not wrap the JSON in markdown fences.
 
 Return one JSON object with:
 - source: always "audio"
@@ -133,6 +233,55 @@ Assess how this line actually sounded in the audio.`,
   return extractAssistantText(completion.choices[0]?.message?.content);
 }
 
+async function structureAnalysisText(
+  rawAnalysis: string,
+  input: TraineeDeliveryAnalysisInput
+): Promise<TraineeDeliveryAnalysis | null> {
+  const client = getOpenAIClient();
+  if (!client) {
+    return null;
+  }
+
+  try {
+    const response = await client.responses.parse({
+      model: AUDIO_ANALYSIS_STRUCTURER_MODEL,
+      instructions: `You convert a free-form audio-analysis result into a strict schema.
+
+Do not invent evidence that is not present in the supplied analysis.
+Preserve the fact that the source is audio-derived.
+If the audio analysis is vague or uncertain, keep confidence low.
+Return only the schema.`,
+      input: `Scenario: ${input.scenarioContext}
+Current escalation level: ${input.currentEscalation}/10
+Clip duration: ${input.durationMs ?? "unknown"} ms
+
+Recent conversation:
+${formatRecentTurns(input.recentTurns)}
+
+Transcript of the trainee utterance:
+"${input.utterance}"
+
+Raw audio-model analysis:
+${rawAnalysis}`,
+      store: false,
+      reasoning: { effort: "minimal" },
+      max_output_tokens: 500,
+      text: {
+        format: zodTextFormat(traineeDeliveryAnalysisSchema, "trainee_delivery_analysis"),
+        verbosity: "low",
+      },
+    });
+
+    return (response.output_parsed as TraineeDeliveryAnalysis | null) ?? null;
+  } catch (error) {
+    console.error("Trainee delivery structuring error:", error);
+    if (shouldFailLoudOnOpenAIError()) {
+      throw error;
+    }
+    return null;
+  }
+}
+
 export async function analyzeTraineeDeliveryFromAudio(
   input: TraineeDeliveryAnalysisInput
 ): Promise<TraineeDeliveryAnalysis | null> {
@@ -145,12 +294,22 @@ export async function analyzeTraineeDeliveryFromAudio(
       throw new Error("No audio analysis output returned");
     }
 
-    const parsed = traineeDeliveryAnalysisSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success) {
-      throw new Error(parsed.error.message);
+    const direct = tryParseStructuredAnalysis(raw);
+    if (direct) {
+      return direct;
     }
 
-    return parsed.data;
+    console.warn(
+      "Trainee delivery analysis parse fallback triggered:",
+      raw.slice(0, 600)
+    );
+
+    const structured = await structureAnalysisText(raw, input);
+    if (structured) {
+      return structured;
+    }
+
+    throw new Error("Unable to derive structured trainee audio analysis");
   } catch (error) {
     console.error("Trainee delivery analysis error:", error);
     if (shouldFailLoudOnOpenAIError()) {
