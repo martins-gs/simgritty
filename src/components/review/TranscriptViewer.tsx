@@ -257,6 +257,14 @@ export function TranscriptViewer({
             </div>
           );
         })}
+        {turns.length > 0 && (
+          <p className="mt-4 text-[11px] leading-relaxed text-slate-400 px-1">
+            Transcriptions are not always accurate. AI, like people, often
+            doesn&rsquo;t interpret the exact words you said, but still
+            understands the general gist of what you are saying and the tone in
+            which you say it.
+          </p>
+        )}
       </div>
     </ScrollArea>
   );
