@@ -572,6 +572,29 @@ export default function SimulationPage() {
     );
   }
 
+  function updatePersistedTurnDeliveryAnalysis(
+    turnIndex: number,
+    classifierResult: ClassifierResult | null,
+    traineeDeliveryAnalysis: TraineeDeliveryAnalysis
+  ) {
+    return trackPersistence(
+      persistRequest(
+        `transcript audio patch ${turnIndex}`,
+        `/api/sessions/${sessionId}/transcript`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          keepalive: true,
+          body: JSON.stringify({
+            turn_index: turnIndex,
+            classifier_result: classifierResult,
+            trainee_delivery_analysis: traineeDeliveryAnalysis,
+          }),
+        }
+      )
+    );
+  }
+
   function buildSnapshot(
     overrides: Partial<PersistedTurnSnapshot> = {}
   ): PersistedTurnSnapshot | null {
@@ -689,7 +712,11 @@ export default function SimulationPage() {
           },
         };
 
-        const patchRes = await updatePersistedTurnSnapshot(turn.turnIndex, nextSnapshot);
+        const patchRes = await updatePersistedTurnDeliveryAnalysis(
+          turn.turnIndex,
+          nextSnapshot.classifierResult,
+          deliveryAnalysis
+        );
         if (!patchRes?.ok) {
           console.warn(
             `[Simulation] Trainee audio analysis patch failed item_id=${itemId} turn_index=${turn.turnIndex} status=${patchRes?.status ?? "network"}`

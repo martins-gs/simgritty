@@ -77,6 +77,19 @@ function resolveTurnDeliveryAnalysis(
   );
 }
 
+async function updateTranscriptTurnById(
+  supabase: Awaited<ReturnType<typeof createClient>> | NonNullable<ReturnType<typeof createAdminClientIfAvailable>>,
+  turnId: string,
+  update: Record<string, unknown>
+) {
+  return supabase
+    .from("transcript_turns")
+    .update(update)
+    .eq("id", turnId)
+    .select("turn_index, classifier_result, trainee_delivery_analysis")
+    .maybeSingle();
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -264,17 +277,30 @@ export async function PATCH(
     patient_prompt_after: body.patient_prompt_after || null,
   };
 
-  const { data: updatedTurn, error } = await supabase
-    .from("transcript_turns")
-    .update(snapshotUpdate)
-    .eq("id", existingTurn.id)
-    .select("turn_index, classifier_result, trainee_delivery_analysis")
-    .maybeSingle();
+  const minimalUpdate = {
+    classifier_result: mergedClassifierResult,
+    trainee_delivery_analysis: mergedDeliveryAnalysis,
+  };
+
+  let { data: updatedTurn, error } = await updateTranscriptTurnById(
+    supabase,
+    existingTurn.id,
+    snapshotUpdate
+  );
+
+  if (error && isLegacySnapshotColumnError(error.message)) {
+    console.warn(
+      `[Transcript API] patch turn=${body.turn_index} retrying without legacy snapshot columns: ${error.message}`
+    );
+
+    ({ data: updatedTurn, error } = await updateTranscriptTurnById(
+      supabase,
+      existingTurn.id,
+      minimalUpdate
+    ));
+  }
 
   if (error) {
-    if (isLegacySnapshotColumnError(error.message)) {
-      return NextResponse.json({ success: true });
-    }
     if (isTraineeDeliveryColumnError(error.message)) {
       return NextResponse.json(
         { error: "Database missing transcript_turns.trainee_delivery_analysis column" },
