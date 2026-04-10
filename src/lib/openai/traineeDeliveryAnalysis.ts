@@ -147,8 +147,7 @@ function tryParseStructuredAnalysis(raw: string): TraineeDeliveryAnalysis | null
 }
 
 async function requestAnalysis(
-  input: TraineeDeliveryAnalysisInput,
-  responseFormat?: { type: "json_object" }
+  input: TraineeDeliveryAnalysisInput
 ): Promise<string> {
   const client = getOpenAIClient();
   if (!client) {
@@ -162,7 +161,6 @@ async function requestAnalysis(
   const completion = await client.chat.completions.create({
     model: AUDIO_ANALYSIS_MODEL,
     modalities: ["text"],
-    response_format: responseFormat,
     messages: [
       {
         role: "developer",
@@ -264,7 +262,7 @@ Transcript of the trainee utterance:
 Raw audio-model analysis:
 ${rawAnalysis}`,
       store: false,
-      reasoning: { effort: "minimal" },
+      reasoning: { effort: "low" },
       max_output_tokens: 500,
       text: {
         format: zodTextFormat(traineeDeliveryAnalysisSchema, "trainee_delivery_analysis"),
@@ -286,9 +284,7 @@ export async function analyzeTraineeDeliveryFromAudio(
   input: TraineeDeliveryAnalysisInput
 ): Promise<TraineeDeliveryAnalysis | null> {
   try {
-    const raw =
-      await requestAnalysis(input, { type: "json_object" })
-      || await requestAnalysis(input);
+    const raw = await requestAnalysis(input);
 
     if (!raw) {
       throw new Error("No audio analysis output returned");
