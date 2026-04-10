@@ -190,14 +190,8 @@ function TimelineMomentCard({
         </div>
       </div>
 
-      {level !== null && (
-        <p className="mb-1 text-[12px] font-semibold text-slate-800">
-          Patient/relative state: {ESCALATION_LABELS[level] ?? `Level ${level}`}
-        </p>
-      )}
-
       {turn.content && (
-        <div className="mt-2">
+        <div className="mt-1">
           <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
             Trainee said
           </p>
@@ -205,6 +199,12 @@ function TimelineMomentCard({
             &ldquo;{turn.content}&rdquo;
           </p>
         </div>
+      )}
+
+      {level !== null && (
+        <p className="mt-2 text-[12px] font-semibold text-slate-800">
+          Patient/relative state: {ESCALATION_LABELS[level] ?? `Level ${level}`}
+        </p>
       )}
 
       <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
