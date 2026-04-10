@@ -255,14 +255,23 @@ export default function ReviewPage() {
       setNotes(nextNotes);
       setLoading(false);
 
+      const directAudioDeliveryTurnIndexes = nextTurns.flatMap((turn) => (
+        turn.speaker === "trainee" &&
+        (turn.trainee_delivery_analysis || turn.classifier_result?.trainee_delivery_analysis)
+          ? [turn.turn_index]
+          : []
+      ));
       const audioDeliveryTurnIndexes = mergedTurns.flatMap((turn) => (
         turn.speaker === "trainee" &&
         (turn.trainee_delivery_analysis || turn.classifier_result?.trainee_delivery_analysis)
           ? [turn.turn_index]
           : []
       ));
+      const fallbackAudioDeliveryTurnIndexes = audioDeliveryTurnIndexes.filter(
+        (turnIndex) => !directAudioDeliveryTurnIndexes.includes(turnIndex)
+      );
       console.info(
-        `[Review] loaded trainee audio delivery turns=${audioDeliveryTurnIndexes.join(",") || "none"}`
+        `[Review] loaded trainee audio delivery turns=${audioDeliveryTurnIndexes.join(",") || "none"} direct=${directAudioDeliveryTurnIndexes.join(",") || "none"} fallback=${fallbackAudioDeliveryTurnIndexes.join(",") || "none"}`
       );
 
       // Fetch audio recording URL if available (non-blocking, once only)

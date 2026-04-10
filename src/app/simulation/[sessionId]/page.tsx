@@ -488,8 +488,8 @@ export default function SimulationPage() {
     return res;
   }
 
-  function persistSessionEvent(event: SessionEventInput) {
-    void trackPersistence(
+  function persistSessionEventRequest(event: SessionEventInput) {
+    return trackPersistence(
       persistRequest(
         `event ${event.event_type}`,
         `/api/sessions/${sessionId}/events`,
@@ -510,6 +510,10 @@ export default function SimulationPage() {
         }
       )
     );
+  }
+
+  function persistSessionEvent(event: SessionEventInput) {
+    void persistSessionEventRequest(event);
   }
 
   function persistTranscriptTurn(
@@ -702,6 +706,9 @@ export default function SimulationPage() {
           );
           return;
         }
+        console.info(
+          `[Simulation] Trainee audio analysis received item_id=${itemId} turn_index=${turn.turnIndex} markers=${deliveryAnalysis.markers.join(",") || "none"} confidence=${deliveryAnalysis.confidence.toFixed(2)}`
+        );
 
         const nextSnapshot: PersistedTurnSnapshot = {
           ...turn.snapshot,
@@ -713,7 +720,7 @@ export default function SimulationPage() {
         };
 
         const audioAnalysisEventIndex = eventIndexRef.current++;
-        persistSessionEvent({
+        const eventRes = await persistSessionEventRequest({
           event_index: audioAnalysisEventIndex,
           event_type: "classification_result",
           payload: {
@@ -724,6 +731,15 @@ export default function SimulationPage() {
             delivery_analysis: deliveryAnalysis,
           },
         });
+        if (!eventRes?.ok) {
+          console.warn(
+            `[Simulation] Trainee audio analysis event fallback failed item_id=${itemId} turn_index=${turn.turnIndex} status=${eventRes?.status ?? "network"}`
+          );
+        } else {
+          console.info(
+            `[Simulation] Trainee audio analysis event fallback saved item_id=${itemId} turn_index=${turn.turnIndex}`
+          );
+        }
 
         const patchRes = await updatePersistedTurnDeliveryAnalysis(
           turn.turnIndex,
@@ -760,7 +776,7 @@ export default function SimulationPage() {
           return;
         }
         console.info(
-          `[Simulation] Trainee audio analysis saved item_id=${itemId} turn_index=${turn.turnIndex} markers=${patchAck.markers.join(",") || "none"} confidence=${deliveryAnalysis.confidence.toFixed(2)}`
+          `[Simulation] Trainee audio analysis transcript save confirmed item_id=${itemId} turn_index=${turn.turnIndex} markers=${patchAck.markers.join(",") || "none"} confidence=${deliveryAnalysis.confidence.toFixed(2)}`
         );
       } catch (error) {
         console.error("[Simulation] Trainee audio analysis error", error);
