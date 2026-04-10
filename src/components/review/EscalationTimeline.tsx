@@ -115,6 +115,20 @@ function formatTime(secs: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function getSupportDetail(moment: ScoreEvidence) {
+  if (moment.dimension !== "support_seeking") return null;
+
+  const levelValue = moment.evidenceData.escalationLevel;
+  const level = typeof levelValue === "number" ? levelValue : null;
+  if (level === null) return describeEvidence(moment);
+
+  if (moment.evidenceType === "support_invoked") {
+    return `Support was sought at level ${level}.`;
+  }
+
+  return `Support was indicated at level ${level}.`;
+}
+
 function estimateTurnCueTime(turnPosition: number, turns: TranscriptTurn[], startTime: number) {
   const turn = turns[turnPosition];
   const turnTime = getRelativeTime(turn.started_at, startTime);
@@ -144,9 +158,12 @@ function TimelineMomentCard({
   const isNegative = moment.scoreImpact < 0;
   const level = point?.level ?? null;
   const levelColor = level !== null ? getLevelColor(level) : "#64748b";
+  const supportDetail = getSupportDetail(moment);
+  const impactLabel = supportDetail ? "Support" : "Impact";
+  const impactText = supportDetail ?? describeEvidence(moment);
 
   return (
-    <div className="w-full rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm">
+    <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm">
       <div className="mb-2 flex items-start justify-between gap-4">
         <div>
           <span className="text-[11px] font-medium text-slate-400">{formatTime(time)}</span>
@@ -188,22 +205,28 @@ function TimelineMomentCard({
 
       {level !== null && (
         <p className="mb-1 text-[12px] font-semibold text-slate-800">
-          {ESCALATION_LABELS[level] ?? `Level ${level}`}
+          Patient/relative state: {ESCALATION_LABELS[level] ?? `Level ${level}`}
         </p>
       )}
 
       {turn.content && (
-        <p className="text-[12px] italic leading-relaxed text-slate-700">
-          &ldquo;{turn.content}&rdquo;
-        </p>
+        <div className="mt-2">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+            Trainee said
+          </p>
+          <p className="mt-1 text-[12px] italic leading-relaxed text-slate-700">
+            &ldquo;{turn.content}&rdquo;
+          </p>
+        </div>
       )}
 
-      <p className="mt-2 text-[12px] leading-relaxed text-slate-600">
-        {describeEvidence(moment)}
-      </p>
+      <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
+        <p className="text-[12px] leading-relaxed text-slate-600">
+          <span className="font-medium text-slate-700">{impactLabel}:</span> {impactText}
+        </p>
 
-      {(point?.technique || point?.effectiveness != null) && (
-        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
+        {(point?.technique || point?.effectiveness != null) && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
           {point?.technique && (
             <p className="text-[12px] text-slate-700">
               <span className="font-medium">Technique:</span> {point.technique}
@@ -221,25 +244,26 @@ function TimelineMomentCard({
               </span>
             </p>
           )}
-        </div>
-      )}
+          </div>
+        )}
 
-      {point?.reasoning && (
-        <p className="mt-2 text-[12px] italic leading-relaxed text-slate-500">
-          {point.reasoning}
-        </p>
-      )}
+        {point?.reasoning && (
+          <p className="text-[12px] italic leading-relaxed text-slate-500">
+            {point.reasoning}
+          </p>
+        )}
 
-      {(point?.trust != null || point?.listening != null) && (
-        <div className="mt-2 flex flex-wrap gap-4 border-t border-slate-100 pt-2 text-[11px]">
+        {(point?.trust != null || point?.listening != null) && (
+          <div className="flex flex-wrap gap-4 text-[11px]">
           {point?.trust != null && (
             <span className="font-medium text-blue-600">Trust: {point.trust}/10</span>
           )}
           {point?.listening != null && (
             <span className="font-medium text-violet-600">Listening: {point.listening}/10</span>
           )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -508,6 +532,7 @@ export function EscalationTimeline({
   const displayedKeyMomentEntry = displayedKeyMomentIndex !== null
     ? keyMomentEntryByIndex.get(displayedKeyMomentIndex) ?? null
     : null;
+  const reserveCardSpace = playbackActive || playbackOverlayMomentIndex !== null;
 
   useEffect(() => {
     onActiveKeyMomentChange?.(displayedKeyMomentIndex);
@@ -838,11 +863,15 @@ export function EscalationTimeline({
 
       </div>
 
-      {displayedKeyMomentEntry && (
-        <TimelineMomentCard
-          entry={displayedKeyMomentEntry}
-          showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
-        />
+      {(reserveCardSpace || displayedKeyMomentEntry) && (
+        <div className={cn("transition-[min-height] duration-200", reserveCardSpace && "min-h-56")}>
+          {displayedKeyMomentEntry && (
+            <TimelineMomentCard
+              entry={displayedKeyMomentEntry}
+              showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
+            />
+          )}
+        </div>
       )}
 
       <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500">

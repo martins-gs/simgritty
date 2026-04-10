@@ -312,7 +312,7 @@ export default function ReviewPage() {
 
   const preliminary = isSessionPreliminary(score.turnCount);
   const keyMoments = pickKeyMoments(score.evidence);
-  const timelineKeyMoments = pickKeyMoments(score.evidence, 6);
+  const timelineKeyMoments = pickKeyMoments(score.evidence, 8);
   const suggestion = getNextTimeTrySuggestion(score);
 
   const selectedTurn = turns.find((turn) => turn.id === selectedTurnId) ?? null;
