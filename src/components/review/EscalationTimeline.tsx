@@ -146,30 +146,35 @@ function TimelineMomentCard({
   const levelColor = level !== null ? getLevelColor(level) : "#64748b";
 
   return (
-    <div className="w-[26rem] max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-2xl ring-1 ring-black/5 backdrop-blur-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-slate-400">
-            Key moment
-          </span>
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-[10px] font-semibold",
-              isPositive && "bg-emerald-50 text-emerald-700",
-              isNegative && "bg-red-50 text-red-700",
-              !isPositive && !isNegative && "bg-slate-100 text-slate-600"
+    <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm">
+      <div className="mb-2 flex items-start justify-between gap-4">
+        <div>
+          <span className="text-[11px] font-medium text-slate-400">{formatTime(time)}</span>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              {DIMENSION_LABELS[moment.dimension] ?? moment.dimension} • Turn {moment.turnIndex + 1}
+            </span>
+            {showNow && (
+              <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
+                Now
+              </span>
             )}
-          >
-            {DIMENSION_LABELS[moment.dimension] ?? moment.dimension}
-          </span>
-          {showNow && (
-            <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
-              Now
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {moment.scoreImpact !== 0 && (
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums",
+                isPositive && "bg-emerald-50 text-emerald-700",
+                isNegative && "bg-red-50 text-red-700",
+                !isPositive && !isNegative && "bg-slate-100 text-slate-600"
+              )}
+            >
+              {isPositive ? "+" : ""}
+              {Math.round(moment.scoreImpact)}
             </span>
           )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-medium text-slate-400">{formatTime(time)}</span>
           {level !== null && (
             <span
               className="rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white"
@@ -182,40 +187,23 @@ function TimelineMomentCard({
       </div>
 
       {level !== null && (
-        <p className="mt-2 text-[13px] font-semibold text-slate-800">
+        <p className="mb-1 text-[12px] font-semibold text-slate-800">
           {ESCALATION_LABELS[level] ?? `Level ${level}`}
         </p>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="text-[12px] font-medium text-slate-600">Turn {moment.turnIndex + 1}</span>
-        {moment.scoreImpact !== 0 && (
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums",
-              isPositive && "bg-emerald-50 text-emerald-700",
-              isNegative && "bg-red-50 text-red-700",
-              !isPositive && !isNegative && "bg-slate-100 text-slate-600"
-            )}
-          >
-            {isPositive ? "+" : ""}
-            {Math.round(moment.scoreImpact)}
-          </span>
-        )}
-      </div>
-
       {turn.content && (
-        <p className="mt-3 text-[13px] italic leading-relaxed text-slate-700">
+        <p className="text-[12px] italic leading-relaxed text-slate-700">
           &ldquo;{turn.content}&rdquo;
         </p>
       )}
 
-      <p className="mt-3 text-[13px] leading-relaxed text-slate-600">
+      <p className="mt-2 text-[12px] leading-relaxed text-slate-600">
         {describeEvidence(moment)}
       </p>
 
       {(point?.technique || point?.effectiveness != null) && (
-        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2">
+        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
           {point?.technique && (
             <p className="text-[12px] text-slate-700">
               <span className="font-medium">Technique:</span> {point.technique}
@@ -237,13 +225,13 @@ function TimelineMomentCard({
       )}
 
       {point?.reasoning && (
-        <p className="mt-3 text-[12px] italic leading-relaxed text-slate-500">
+        <p className="mt-2 text-[12px] italic leading-relaxed text-slate-500">
           {point.reasoning}
         </p>
       )}
 
       {(point?.trust != null || point?.listening != null) && (
-        <div className="mt-3 flex flex-wrap gap-4 border-t border-slate-100 pt-3 text-[11px]">
+        <div className="mt-2 flex flex-wrap gap-4 border-t border-slate-100 pt-2 text-[11px]">
           {point?.trust != null && (
             <span className="font-medium text-blue-600">Trust: {point.trust}/10</span>
           )}
@@ -306,6 +294,7 @@ export function EscalationTimeline({
   const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousPlaybackSecondRef = useRef<number | null>(null);
   const previousTriggeredMomentIndexRef = useRef<number | null | undefined>(undefined);
+  const keyMomentEntriesRef = useRef<KeyMomentEntry[]>([]);
   const [chartSize, setChartSize] = useState<{ width: number; height: number } | null>(null);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
@@ -315,6 +304,33 @@ export function EscalationTimeline({
   const startTime = new Date(sessionStartedAt).getTime();
   const syncPlaybackOverlayMomentIndex = useEffectEvent((index: number | null) => {
     setPlaybackOverlayMomentIndex(index);
+  });
+  const syncPlaybackMomentFromTime = useEffectEvent((currentTime: number) => {
+    const currentSecond = snapToSecond(currentTime);
+    if (
+      currentSecond !== null &&
+      previousPlaybackSecondRef.current !== null &&
+      currentSecond < previousPlaybackSecondRef.current
+    ) {
+      previousTriggeredMomentIndexRef.current = undefined;
+      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+      syncPlaybackOverlayMomentIndex(null);
+    }
+    previousPlaybackSecondRef.current = currentSecond;
+
+    const activeEntry = getKeyMomentAtTime(keyMomentEntriesRef.current, currentSecond);
+    const nextIndex = activeEntry?.index ?? null;
+
+    if (nextIndex === null || nextIndex === previousTriggeredMomentIndexRef.current) {
+      return;
+    }
+
+    previousTriggeredMomentIndexRef.current = nextIndex;
+    if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+    syncPlaybackOverlayMomentIndex(nextIndex);
+    overlayTimerRef.current = setTimeout(() => {
+      syncPlaybackOverlayMomentIndex(null);
+    }, PLAYBACK_CARD_DURATION_MS);
   });
 
   useEffect(() => {
@@ -353,7 +369,9 @@ export function EscalationTimeline({
     audioRef.current = audio;
 
     const syncTime = () => {
-      setPlaybackTime(audio.currentTime || 0);
+      const currentTime = audio.currentTime || 0;
+      setPlaybackTime(currentTime);
+      syncPlaybackMomentFromTime(currentTime);
     };
 
     const syncMetadata = () => {
@@ -362,7 +380,10 @@ export function EscalationTimeline({
       }
     };
 
-    const handlePlay = () => setIsPlaying(true);
+    const handlePlay = () => {
+      setIsPlaying(true);
+      syncPlaybackMomentFromTime(audio.currentTime || 0);
+    };
     const handlePause = () => setIsPlaying(false);
     const handleEnded = () => {
       syncTime();
@@ -455,6 +476,10 @@ export function EscalationTimeline({
     .sort((a, b) => a.time - b.time || a.index - b.index);
   const keyMomentEntryByIndex = new Map(keyMomentEntries.map((entry) => [entry.index, entry]));
 
+  useEffect(() => {
+    keyMomentEntriesRef.current = keyMomentEntries;
+  }, [keyMomentEntries]);
+
   const lastTurn = turns[turns.length - 1];
   const lastTurnTime = lastTurn ? getRelativeTime(lastTurn.started_at, startTime) : 0;
   const resolvedPlaybackTime = recordingUrl ? playbackTime : 0;
@@ -478,7 +503,6 @@ export function EscalationTimeline({
     ? hoveredSecond
     : playbackSecond;
   const markerPoint = getChartPointAtTime(data, markerTime);
-  const playbackKeyMomentIndex = getKeyMomentAtTime(keyMomentEntries, playbackSecond)?.index ?? null;
   const hoveredKeyMomentIndex = getKeyMomentAtTime(keyMomentEntries, hoveredSecond)?.index ?? null;
   const displayedKeyMomentIndex = hoveredKeyMomentIndex ?? playbackOverlayMomentIndex;
   const displayedKeyMomentEntry = displayedKeyMomentIndex !== null
@@ -491,38 +515,12 @@ export function EscalationTimeline({
 
   useEffect(() => {
     if (!playbackActive) {
-      previousTriggeredMomentIndexRef.current = undefined;
-      previousPlaybackSecondRef.current = playbackSecond;
-      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
-      syncPlaybackOverlayMomentIndex(null);
-      return;
-    }
-
-    if (
-      playbackSecond !== null &&
-      previousPlaybackSecondRef.current !== null &&
-      playbackSecond < previousPlaybackSecondRef.current
-    ) {
+      previousPlaybackSecondRef.current = null;
       previousTriggeredMomentIndexRef.current = undefined;
       if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
       syncPlaybackOverlayMomentIndex(null);
     }
-    previousPlaybackSecondRef.current = playbackSecond;
-
-    if (
-      playbackKeyMomentIndex === null ||
-      playbackKeyMomentIndex === previousTriggeredMomentIndexRef.current
-    ) {
-      return;
-    }
-    previousTriggeredMomentIndexRef.current = playbackKeyMomentIndex;
-
-    if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
-    syncPlaybackOverlayMomentIndex(playbackKeyMomentIndex);
-    overlayTimerRef.current = setTimeout(() => {
-      syncPlaybackOverlayMomentIndex(null);
-    }, PLAYBACK_CARD_DURATION_MS);
-  }, [playbackActive, playbackKeyMomentIndex, playbackSecond]);
+  }, [playbackActive]);
 
   useEffect(() => {
     return () => {
@@ -839,7 +837,7 @@ export function EscalationTimeline({
         )}
 
         {displayedKeyMomentEntry && (
-          <div className="pointer-events-none absolute bottom-3 left-4 z-10 max-w-[calc(100%-2rem)] overflow-hidden">
+          <div className="pointer-events-none absolute bottom-3 left-4 right-4 z-10 flex justify-start">
             <TimelineMomentCard
               entry={displayedKeyMomentEntry}
               showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
