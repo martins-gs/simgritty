@@ -617,9 +617,6 @@ export function EscalationTimeline({
             {playbackActive ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             {playbackActive ? "Pause" : "Play"}
           </Button>
-          <div className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] text-slate-500">
-            1s playhead
-          </div>
         </div>
       </div>
 
