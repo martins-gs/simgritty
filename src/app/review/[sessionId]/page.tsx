@@ -173,10 +173,10 @@ export default function ReviewPage() {
 
     async function load() {
       const [sessionRes, turnsRes, eventsRes, notesRes] = await Promise.all([
-        fetch(`/api/sessions/${sessionId}`).catch(() => null),
-        fetch(`/api/sessions/${sessionId}/transcript`).catch(() => null),
-        fetch(`/api/sessions/${sessionId}/events`).catch(() => null),
-        fetch(`/api/sessions/${sessionId}/educator-notes`).catch(() => null),
+        fetch(`/api/sessions/${sessionId}`, { cache: "no-store" }).catch(() => null),
+        fetch(`/api/sessions/${sessionId}/transcript`, { cache: "no-store" }).catch(() => null),
+        fetch(`/api/sessions/${sessionId}/events`, { cache: "no-store" }).catch(() => null),
+        fetch(`/api/sessions/${sessionId}/educator-notes`, { cache: "no-store" }).catch(() => null),
       ]);
       if (cancelled) return;
 
@@ -199,6 +199,15 @@ export default function ReviewPage() {
       setEvents(nextEvents);
       setNotes(nextNotes);
       setLoading(false);
+
+      const audioDeliveryTurnIndexes = nextTurns.flatMap((turn) => (
+        turn.speaker === "trainee" && turn.classifier_result?.trainee_delivery_analysis
+          ? [turn.turn_index]
+          : []
+      ));
+      console.info(
+        `[Review] loaded trainee audio delivery turns=${audioDeliveryTurnIndexes.join(",") || "none"}`
+      );
 
       // Fetch audio recording URL if available (non-blocking, once only)
       if (nextSession?.recording_path && !audioFetchedRef.current) {

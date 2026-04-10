@@ -94,7 +94,11 @@ export async function GET(
     `[Transcript API] session=${id} total_turns=${turns?.length ?? 0} trainee_audio_delivery_turns=${analysedTurnIndexes.join(",") || "none"}`
   );
 
-  return NextResponse.json(turns);
+  return NextResponse.json(turns, {
+    headers: {
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 export async function POST(
