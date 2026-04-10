@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AreaChart,
   Area,
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
   ReferenceLine,
   ReferenceArea,
   ReferenceDot,
@@ -17,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { KeyMomentCard } from "@/components/review/KeyMoments";
 import type { ScoreEvidence } from "@/lib/engine/scoring";
 import type { SimulationStateEvent, TranscriptTurn } from "@/types/simulation";
-import { ESCALATION_LABELS } from "@/types/escalation";
 
 interface EscalationTimelineProps {
   events: SimulationStateEvent[];
@@ -53,12 +51,6 @@ function getLevelColor(level: number): string {
   if (level <= 6) return "#f97316";
   if (level <= 8) return "#ef4444";
   return "#991b1b";
-}
-
-function getEffectivenessColor(effectiveness: number): string {
-  if (effectiveness > 0.2) return "#10b981";
-  if (effectiveness < -0.2) return "#ef4444";
-  return "#94a3b8";
 }
 
 function getEventDotColor(type: string): string {
@@ -146,76 +138,6 @@ function CustomDot(props: {
   );
 }
 
-function CustomTooltip({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean;
-  payload?: { payload: ChartPoint }[];
-  label?: number;
-}) {
-  if (!active || !payload?.length) return null;
-  const data = payload[0].payload;
-  const levelColor = getLevelColor(data.level);
-
-  return (
-    <div className="max-w-xs rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm">
-      <div className="mb-2 flex items-center justify-between gap-4">
-        <span className="text-[11px] font-medium text-slate-400">
-          {formatTime(label ?? data.time)}
-        </span>
-        <span
-          className="rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white"
-          style={{ backgroundColor: levelColor }}
-        >
-          Level {data.level}
-        </span>
-      </div>
-
-      <p className="mb-0.5 text-[12px] font-semibold text-slate-800">
-        {ESCALATION_LABELS[data.level] ?? `Level ${data.level}`}
-      </p>
-
-      {data.technique && (
-        <p className="mt-1.5 text-[12px] text-slate-600">
-          <span className="font-medium">Technique:</span> {data.technique}
-        </p>
-      )}
-
-      {data.effectiveness !== null && (
-        <p className="mt-0.5 text-[12px]">
-          <span className="font-medium text-slate-600">Effectiveness:</span>{" "}
-          <span
-            className="font-bold"
-            style={{ color: getEffectivenessColor(data.effectiveness) }}
-          >
-            {data.effectiveness > 0 ? "+" : ""}
-            {data.effectiveness.toFixed(2)}
-          </span>
-        </p>
-      )}
-
-      {data.reasoning && (
-        <p className="mt-1.5 text-[12px] italic leading-relaxed text-slate-500">
-          {data.reasoning}
-        </p>
-      )}
-
-      {(data.trust !== null || data.listening !== null) && (
-        <div className="mt-2 flex gap-4 border-t border-slate-100 pt-2 text-[11px]">
-          {data.trust !== null && (
-            <span className="font-medium text-blue-500">Trust: {data.trust}/10</span>
-          )}
-          {data.listening !== null && (
-            <span className="font-medium text-purple-500">Listening: {data.listening}/10</span>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function EscalationTimeline({
   events,
   turns,
@@ -227,18 +149,12 @@ export function EscalationTimeline({
 }: EscalationTimelineProps) {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevOverlayIndexRef = useRef<number | null | undefined>(undefined);
   const [chartSize, setChartSize] = useState<{ width: number; height: number } | null>(null);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hoveredTime, setHoveredTime] = useState<number | null>(null);
-  const [overlayMomentIndex, setOverlayMomentIndex] = useState<number | null>(null);
   const startTime = new Date(sessionStartedAt).getTime();
-  const syncOverlayMomentIndex = useEffectEvent((index: number | null) => {
-    setOverlayMomentIndex(index);
-  });
 
   useEffect(() => {
     const container = chartContainerRef.current;
@@ -394,38 +310,17 @@ export function EscalationTimeline({
     ? hoveredSecond
     : playbackSecond;
   const markerPoint = getChartPointAtTime(data, markerTime);
-  const activeKeyMoment = getKeyMomentAtTime(keyMomentEntries, markerTime);
+  const playbackKeyMomentIndex = getKeyMomentAtTime(keyMomentEntries, playbackSecond)?.index ?? null;
+  const hoveredKeyMomentIndex = getKeyMomentAtTime(keyMomentEntries, hoveredSecond)?.index ?? null;
+  const displayedKeyMomentIndex = hoveredSecond !== null
+    ? hoveredKeyMomentIndex
+    : playbackActive
+      ? playbackKeyMomentIndex
+      : null;
 
   useEffect(() => {
-    onActiveKeyMomentChange?.(activeKeyMoment?.index ?? null);
-  }, [activeKeyMoment?.index, onActiveKeyMomentChange]);
-
-  // Show overlay card when the active key moment changes during playback.
-  // Uses the same `activeKeyMoment` that drives sidebar highlighting, so the
-  // overlay stays in sync with what the user sees in the Key Moments panel.
-  const activeKeyMomentIndex = activeKeyMoment?.index ?? null;
-
-  useEffect(() => {
-    if (!playbackActive) {
-      prevOverlayIndexRef.current = undefined;
-      syncOverlayMomentIndex(null);
-      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
-      return;
-    }
-
-    if (activeKeyMomentIndex === null || activeKeyMomentIndex === prevOverlayIndexRef.current) return;
-    prevOverlayIndexRef.current = activeKeyMomentIndex;
-
-    if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
-    syncOverlayMomentIndex(activeKeyMomentIndex);
-    overlayTimerRef.current = setTimeout(() => syncOverlayMomentIndex(null), 15_000);
-  }, [playbackActive, activeKeyMomentIndex]);
-
-  useEffect(() => {
-    return () => {
-      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
-    };
-  }, []);
+    onActiveKeyMomentChange?.(displayedKeyMomentIndex);
+  }, [displayedKeyMomentIndex, onActiveKeyMomentChange]);
 
   if (data.length === 0) {
     return (
@@ -594,11 +489,6 @@ export function EscalationTimeline({
               tickFormatter={(value) => `${value}`}
             />
 
-            <Tooltip
-              content={<CustomTooltip />}
-              cursor={{ stroke: "#cbd5e1", strokeDasharray: "4 4" }}
-            />
-
             {markerTime !== null && markerPoint && (
               <>
                 <ReferenceLine
@@ -740,13 +630,17 @@ export function EscalationTimeline({
           <div className="h-full w-full animate-pulse rounded-xl bg-slate-100/70" />
         )}
 
-        {overlayMomentIndex !== null && (() => {
-          const moment = keyMoments[overlayMomentIndex];
+        {displayedKeyMomentIndex !== null && (() => {
+          const moment = keyMoments[displayedKeyMomentIndex];
           if (!moment) return null;
           const turn = turns.find((t) => t.turn_index === moment.turnIndex);
           return (
             <div className="pointer-events-none absolute bottom-3 left-9 z-10 w-72 overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-black/5">
-              <KeyMomentCard moment={moment} turn={turn} isActive />
+              <KeyMomentCard
+                moment={moment}
+                turn={turn}
+                isActive={playbackActive && hoveredSecond === null}
+              />
             </div>
           );
         })()}
