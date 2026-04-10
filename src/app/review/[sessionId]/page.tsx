@@ -312,6 +312,7 @@ export default function ReviewPage() {
 
   const preliminary = isSessionPreliminary(score.turnCount);
   const keyMoments = pickKeyMoments(score.evidence);
+  const timelineKeyMoments = pickKeyMoments(score.evidence, 6);
   const suggestion = getNextTimeTrySuggestion(score);
 
   const selectedTurn = turns.find((turn) => turn.id === selectedTurnId) ?? null;
@@ -495,7 +496,7 @@ export default function ReviewPage() {
               <EscalationTimeline
                 events={events}
                 turns={turns}
-                keyMoments={keyMoments}
+                keyMoments={timelineKeyMoments}
                 maxCeiling={snapshot.escalation_rules[0]?.max_ceiling ?? 8}
                 sessionStartedAt={recordingStartedAt ?? session.started_at}
                 recordingUrl={recordingUrl}

@@ -146,7 +146,7 @@ function TimelineMomentCard({
   const levelColor = level !== null ? getLevelColor(level) : "#64748b";
 
   return (
-    <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm">
+    <div className="w-full rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm">
       <div className="mb-2 flex items-start justify-between gap-4">
         <div>
           <span className="text-[11px] font-medium text-slate-400">{formatTime(time)}</span>
@@ -836,15 +836,14 @@ export function EscalationTimeline({
           <div className="h-full w-full animate-pulse rounded-xl bg-slate-100/70" />
         )}
 
-        {displayedKeyMomentEntry && (
-          <div className="pointer-events-none absolute bottom-3 left-4 right-4 z-10 flex justify-start">
-            <TimelineMomentCard
-              entry={displayedKeyMomentEntry}
-              showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
-            />
-          </div>
-        )}
       </div>
+
+      {displayedKeyMomentEntry && (
+        <TimelineMomentCard
+          entry={displayedKeyMomentEntry}
+          showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
+        />
+      )}
 
       <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
         <span className="flex items-center gap-1.5">
