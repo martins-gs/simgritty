@@ -28,6 +28,9 @@ const DEFAULT_TURN_DETECTION = {
   create_response: true,
 };
 
+/** Max time (ms) to wait for the data channel to open before treating as a failure. */
+const CONNECTION_TIMEOUT_MS = 15_000;
+
 function isLikelyEnglish(text: string) {
   return /^[a-zA-Z0-9\s.,!?'";\-:()\/&@#$%+=\[\]{}*_~`<>]+$/.test(text);
 }
@@ -49,6 +52,8 @@ export function useRealtimeSession() {
   // never arrives after the response completes.
   const playbackSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consecutivePlaybackSafetyTimeoutsRef = useRef(0);
+  // Connection timeout: detect stuck "connecting" state
+  const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Deduplication
   const lastTraineeTextRef = useRef("");
   const lastTraineeTimeRef = useRef(0);
@@ -398,6 +403,10 @@ export function useRealtimeSession() {
 
       nextDc.onopen = () => {
         if (!isStale()) {
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
           setConnectionStatus("connected");
         }
       };
@@ -418,6 +427,57 @@ export function useRealtimeSession() {
           setConnectionStatus("error");
         }
       };
+
+      // Monitor the peer connection for ICE/DTLS failures.
+      // Without this, if the ICE connection fails (firewall, network),
+      // the status stays at "connecting" forever.
+      nextPc.onconnectionstatechange = () => {
+        if (isStale()) return;
+        const state = nextPc.connectionState;
+        if (state === "failed") {
+          console.error("[Realtime] Peer connection failed (connectionState=failed)");
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
+          config.onError("Connection failed — check your network and try again");
+          setConnectionStatus("error");
+        } else if (state === "disconnected") {
+          console.warn("[Realtime] Peer connection disconnected (connectionState=disconnected)");
+          // "disconnected" can be transient; browsers may recover.
+          // Only update if we were previously connected.
+          const currentStatus = useSimulationStore.getState().connectionStatus;
+          if (currentStatus === "connected") {
+            setConnectionStatus("reconnecting");
+          }
+        } else if (state === "connected") {
+          // ICE + DTLS succeeded — if we were reconnecting, restore status.
+          const currentStatus = useSimulationStore.getState().connectionStatus;
+          if (currentStatus === "reconnecting") {
+            setConnectionStatus("connected");
+          }
+        }
+      };
+
+      // Safety timeout: if the data channel hasn't opened within
+      // CONNECTION_TIMEOUT_MS, treat this as a failure so the user
+      // isn't stuck on "Connecting..." forever.
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+      }
+      connectionTimeoutRef.current = setTimeout(() => {
+        connectionTimeoutRef.current = null;
+        if (isStale()) return;
+        const currentStatus = useSimulationStore.getState().connectionStatus;
+        if (currentStatus === "connecting") {
+          console.error(
+            `[Realtime] Connection timeout: data channel did not open within ${CONNECTION_TIMEOUT_MS}ms`
+          );
+          config.onError("Connection timed out — please check your network and try again");
+          setConnectionStatus("error");
+          cleanupAttempt();
+        }
+      }, CONNECTION_TIMEOUT_MS);
 
       const offer = await nextPc.createOffer();
       if (isStale()) {
@@ -461,6 +521,10 @@ export function useRealtimeSession() {
         cleanupAttempt();
       }
     } catch (err) {
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
+      }
       cleanupAttempt();
       if (isStale()) return;
       console.error("Realtime connection error:", err);
@@ -525,6 +589,10 @@ export function useRealtimeSession() {
     connectAttemptRef.current += 1;
     disconnectedRef.current = true;
 
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
     if (unmutTimerRef.current) {
       clearTimeout(unmutTimerRef.current);
       unmutTimerRef.current = null;

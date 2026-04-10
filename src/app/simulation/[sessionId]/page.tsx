@@ -1920,7 +1920,11 @@ export default function SimulationPage() {
       ? `${aiRole} is speaking`
       : connectionStatus === "connected"
         ? "Listening — speak when ready"
-        : "Connecting...";
+        : connectionStatus === "error"
+          ? "Connection failed — please refresh to retry"
+          : connectionStatus === "reconnecting"
+            ? "Reconnecting..."
+            : "Connecting...";
   const supportHelperText = botActive
     ? "AI clinician support is active. Resume the conversation whenever you're ready."
     : "The AI clinician will take over temporarily and model a response. You can resume at any time.";
@@ -1945,10 +1949,22 @@ export default function SimulationPage() {
           <span className="hidden sm:inline text-[12px] tabular-nums text-slate-400">{formatTime(elapsed)}</span>
         </div>
         <div className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
-          connectionStatus === "connected" ? "bg-emerald-50 text-emerald-600" : "bg-slate-50 text-slate-400"
+          connectionStatus === "connected" ? "bg-emerald-50 text-emerald-600"
+            : connectionStatus === "error" ? "bg-red-50 text-red-600"
+            : connectionStatus === "reconnecting" ? "bg-amber-50 text-amber-600"
+            : "bg-slate-50 text-slate-400"
         )}>
-          <span className={cn("h-1.5 w-1.5 rounded-full", connectionStatus === "connected" ? "bg-emerald-500 animate-pulse" : "bg-slate-300")} />
-          {connectionStatus === "connected" ? "Live" : connectionStatus === "connecting" ? "Connecting..." : "Offline"}
+          <span className={cn("h-1.5 w-1.5 rounded-full",
+            connectionStatus === "connected" ? "bg-emerald-500 animate-pulse"
+              : connectionStatus === "error" ? "bg-red-500"
+              : connectionStatus === "reconnecting" ? "bg-amber-500 animate-pulse"
+              : "bg-slate-300"
+          )} />
+          {connectionStatus === "connected" ? "Live"
+            : connectionStatus === "connecting" ? "Connecting..."
+            : connectionStatus === "reconnecting" ? "Reconnecting..."
+            : connectionStatus === "error" ? "Connection failed"
+            : "Offline"}
         </div>
       </header>
 

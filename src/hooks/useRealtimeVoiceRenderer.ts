@@ -15,6 +15,9 @@ interface SpeakOptions {
 
 type RealtimeSpeakResult = "completed" | "partial" | "failed";
 
+/** Max time (ms) to wait for the data channel to open before treating as a failure. */
+const CONNECTION_TIMEOUT_MS = 15_000;
+
 const MIN_SPEECH_TIMEOUT_MS = 15000;
 const MAX_SPEECH_TIMEOUT_MS = 30000;
 const SPEECH_TIMEOUT_BASE_MS = 5000;
@@ -69,6 +72,7 @@ export function useRealtimeVoiceRenderer() {
   const connectAttemptRef = useRef(0);
   const disconnectedRef = useRef(false);
   const readyRef = useRef(false);
+  const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeResponseIdRef = useRef<string | null>(null);
   const pendingSpeechRef = useRef<{
     responseId: string | null;
@@ -193,6 +197,10 @@ export function useRealtimeVoiceRenderer() {
 
       nextDc.onopen = () => {
         if (!isStale()) {
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
           readyRef.current = true;
         }
       };
@@ -349,6 +357,40 @@ export function useRealtimeVoiceRenderer() {
         }
       };
 
+      // Monitor the peer connection for ICE/DTLS failures.
+      nextPc.onconnectionstatechange = () => {
+        if (isStale()) return;
+        const state = nextPc.connectionState;
+        if (state === "failed") {
+          console.error("[Clinician Audio] Peer connection failed (connectionState=failed)");
+          if (connectionTimeoutRef.current) {
+            clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
+          readyRef.current = false;
+          failPendingSpeech("peer_connection_failed", () => {
+            config.onError("Clinician voice connection failed — check your network");
+          });
+        }
+      };
+
+      // Safety timeout: if the data channel hasn't opened within
+      // CONNECTION_TIMEOUT_MS, treat this as a failure.
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+      }
+      connectionTimeoutRef.current = setTimeout(() => {
+        connectionTimeoutRef.current = null;
+        if (isStale()) return;
+        if (!readyRef.current) {
+          console.error(
+            `[Clinician Audio] Connection timeout: data channel did not open within ${CONNECTION_TIMEOUT_MS}ms`
+          );
+          config.onError("Clinician voice connection timed out");
+          cleanupAttempt();
+        }
+      }, CONNECTION_TIMEOUT_MS);
+
       const offer = await nextPc.createOffer();
       if (isStale()) {
         cleanupAttempt();
@@ -391,6 +433,10 @@ export function useRealtimeVoiceRenderer() {
 
       return true;
     } catch (err) {
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
+      }
       cleanupAttempt();
       if (isStale()) return false;
       config.onError(err instanceof Error ? err.message : "Clinician realtime connection failed");
@@ -454,6 +500,10 @@ export function useRealtimeVoiceRenderer() {
     disconnectedRef.current = true;
     readyRef.current = false;
     activeResponseIdRef.current = null;
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
     clearPendingSpeech("failed");
     teardownRendererResources(pcRef.current, dcRef.current, audioElRef.current);
     pcRef.current = null;
