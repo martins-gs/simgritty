@@ -61,6 +61,8 @@ const COMPOSURE_MARKER_WEIGHTS: Record<ComposureMarker, number> = {
 };
 const COMPOSURE_REPEAT_MARKER_PENALTY = 3;
 const COMPOSURE_MULTI_MARKER_MULTIPLIER = 1.1;
+const LOW_SUBSTANCE_EFFECTIVENESS_THRESHOLD = -0.15;
+const LOW_SUBSTANCE_COMPOSURE_PENALTY = 6;
 const AUDIO_DELIVERY_CONFIDENCE_THRESHOLD = 0.45;
 const DE_ESCALATION_HARM_PENALTY_FACTOR = 20;
 const SUPPORT_SEEKING_START_SCORE = 100;
@@ -102,6 +104,47 @@ interface SupportEpisode {
 interface DeliveryScoreDelta {
   delta: number;
   markers: TraineeDeliveryMarker[];
+}
+
+const LOW_SUBSTANCE_TAGS = new Set([
+  "non_substantive",
+  "minimal_response",
+  "minimal_acknowledgement",
+  "fails_to_address_concern",
+  "failure_to_address_concern",
+  "does_not_address_concern",
+  "poor_engagement",
+  "insufficient_engagement",
+  "poor_answer",
+  "low_information",
+  "unclear",
+  "vague",
+  "missed_emotion",
+  "missed_empathy",
+]);
+
+function normalizeDescriptor(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function isLowSubstanceTurn(turn: TranscriptTurn): boolean {
+  const cr = turn.classifier_result;
+  if (!cr || cr.effectiveness > LOW_SUBSTANCE_EFFECTIVENESS_THRESHOLD) {
+    return false;
+  }
+
+  const normalizedTags = new Set((cr.tags ?? []).map(normalizeDescriptor));
+  if ([...normalizedTags].some((tag) => LOW_SUBSTANCE_TAGS.has(tag))) {
+    return true;
+  }
+
+  const normalizedTechnique = normalizeDescriptor(cr.technique ?? "");
+  return (
+    normalizedTechnique.includes("minimal") ||
+    normalizedTechnique.includes("non_substantive") ||
+    normalizedTechnique.includes("unclear") ||
+    normalizedTechnique.includes("vague")
+  );
 }
 
 function getTurnDeliveryAnalysis(turn: TranscriptTurn): TraineeDeliveryAnalysis | null {
@@ -176,18 +219,41 @@ function getDefaultWeights(hasMilestones: boolean): ScoringWeights {
   return { composure: 0.33, de_escalation: 0.34, clinical_task: 0, support_seeking: 0.33 };
 }
 
-function renormalizeWeights(weights: ScoringWeights, hasMilestones: boolean): ScoringWeights {
-  if (hasMilestones) return weights;
+function renormalizeWeights(
+  weights: ScoringWeights,
+  options: {
+    includeClinicalTask: boolean;
+    includeDeEscalation: boolean;
+    includeSupportSeeking: boolean;
+  }
+): ScoringWeights {
+  const filtered: ScoringWeights = {
+    composure: weights.composure,
+    de_escalation: options.includeDeEscalation ? weights.de_escalation : 0,
+    clinical_task: options.includeClinicalTask ? weights.clinical_task : 0,
+    support_seeking: options.includeSupportSeeking ? weights.support_seeking : 0,
+  };
 
-  // Remove clinical_task weight and redistribute proportionally
-  const remaining = weights.composure + weights.de_escalation + weights.support_seeking;
-  if (remaining === 0) return getDefaultWeights(false);
+  const total =
+    filtered.composure +
+    filtered.de_escalation +
+    filtered.clinical_task +
+    filtered.support_seeking;
+
+  if (total === 0) {
+    return {
+      composure: 1,
+      de_escalation: 0,
+      clinical_task: 0,
+      support_seeking: 0,
+    };
+  }
 
   return {
-    composure: weights.composure / remaining,
-    de_escalation: weights.de_escalation / remaining,
-    clinical_task: 0,
-    support_seeking: weights.support_seeking / remaining,
+    composure: filtered.composure / total,
+    de_escalation: filtered.de_escalation / total,
+    clinical_task: filtered.clinical_task / total,
+    support_seeking: filtered.support_seeking / total,
   };
 }
 
@@ -240,6 +306,32 @@ function computeComposure(
         turnIndex: turn.turn_index,
         evidenceType: "composure_marker",
         evidenceData: { markers, levelBefore },
+        scoreImpact: -turnPenalty,
+      });
+    }
+
+    if (markers.length === 0 && isLowSubstanceTurn(turn)) {
+      let turnPenalty = LOW_SUBSTANCE_COMPOSURE_PENALTY;
+
+      if (levelBefore != null) {
+        if (levelBefore >= 8) {
+          turnPenalty *= 1.2;
+        } else if (levelBefore >= 5) {
+          turnPenalty *= 1.1;
+        }
+      }
+
+      totalPenalty += turnPenalty;
+      evidence.push({
+        dimension: "composure",
+        turnIndex: turn.turn_index,
+        evidenceType: "low_substance_response",
+        evidenceData: {
+          technique: cr?.technique ?? null,
+          tags: cr?.tags ?? [],
+          effectiveness: cr?.effectiveness ?? null,
+          levelBefore,
+        },
         scoreImpact: -turnPenalty,
       });
     }
@@ -395,6 +487,17 @@ function computeDeEscalation(
   const successRate = effectiveAttempts / attemptsMade;
   const rawScore = (attemptRate * 0.4 + successRate * 0.6) * 100;
   return Math.max(0, Math.min(100, Math.round(rawScore - harmPenalty + deliveryDelta)));
+}
+
+function countDeEscalationOpportunities(
+  traineeTurns: TranscriptTurn[],
+  allTurns: TranscriptTurn[]
+): number {
+  const baselineLevel = 2;
+  return traineeTurns.filter((turn) => {
+    const prevLevel = findLevelBeforeTurn(turn.turn_index, allTurns);
+    return prevLevel != null && prevLevel > baselineLevel;
+  }).length;
 }
 
 /** Find the escalation level before a given trainee turn. */
@@ -706,6 +809,21 @@ function computeSupportSeeking(
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
+function getSupportSeekingOpportunityCount(
+  turns: TranscriptTurn[],
+  supportThreshold: number | null,
+  criticalThreshold: number | null
+): number {
+  const effectiveSupportThreshold = supportThreshold ?? criticalThreshold ?? 6;
+  const sortedTurns = [...turns].sort((a, b) => a.turn_index - b.turn_index);
+  const traineeTurns = sortedTurns.filter((turn) => turn.speaker === "trainee");
+
+  return traineeTurns.filter((turn) => {
+    const levelBefore = findLevelBeforeTurn(turn.turn_index, sortedTurns);
+    return levelBefore != null && levelBefore >= effectiveSupportThreshold;
+  }).length;
+}
+
 // ---------------------------------------------------------------------------
 // Summary generation
 // ---------------------------------------------------------------------------
@@ -729,7 +847,12 @@ function getSummary(
     dims.push({ name: "Clinical task", score: clinicalTask, weight: weightsUsed.clinical_task });
   }
 
-  const sorted = [...dims].sort((a, b) => b.score - a.score);
+  const activeDims = dims.filter((dim) => dim.weight > 0);
+  if (activeDims.length === 0) {
+    return "Score unavailable.";
+  }
+
+  const sorted = [...activeDims].sort((a, b) => b.score - a.score);
   const strongest = sorted[0];
   const weakest = sorted[sorted.length - 1];
 
@@ -762,10 +885,23 @@ export function computeScore(input: ScoringInput): ScoreBreakdown {
   const turnCount = traineeTurns.length;
   const sessionValid = turnCount >= MIN_TRAINEE_TURNS_FOR_SCORING;
   const hasMilestones = milestones.length > 0;
+  const deEscalationOpportunityCount = countDeEscalationOpportunities(traineeTurns, allTurns);
+  const supportEpisodes = collectSupportEpisodes(allTurns, events);
+  const supportOpportunityCount = getSupportSeekingOpportunityCount(
+    allTurns,
+    supportThreshold,
+    criticalThreshold
+  );
+  const includeDeEscalation = deEscalationOpportunityCount > 0;
+  const includeSupportSeeking = supportOpportunityCount > 0 || supportEpisodes.length > 0;
 
   // Resolve weights
   const rawWeights = weights ?? getDefaultWeights(hasMilestones);
-  const weightsUsed = renormalizeWeights(rawWeights, hasMilestones);
+  const weightsUsed = renormalizeWeights(rawWeights, {
+    includeClinicalTask: hasMilestones,
+    includeDeEscalation,
+    includeSupportSeeking,
+  });
 
   // If session is too short, return zeroed scores
   if (!sessionValid) {
@@ -844,16 +980,19 @@ export function pickKeyMoments(evidence: ScoreEvidence[], maxCount = 3): ScoreEv
 export function getNextTimeTrySuggestion(score: ScoreBreakdown): string | null {
   if (!score.sessionValid) return null;
 
-  const dims: { key: string; score: number }[] = [
-    { key: "composure", score: score.composure },
-    { key: "deEscalation", score: score.deEscalation },
-    { key: "supportSeeking", score: score.supportSeeking },
+  const dims: { key: string; score: number; weight: number }[] = [
+    { key: "composure", score: score.composure, weight: score.weightsUsed.composure },
+    { key: "deEscalation", score: score.deEscalation, weight: score.weightsUsed.de_escalation },
+    { key: "supportSeeking", score: score.supportSeeking, weight: score.weightsUsed.support_seeking },
   ];
   if (score.clinicalTask != null) {
-    dims.push({ key: "clinicalTask", score: score.clinicalTask });
+    dims.push({ key: "clinicalTask", score: score.clinicalTask, weight: score.weightsUsed.clinical_task });
   }
 
-  const weakest = dims.reduce((min, d) => (d.score < min.score ? d : min));
+  const activeDims = dims.filter((dim) => dim.weight > 0);
+  if (activeDims.length === 0) return null;
+
+  const weakest = activeDims.reduce((min, d) => (d.score < min.score ? d : min));
 
   const suggestions: Record<string, string> = {
     composure:

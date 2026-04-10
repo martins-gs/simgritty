@@ -24,6 +24,14 @@ const EVIDENCE_DESCRIPTIONS: Record<string, (data: Record<string, unknown>) => s
     const labels = markers.map((m) => m.replace(/_/g, " "));
     return labels.join(", ");
   },
+  low_substance_response: (data) => {
+    const technique = data.technique as string | undefined;
+    const effectiveness = data.effectiveness as number | undefined;
+    if (technique && typeof effectiveness === "number") {
+      return `${technique.replace(/_/g, " ")} gave little useful engagement (${effectiveness.toFixed(1)})`;
+    }
+    return "This response stayed low-substance and did not meaningfully engage with the concern";
+  },
   delivery_marker: (data) => {
     const markers = data.markers as string[] | undefined;
     const summary = data.summary as string | undefined;

@@ -47,23 +47,29 @@ function ScoreBar({
 }) {
   const ratio = value / 100;
   const weightPct = Math.round(weight * 100);
+  const notExercised = weightPct === 0;
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
         <span className="text-[12px] font-medium text-slate-700">{label}</span>
         <span className="text-[12px] tabular-nums text-slate-900">
-          <span className="font-bold">{value}</span>
-          <span className="text-slate-400 font-normal">/100</span>
+          <span className="font-bold">{notExercised ? "N/A" : value}</span>
+          {!notExercised && <span className="text-slate-400 font-normal">/100</span>}
           <span className="ml-1.5 text-[10px] text-slate-400 font-normal">({weightPct}%)</span>
         </span>
       </div>
       <div className="h-2 w-full rounded-full bg-slate-100">
         <div
-          className={cn("h-full rounded-full transition-all duration-500", getBarColor(ratio))}
-          style={{ width: `${ratio * 100}%` }}
+          className={cn(
+            "h-full rounded-full transition-all duration-500",
+            notExercised ? "bg-slate-300" : getBarColor(ratio)
+          )}
+          style={{ width: `${notExercised ? 100 : ratio * 100}%` }}
         />
       </div>
-      <p className="text-[11px] text-slate-400 hidden sm:block">{description}</p>
+      <p className="text-[11px] text-slate-400 hidden sm:block">
+        {notExercised ? "Not exercised in this session, so it did not affect the overall score." : description}
+      </p>
     </div>
   );
 }
