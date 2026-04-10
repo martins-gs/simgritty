@@ -639,9 +639,17 @@ export default function SimulationPage() {
             audioBase64,
             durationMs: turn.durationMs ?? segment.durationMs ?? null,
           }),
-        }).catch(() => null);
+        }).catch((error) => {
+          console.error("[Simulation] Trainee audio analysis request failed", error);
+          return null;
+        });
 
         if (!res || !res.ok) {
+          const errorText = res ? await res.text().catch(() => "") : "";
+          console.warn(
+            `[Simulation] Trainee audio analysis request rejected item_id=${itemId} status=${res?.status ?? "network"}`,
+            errorText
+          );
           return;
         }
 
@@ -657,6 +665,9 @@ export default function SimulationPage() {
           "trainee delivery analysis"
         );
         if (!deliveryAnalysis) {
+          console.warn(
+            `[Simulation] Trainee audio analysis returned no structured result item_id=${itemId}`
+          );
           return;
         }
 
@@ -669,6 +680,9 @@ export default function SimulationPage() {
         };
 
         await updatePersistedTurnSnapshot(turn.turnIndex, nextSnapshot);
+        console.info(
+          `[Simulation] Trainee audio analysis saved item_id=${itemId} turn_index=${turn.turnIndex} markers=${deliveryAnalysis.markers.join(",") || "none"} confidence=${deliveryAnalysis.confidence.toFixed(2)}`
+        );
       } catch (error) {
         console.error("[Simulation] Trainee audio analysis error", error);
       } finally {
