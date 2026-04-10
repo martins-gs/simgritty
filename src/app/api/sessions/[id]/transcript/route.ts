@@ -34,6 +34,24 @@ export async function GET(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const analysedTurnIndexes = (turns ?? []).flatMap((turn) => {
+    const classifier = turn.classifier_result;
+    if (
+      turn.speaker === "trainee" &&
+      classifier &&
+      typeof classifier === "object" &&
+      "trainee_delivery_analysis" in classifier &&
+      (classifier as Record<string, unknown>).trainee_delivery_analysis
+    ) {
+      return [turn.turn_index];
+    }
+    return [];
+  });
+
+  console.info(
+    `[Transcript API] session=${id} total_turns=${turns?.length ?? 0} trainee_audio_delivery_turns=${analysedTurnIndexes.join(",") || "none"}`
+  );
+
   return NextResponse.json(turns);
 }
 
@@ -97,6 +115,12 @@ export async function PATCH(
   if (!parsed.success) return parsed.response;
 
   const body = parsed.data;
+
+  if (body.classifier_result?.trainee_delivery_analysis) {
+    console.info(
+      `[Transcript API] patch turn=${body.turn_index} trainee_audio_delivery markers=${body.classifier_result.trainee_delivery_analysis.markers.join(",") || "none"}`
+    );
+  }
 
   const snapshotUpdate = {
     classifier_result: body.classifier_result || null,
