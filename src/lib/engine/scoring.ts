@@ -4,6 +4,8 @@ import type {
   TranscriptTurn,
   QualitativeLabel,
   ComposureMarker,
+  TraineeDeliveryAnalysis,
+  TraineeDeliveryMarker,
 } from "@/types/simulation";
 import type { ScoringWeights, ScenarioMilestone } from "@/types/scenario";
 import { parseClinicianAudioPayload } from "@/lib/validation/schemas";
@@ -59,6 +61,7 @@ const COMPOSURE_MARKER_WEIGHTS: Record<ComposureMarker, number> = {
 };
 const COMPOSURE_REPEAT_MARKER_PENALTY = 3;
 const COMPOSURE_MULTI_MARKER_MULTIPLIER = 1.1;
+const AUDIO_DELIVERY_CONFIDENCE_THRESHOLD = 0.45;
 const DE_ESCALATION_HARM_PENALTY_FACTOR = 20;
 const SUPPORT_SEEKING_START_SCORE = 100;
 const SUPPORT_SEEKING_APPROPRIATE_BONUS = 10;
@@ -67,11 +70,85 @@ const SUPPORT_SEEKING_MISSED_OPPORTUNITY_PENALTY = 20;
 const SUPPORT_SEEKING_CRITICAL_DELAY_PENALTY = 15;
 const SUPPORT_SEEKING_CRISIS_PENALTY = 25;
 const CRISIS_LEVEL = 10;
+const COMPOSURE_DELIVERY_MARKER_SCORE_DELTAS: Record<TraineeDeliveryMarker, number> = {
+  calm_measured: 3,
+  warm_empathic: 4,
+  tense_hurried: -4,
+  flat_detached: -3,
+  defensive_tone: -6,
+  sarcastic_tone: -8,
+  irritated_tone: -7,
+  hostile_tone: -12,
+  anxious_unsteady: -4,
+};
+const DE_ESCALATION_DELIVERY_MARKER_SCORE_DELTAS: Record<TraineeDeliveryMarker, number> = {
+  calm_measured: 4,
+  warm_empathic: 5,
+  tense_hurried: -4,
+  flat_detached: -3,
+  defensive_tone: -6,
+  sarcastic_tone: -8,
+  irritated_tone: -7,
+  hostile_tone: -10,
+  anxious_unsteady: -5,
+};
 
 interface SupportEpisode {
   startTurnIndex: number;
   endTurnIndex: number;
   escalationLevel: number;
+}
+
+interface DeliveryScoreDelta {
+  delta: number;
+  markers: TraineeDeliveryMarker[];
+}
+
+function getDeliveryScoreDelta(
+  analysis: TraineeDeliveryAnalysis | null | undefined,
+  markerScoreDeltas: Record<TraineeDeliveryMarker, number>,
+  options: {
+    allowPositive?: boolean;
+    allowNegative?: boolean;
+  } = {}
+): DeliveryScoreDelta | null {
+  if (
+    !analysis ||
+    analysis.source !== "audio" ||
+    analysis.confidence < AUDIO_DELIVERY_CONFIDENCE_THRESHOLD
+  ) {
+    return null;
+  }
+
+  const allowPositive = options.allowPositive ?? true;
+  const allowNegative = options.allowNegative ?? true;
+  const uniqueMarkers = [...new Set(analysis.markers)];
+  const scoredMarkers: TraineeDeliveryMarker[] = [];
+  let rawDelta = 0;
+
+  for (const marker of uniqueMarkers) {
+    const markerDelta = markerScoreDeltas[marker] ?? 0;
+    if (markerDelta === 0) continue;
+    if (markerDelta > 0 && !allowPositive) continue;
+    if (markerDelta < 0 && !allowNegative) continue;
+
+    rawDelta += markerDelta;
+    scoredMarkers.push(marker);
+  }
+
+  if (rawDelta === 0 || scoredMarkers.length === 0) {
+    return null;
+  }
+
+  const scaledDelta = Math.round(rawDelta * analysis.confidence);
+  if (scaledDelta === 0) {
+    return null;
+  }
+
+  return {
+    delta: scaledDelta,
+    markers: scoredMarkers,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -122,46 +199,68 @@ function computeComposure(
   if (traineeTurns.length === 0) return 100;
 
   let totalPenalty = 0;
+  let totalDeliveryDelta = 0;
   const seenMarkerCounts = new Map<ComposureMarker, number>();
 
   for (const turn of traineeTurns) {
     const cr = turn.classifier_result;
     const markers: ComposureMarker[] = cr?.composure_markers ?? [];
-    if (markers.length === 0) continue;
-
-    let turnPenalty = 0;
-
-    for (const marker of markers) {
-      const seenCount = seenMarkerCounts.get(marker) ?? 0;
-      turnPenalty += COMPOSURE_MARKER_WEIGHTS[marker] + seenCount * COMPOSURE_REPEAT_MARKER_PENALTY;
-      seenMarkerCounts.set(marker, seenCount + 1);
-    }
-
-    if (markers.length > 1) {
-      turnPenalty *= COMPOSURE_MULTI_MARKER_MULTIPLIER;
-    }
-
     const levelBefore = findLevelBeforeTurn(turn.turn_index, allTurns);
-    if (levelBefore != null) {
-      if (levelBefore >= 8) {
-        turnPenalty *= 1.2;
-      } else if (levelBefore >= 5) {
-        turnPenalty *= 1.1;
+
+    if (markers.length > 0) {
+      let turnPenalty = 0;
+
+      for (const marker of markers) {
+        const seenCount = seenMarkerCounts.get(marker) ?? 0;
+        turnPenalty += COMPOSURE_MARKER_WEIGHTS[marker] + seenCount * COMPOSURE_REPEAT_MARKER_PENALTY;
+        seenMarkerCounts.set(marker, seenCount + 1);
       }
+
+      if (markers.length > 1) {
+        turnPenalty *= COMPOSURE_MULTI_MARKER_MULTIPLIER;
+      }
+
+      if (levelBefore != null) {
+        if (levelBefore >= 8) {
+          turnPenalty *= 1.2;
+        } else if (levelBefore >= 5) {
+          turnPenalty *= 1.1;
+        }
+      }
+
+      totalPenalty += turnPenalty;
+
+      evidence.push({
+        dimension: "composure",
+        turnIndex: turn.turn_index,
+        evidenceType: "composure_marker",
+        evidenceData: { markers, levelBefore },
+        scoreImpact: -turnPenalty,
+      });
     }
 
-    totalPenalty += turnPenalty;
+    const deliveryDelta = getDeliveryScoreDelta(
+      cr?.trainee_delivery_analysis,
+      COMPOSURE_DELIVERY_MARKER_SCORE_DELTAS
+    );
+    if (!deliveryDelta) continue;
 
+    totalDeliveryDelta += deliveryDelta.delta;
     evidence.push({
       dimension: "composure",
       turnIndex: turn.turn_index,
-      evidenceType: "composure_marker",
-      evidenceData: { markers, levelBefore },
-      scoreImpact: -turnPenalty,
+      evidenceType: "delivery_marker",
+      evidenceData: {
+        markers: deliveryDelta.markers,
+        confidence: cr?.trainee_delivery_analysis?.confidence ?? null,
+        summary: cr?.trainee_delivery_analysis?.summary ?? null,
+        source: cr?.trainee_delivery_analysis?.source ?? null,
+      },
+      scoreImpact: deliveryDelta.delta,
     });
   }
 
-  return Math.max(0, Math.round(100 - totalPenalty));
+  return Math.max(0, Math.min(100, Math.round(100 - totalPenalty + totalDeliveryDelta)));
 }
 
 // ---------------------------------------------------------------------------
@@ -189,10 +288,37 @@ function computeDeEscalation(
   let attemptsMade = 0;
   let effectiveAttempts = 0;
   let harmPenalty = 0;
+  let deliveryDelta = 0;
 
   for (const turn of scoreableTurns) {
     const cr = turn.classifier_result;
     const levelBefore = findLevelBeforeTurn(turn.turn_index, allTurns);
+    const turnDeliveryDelta = getDeliveryScoreDelta(
+      cr?.trainee_delivery_analysis,
+      DE_ESCALATION_DELIVERY_MARKER_SCORE_DELTAS,
+      {
+        allowPositive: Boolean(cr?.de_escalation_attempt),
+        allowNegative: true,
+      }
+    );
+
+    if (turnDeliveryDelta) {
+      deliveryDelta += turnDeliveryDelta.delta;
+      evidence.push({
+        dimension: "de_escalation",
+        turnIndex: turn.turn_index,
+        evidenceType: "delivery_marker",
+        evidenceData: {
+          markers: turnDeliveryDelta.markers,
+          confidence: cr?.trainee_delivery_analysis?.confidence ?? null,
+          summary: cr?.trainee_delivery_analysis?.summary ?? null,
+          source: cr?.trainee_delivery_analysis?.source ?? null,
+          pairedWithAttempt: Boolean(cr?.de_escalation_attempt),
+          levelBefore,
+        },
+        scoreImpact: turnDeliveryDelta.delta,
+      });
+    }
 
     if (cr?.effectiveness != null && cr.effectiveness < 0) {
       const turnPenalty = Math.abs(cr.effectiveness) * DE_ESCALATION_HARM_PENALTY_FACTOR;
@@ -262,7 +388,7 @@ function computeDeEscalation(
   const attemptRate = attemptsMade / opportunities;
   const successRate = effectiveAttempts / attemptsMade;
   const rawScore = (attemptRate * 0.4 + successRate * 0.6) * 100;
-  return Math.max(0, Math.min(100, Math.round(rawScore - harmPenalty)));
+  return Math.max(0, Math.min(100, Math.round(rawScore - harmPenalty + deliveryDelta)));
 }
 
 /** Find the escalation level before a given trainee turn. */

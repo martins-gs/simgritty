@@ -3,9 +3,14 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSimulationStore } from "@/store/simulationStore";
-import { useRealtimeSession } from "@/hooks/useRealtimeSession";
+import {
+  type TraineeAudioSegment,
+  type TraineeTranscriptMeta,
+  useRealtimeSession,
+} from "@/hooks/useRealtimeSession";
 import { useRealtimeVoiceRenderer } from "@/hooks/useRealtimeVoiceRenderer";
 import { useSessionRecorder } from "@/hooks/useSessionRecorder";
+import { convertAudioBlobToWavBase64 } from "@/lib/audio/wav";
 import { EscalationEngine } from "@/lib/engine/escalationEngine";
 import { buildPrompt } from "@/lib/engine/promptBuilder";
 import {
@@ -42,6 +47,7 @@ import {
   parseSimulationEvents,
   parseSimulationSession,
   parseStructuredVoiceProfile,
+  parseTraineeDeliveryAnalysis,
   parseTranscriptTurns,
   type ValidatedScenarioSnapshot,
 } from "@/lib/validation/schemas";
@@ -118,6 +124,18 @@ interface SessionEventInput {
   listening_before?: number | null;
   listening_after?: number | null;
   payload?: Record<string, unknown>;
+}
+
+interface PendingTraineeAudioAnalysisTurn {
+  turnIndex: number;
+  utterance: string;
+  scenarioContext: string;
+  currentEscalation: number;
+  recentTurns: { speaker: string; content: string }[];
+  classifierResult: ClassifierResult;
+  snapshot: PersistedTurnSnapshot;
+  durationMs: number | null;
+  turnPersistPromise: Promise<unknown> | null;
 }
 
 const FALLBACK_BOT_TURN: PreparedBotTurn = {
@@ -201,6 +219,9 @@ export default function SimulationPage() {
   const lastClinicianVoiceProfileRef = useRef<StructuredVoiceProfile | null>(null);
   const pendingPatientTurnCompletionRef = useRef<PendingTurnCompletion | null>(null);
   const maxSessionDurationSecondsRef = useRef<number>(10 * 60);
+  const pendingTraineeAudioAnalysisTurnsRef = useRef<Map<string, PendingTraineeAudioAnalysisTurn>>(new Map());
+  const pendingTraineeAudioSegmentsRef = useRef<Map<string, TraineeAudioSegment>>(new Map());
+  const inFlightTraineeAudioAnalysisRef = useRef<Set<string>>(new Set());
 
   useEffect(() => { transcriptRef.current = transcriptEntries; }, [transcriptEntries]);
 
@@ -354,6 +375,7 @@ export default function SimulationPage() {
         await connect({
           voice: voiceConfig.voice_name || "marin", instructions,
           onTraineeTranscript: handleTraineeTranscript,
+          onTraineeAudioSegment: handleTraineeAudioSegment,
           onAiTranscript: handleAiTranscriptDone,
           onAiTranscriptDelta: handleAiDelta,
           onAiPlaybackComplete: handleAiPlaybackComplete,
@@ -493,9 +515,10 @@ export default function SimulationPage() {
     speaker: Speaker,
     content: string,
     snapshot: PersistedTurnSnapshot,
-    timestamp?: string
+    timestamp?: string,
+    durationMs?: number | null
   ) {
-    void trackPersistence(
+    return trackPersistence(
       persistRequest(
         `transcript turn ${turnIndex} ${speaker}`,
         `/api/sessions/${sessionId}/transcript`,
@@ -513,6 +536,7 @@ export default function SimulationPage() {
             patient_voice_profile_after: snapshot.patientVoiceProfileAfter,
             patient_prompt_after: snapshot.patientPromptAfter,
             started_at: timestamp,
+            duration_ms: durationMs ?? null,
           }),
         }
       )
@@ -523,7 +547,7 @@ export default function SimulationPage() {
     turnIndex: number,
     snapshot: PersistedTurnSnapshot
   ) {
-    void trackPersistence(
+    return trackPersistence(
       persistRequest(
         `transcript patch ${turnIndex}`,
         `/api/sessions/${sessionId}/transcript`,
@@ -584,6 +608,87 @@ export default function SimulationPage() {
       console.error(`[Simulation] Failed to parse ${label} response`, error);
       return fallback;
     }
+  }
+
+  function maybeStartTraineeAudioAnalysis(itemId: string) {
+    const turn = pendingTraineeAudioAnalysisTurnsRef.current.get(itemId);
+    const segment = pendingTraineeAudioSegmentsRef.current.get(itemId);
+    if (!turn || !segment || inFlightTraineeAudioAnalysisRef.current.has(itemId)) {
+      return;
+    }
+
+    inFlightTraineeAudioAnalysisRef.current.add(itemId);
+    pendingTraineeAudioAnalysisTurnsRef.current.delete(itemId);
+    pendingTraineeAudioSegmentsRef.current.delete(itemId);
+
+    void trackPersistence((async () => {
+      try {
+        if (turn.turnPersistPromise) {
+          await turn.turnPersistPromise.catch(() => null);
+        }
+
+        const audioBase64 = await convertAudioBlobToWavBase64(segment.blob);
+        const res = await fetch("/api/analysis/trainee-delivery", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            utterance: turn.utterance,
+            scenarioContext: turn.scenarioContext,
+            currentEscalation: turn.currentEscalation,
+            recentTurns: turn.recentTurns,
+            audioBase64,
+            durationMs: turn.durationMs ?? segment.durationMs ?? null,
+          }),
+          keepalive: true,
+        }).catch(() => null);
+
+        if (!res || !res.ok) {
+          return;
+        }
+
+        const deliveryAnalysis = await readJsonSafely(
+          res,
+          (raw) => {
+            if (typeof raw !== "object" || raw === null || !("deliveryAnalysis" in raw)) {
+              return null;
+            }
+            return parseTraineeDeliveryAnalysis((raw as Record<string, unknown>).deliveryAnalysis);
+          },
+          null,
+          "trainee delivery analysis"
+        );
+        if (!deliveryAnalysis) {
+          return;
+        }
+
+        const nextSnapshot: PersistedTurnSnapshot = {
+          ...turn.snapshot,
+          classifierResult: {
+            ...turn.classifierResult,
+            trainee_delivery_analysis: deliveryAnalysis,
+          },
+        };
+
+        await updatePersistedTurnSnapshot(turn.turnIndex, nextSnapshot);
+      } catch (error) {
+        console.error("[Simulation] Trainee audio analysis error", error);
+      } finally {
+        inFlightTraineeAudioAnalysisRef.current.delete(itemId);
+      }
+    })());
+  }
+
+  function queueTraineeAudioAnalysis(
+    itemId: string,
+    pendingTurn: PendingTraineeAudioAnalysisTurn
+  ) {
+    pendingTraineeAudioAnalysisTurnsRef.current.set(itemId, pendingTurn);
+    maybeStartTraineeAudioAnalysis(itemId);
+  }
+
+  function handleTraineeAudioSegment(segment: TraineeAudioSegment) {
+    pendingTraineeAudioSegmentsRef.current.set(segment.itemId, segment);
+    maybeStartTraineeAudioAnalysis(segment.itemId);
   }
 
   async function fetchSessionRecord(
@@ -1216,16 +1321,17 @@ export default function SimulationPage() {
     // aiSpeakingRef.current intentionally NOT set to false
   }
 
-  const handleTraineeTranscript = useCallback(async (text: string) => {
+  const handleTraineeTranscript = useCallback(async (text: string, meta?: TraineeTranscriptMeta) => {
     const timestamp = new Date().toISOString();
     const recentTurns = transcriptRef.current.slice(-4).map((e) => ({ speaker: e.speaker, content: e.content }));
     appendTranscriptEntry({ speaker: "trainee", content: text, timestamp });
     const idx = turnIndexRef.current++;
+    const itemId = meta?.itemId ?? null;
 
     if (classifyingRef.current || !engineRef.current || !scenarioRef.current) {
       const fallbackSnapshot = buildSnapshot();
       if (fallbackSnapshot) {
-        persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp);
+        persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp, meta?.durationMs ?? null);
       }
       return;
     }
@@ -1233,6 +1339,8 @@ export default function SimulationPage() {
     let resolveClassifyDone!: () => void;
     classifyDoneRef.current = new Promise<void>((r) => { resolveClassifyDone = r; });
     const snapshot = scenarioRef.current;
+    const scenarioContext = `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`;
+    const currentEscalation = engineRef.current.getLevel();
 
     let classResult: ClassifierResult | null = null;
     let delta: { trigger_type: string; level_delta: number; trust_delta: number; listening_delta: number; reason: string } | null = null;
@@ -1240,9 +1348,6 @@ export default function SimulationPage() {
     let prevState: EscalationState | null = null;
 
     try {
-      const scenarioContext = `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`;
-      const currentEscalation = engineRef.current.getLevel();
-
       // Fetch trainee voice profile first so the classifier can assess tone
       const traineeVoiceProfile = await fetch("/api/voice-profile/trainee", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -1268,11 +1373,18 @@ export default function SimulationPage() {
         console.error("[Escalation] Classify API failed:", classifyRes.status);
         const fallbackSnapshot = buildSnapshot();
         if (fallbackSnapshot) {
-          persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp);
+          persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp, meta?.durationMs ?? null);
         }
         return;
       }
-      classResult = await classifyRes.json();
+      classResult = await readJsonSafely(classifyRes, parseClassifierResult, null, "classification");
+      if (!classResult) {
+        const fallbackSnapshot = buildSnapshot();
+        if (fallbackSnapshot) {
+          persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp, meta?.durationMs ?? null);
+        }
+        return;
+      }
       if (classResult!.clinical_milestone_completed) {
         completedMilestonesRef.current.add(classResult!.clinical_milestone_completed);
       }
@@ -1304,7 +1416,7 @@ export default function SimulationPage() {
       console.error("Classification error:", err);
       const fallbackSnapshot = buildSnapshot();
       if (fallbackSnapshot) {
-        persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp);
+        persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp, meta?.durationMs ?? null);
       }
       return;
     } finally { classifyingRef.current = false; resolveClassifyDone(); }
@@ -1327,7 +1439,27 @@ export default function SimulationPage() {
         patientPromptAfter: newInstructions,
       });
       if (turnSnapshot) {
-        persistTranscriptTurn(idx, "trainee", text, turnSnapshot, timestamp);
+        const persistPromise = persistTranscriptTurn(
+          idx,
+          "trainee",
+          text,
+          turnSnapshot,
+          timestamp,
+          meta?.durationMs ?? null
+        );
+        if (itemId && classResult) {
+          queueTraineeAudioAnalysis(itemId, {
+            turnIndex: idx,
+            utterance: text,
+            scenarioContext,
+            currentEscalation,
+            recentTurns,
+            classifierResult: classResult,
+            snapshot: turnSnapshot,
+            durationMs: meta?.durationMs ?? null,
+            turnPersistPromise: persistPromise ?? null,
+          });
+        }
       }
 
       if (aiSpeakingRef.current) {
@@ -1344,7 +1476,27 @@ export default function SimulationPage() {
         stateAfter: newState!,
       });
       if (fallbackSnapshot) {
-        persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp);
+        const persistPromise = persistTranscriptTurn(
+          idx,
+          "trainee",
+          text,
+          fallbackSnapshot,
+          timestamp,
+          meta?.durationMs ?? null
+        );
+        if (itemId && classResult) {
+          queueTraineeAudioAnalysis(itemId, {
+            turnIndex: idx,
+            utterance: text,
+            scenarioContext,
+            currentEscalation,
+            recentTurns,
+            classifierResult: classResult,
+            snapshot: fallbackSnapshot,
+            durationMs: meta?.durationMs ?? null,
+            turnPersistPromise: persistPromise ?? null,
+          });
+        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1404,7 +1556,7 @@ export default function SimulationPage() {
         }
       )
     );
-    await flushPendingPersistence();
+    await flushPendingPersistence(8000);
     await audioUploadPromise;
     router.push(`/review/${sessionId}`);
   }

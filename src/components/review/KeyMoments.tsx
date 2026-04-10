@@ -24,6 +24,34 @@ const EVIDENCE_DESCRIPTIONS: Record<string, (data: Record<string, unknown>) => s
     const labels = markers.map((m) => m.replace(/_/g, " "));
     return labels.join(", ");
   },
+  delivery_marker: (data) => {
+    const markers = data.markers as string[] | undefined;
+    const summary = data.summary as string | undefined;
+    const confidence = typeof data.confidence === "number"
+      ? Math.round(data.confidence * 100)
+      : null;
+    const pairedWithAttempt = data.pairedWithAttempt as boolean | undefined;
+
+    if (summary) {
+      return pairedWithAttempt && confidence != null
+        ? `${summary} (${confidence}% confidence during the de-escalation attempt)`
+        : pairedWithAttempt
+          ? `${summary} during the de-escalation attempt`
+          : confidence != null
+            ? `${summary} (${confidence}% confidence)`
+            : summary;
+    }
+
+    const labels = markers?.map((marker) => marker.replace(/_/g, " ")) ?? [];
+    if (!labels.length) {
+      return "Audio-derived delivery affected scoring";
+    }
+
+    const markerText = labels.join(", ");
+    return pairedWithAttempt
+      ? `Audio delivery during the de-escalation attempt sounded ${markerText}`
+      : `Audio delivery sounded ${markerText}`;
+  },
   de_escalation_attempt: (data) => {
     const technique = data.technique as string | undefined;
     const effective = data.effective as boolean;

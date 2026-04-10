@@ -108,6 +108,27 @@ export type DeEscalationTechnique =
   | "naming_emotion"
   | "open_question";
 
+export type TraineeDeliveryMarker =
+  | "calm_measured"
+  | "warm_empathic"
+  | "tense_hurried"
+  | "flat_detached"
+  | "defensive_tone"
+  | "sarcastic_tone"
+  | "irritated_tone"
+  | "hostile_tone"
+  | "anxious_unsteady";
+
+export interface TraineeDeliveryAnalysis {
+  source: "audio";
+  confidence: number;
+  summary: string;
+  markers: TraineeDeliveryMarker[];
+  acousticEvidence: string[];
+  duration_ms: number | null;
+  voiceProfile: StructuredVoiceProfile;
+}
+
 export interface ClassifierResult {
   technique: string;
   effectiveness: number; // -1.0 to 1.0
@@ -119,6 +140,7 @@ export interface ClassifierResult {
   de_escalation_attempt?: boolean;
   de_escalation_technique?: DeEscalationTechnique | null;
   clinical_milestone_completed?: string | null;
+  trainee_delivery_analysis?: TraineeDeliveryAnalysis | null;
 }
 
 export interface EducatorNote {

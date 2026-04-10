@@ -31,6 +31,10 @@ function getSpeakerClassName(speaker: string): string {
   return "border-slate-300 bg-slate-50 text-slate-600";
 }
 
+function formatMarkerLabel(marker: string): string {
+  return marker.replace(/_/g, " ");
+}
+
 function EscalationImpact({
   levelBefore,
   levelAfter,
@@ -95,6 +99,9 @@ export function TranscriptViewer({
       <div className="space-y-3 p-4">
         {turns.map((turn) => {
           const classifier = turn.classifier_result;
+          const deliveryAnalysis = turn.speaker === "trainee"
+            ? classifier?.trainee_delivery_analysis ?? null
+            : null;
           const stateAfter = turn.state_after;
           const clinicianAudio = turn.speaker === "system"
             ? clinicianAudioByTurnIndex?.get(turn.turn_index)
@@ -252,6 +259,29 @@ export function TranscriptViewer({
                       {tag}
                     </Badge>
                   ))}
+                </div>
+              )}
+              {deliveryAnalysis && (
+                <div className="mt-2 space-y-1">
+                  <div className="flex flex-wrap gap-1">
+                    <Badge
+                      variant="outline"
+                      className="border-sky-500 text-[10px] text-sky-700"
+                    >
+                      Audio delivery
+                    </Badge>
+                    <Badge variant="outline" className="text-[10px]">
+                      {Math.round(deliveryAnalysis.confidence * 100)}% confidence
+                    </Badge>
+                    {deliveryAnalysis.markers.map((marker) => (
+                      <Badge key={marker} variant="outline" className="text-[10px]">
+                        {formatMarkerLabel(marker)}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {deliveryAnalysis.summary}
+                  </p>
                 </div>
               )}
             </div>

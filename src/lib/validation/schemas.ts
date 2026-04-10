@@ -17,6 +17,7 @@ import type {
   SessionReflection,
   SimulationSession,
   SimulationStateEvent,
+  TraineeDeliveryAnalysis,
   TranscriptTurn,
 } from "@/types/simulation";
 import type { StructuredVoiceProfile } from "@/types/voice";
@@ -93,6 +94,28 @@ const deEscalationTechniqueSchema = z.enum([
   "open_question",
 ]);
 
+const traineeDeliveryMarkerSchema = z.enum([
+  "calm_measured",
+  "warm_empathic",
+  "tense_hurried",
+  "flat_detached",
+  "defensive_tone",
+  "sarcastic_tone",
+  "irritated_tone",
+  "hostile_tone",
+  "anxious_unsteady",
+]);
+
+export const traineeDeliveryAnalysisSchema: z.ZodType<TraineeDeliveryAnalysis> = z.object({
+  source: z.literal("audio"),
+  confidence: z.number().min(0).max(1),
+  summary: z.string(),
+  markers: z.array(traineeDeliveryMarkerSchema),
+  acousticEvidence: z.array(z.string()),
+  duration_ms: nullableNumberSchema,
+  voiceProfile: structuredVoiceProfileSchema,
+});
+
 export const classifierResultSchema = z.object({
   technique: z.string(),
   effectiveness: z.number(),
@@ -103,6 +126,7 @@ export const classifierResultSchema = z.object({
   de_escalation_attempt: z.boolean().optional(),
   de_escalation_technique: deEscalationTechniqueSchema.nullable().optional(),
   clinical_milestone_completed: scenarioMilestoneIdSchema.nullable().optional(),
+  trainee_delivery_analysis: traineeDeliveryAnalysisSchema.nullable().optional(),
 });
 
 export const scenarioTraitsSchema = z.object({
@@ -239,6 +263,15 @@ export const traineeVoiceProfileRequestBodySchema = z.object({
   scenarioContext: z.string().default("NHS communication scenario"),
   currentEscalation: z.number().min(0).max(10).default(3),
   recentTurns: z.array(recentTurnSchema).default([]),
+});
+
+export const traineeDeliveryAnalysisRequestBodySchema = z.object({
+  utterance: z.string().min(1),
+  scenarioContext: z.string().default("NHS communication scenario"),
+  currentEscalation: z.number().min(0).max(10).default(3),
+  recentTurns: z.array(recentTurnSchema).default([]),
+  audioBase64: z.string().min(1),
+  durationMs: z.number().int().nonnegative().nullable().optional(),
 });
 
 const clinicianStateSnapshotSchema = escalationStateSchema
@@ -512,6 +545,11 @@ export function parseSessionReflection(data: unknown): SessionReflection | null 
 
 export function parseClassifierResult(data: unknown): ClassifierResult | null {
   const parsed = classifierResultSchema.safeParse(data);
+  return parsed.success ? parsed.data : null;
+}
+
+export function parseTraineeDeliveryAnalysis(data: unknown): TraineeDeliveryAnalysis | null {
+  const parsed = traineeDeliveryAnalysisSchema.safeParse(data);
   return parsed.success ? parsed.data : null;
 }
 

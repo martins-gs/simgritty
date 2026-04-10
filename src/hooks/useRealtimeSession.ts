@@ -12,10 +12,40 @@ import {
 } from "@/lib/realtime/peerConnection";
 import { useSimulationStore } from "@/store/simulationStore";
 
+function getSupportedSegmentMimeType(): string | null {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+  ];
+
+  for (const mime of candidates) {
+    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(mime)) {
+      return mime;
+    }
+  }
+
+  return null;
+}
+
+export interface TraineeTranscriptMeta {
+  itemId: string;
+  audioStartMs: number | null;
+  audioEndMs: number | null;
+  durationMs: number | null;
+}
+
+export interface TraineeAudioSegment extends TraineeTranscriptMeta {
+  blob: Blob;
+  mimeType: string;
+}
+
 interface RealtimeSessionConfig {
   voice: string;
   instructions: string;
-  onTraineeTranscript: (text: string) => void;
+  onTraineeTranscript: (text: string, meta?: TraineeTranscriptMeta) => void;
+  onTraineeAudioSegment?: (segment: TraineeAudioSegment) => void;
   onAiTranscript: (text: string) => void;
   onAiTranscriptDelta: (delta: string) => void;
   onAiPlaybackComplete: () => void;
@@ -67,6 +97,18 @@ export function useRealtimeSession() {
   // Deduplication
   const lastTraineeTextRef = useRef("");
   const lastTraineeTimeRef = useRef(0);
+  const traineeSpeechBoundariesRef = useRef(new Map<string, {
+    audioStartMs: number | null;
+    audioEndMs: number | null;
+  }>());
+  const traineeSegmentRecorderRef = useRef<{
+    itemId: string;
+    recorder: MediaRecorder;
+    chunks: Blob[];
+    audioStartMs: number | null;
+    audioEndMs: number | null;
+    mimeType: string;
+  } | null>(null);
 
   const setConnectionStatus = useSimulationStore((s) => s.setConnectionStatus);
 
@@ -143,6 +185,94 @@ export function useRealtimeSession() {
     }
   }
 
+  const resetTraineeSegmentRecorder = useCallback(() => {
+    const segment = traineeSegmentRecorderRef.current;
+    if (!segment) return;
+
+    if (segment.recorder.state !== "inactive") {
+      try {
+        segment.recorder.stop();
+      } catch {}
+    }
+
+    traineeSegmentRecorderRef.current = null;
+  }, []);
+
+  const startTraineeSegmentRecorder = useCallback((
+    itemId: string,
+    audioStartMs: number | null,
+    config: RealtimeSessionConfig
+  ) => {
+    const stream = localStreamRef.current;
+    const mimeType = getSupportedSegmentMimeType();
+    if (!stream || typeof MediaRecorder === "undefined" || !mimeType) {
+      return;
+    }
+
+    resetTraineeSegmentRecorder();
+
+    try {
+      const recorder = new MediaRecorder(stream, { mimeType });
+      const nextSegment = {
+        itemId,
+        recorder,
+        chunks: [] as Blob[],
+        audioStartMs,
+        audioEndMs: null as number | null,
+        mimeType,
+      };
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          nextSegment.chunks.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const boundary = traineeSpeechBoundariesRef.current.get(itemId);
+        const audioEndMs = nextSegment.audioEndMs ?? boundary?.audioEndMs ?? null;
+        const blob = nextSegment.chunks.length > 0
+          ? new Blob(nextSegment.chunks, { type: mimeType })
+          : null;
+
+        traineeSegmentRecorderRef.current = null;
+
+        if (!blob || !config.onTraineeAudioSegment) {
+          return;
+        }
+
+        config.onTraineeAudioSegment({
+          itemId,
+          blob,
+          mimeType,
+          audioStartMs,
+          audioEndMs,
+          durationMs:
+            audioStartMs != null && audioEndMs != null
+              ? Math.max(0, audioEndMs - audioStartMs)
+              : null,
+        });
+      };
+
+      recorder.start();
+      traineeSegmentRecorderRef.current = nextSegment;
+    } catch (error) {
+      console.error("[Realtime] Failed to start trainee segment recorder", error);
+    }
+  }, [resetTraineeSegmentRecorder]);
+
+  const stopTraineeSegmentRecorder = useCallback((itemId: string, audioEndMs: number | null) => {
+    const segment = traineeSegmentRecorderRef.current;
+    if (!segment || segment.itemId !== itemId) {
+      return;
+    }
+
+    segment.audioEndMs = audioEndMs;
+    if (segment.recorder.state !== "inactive") {
+      segment.recorder.stop();
+    }
+  }, []);
+
   const handleServerEvent = useCallback((
     msg: Record<string, unknown>,
     config: RealtimeSessionConfig
@@ -164,6 +294,8 @@ export function useRealtimeSession() {
       case "conversation.item.input_audio_transcription.completed": {
         const transcript = (msg.transcript as string)?.trim();
         if (!transcript) break;
+        const itemId = typeof msg.item_id === "string" ? msg.item_id : "";
+        const boundaries = itemId ? traineeSpeechBoundariesRef.current.get(itemId) : undefined;
 
         // The mic track is disabled while the echo gate is active, so no new audio
         // reaches the API during gating. Any transcript arriving while gated is from
@@ -184,7 +316,45 @@ export function useRealtimeSession() {
         lastTraineeTextRef.current = transcript;
         lastTraineeTimeRef.current = now;
 
-        config.onTraineeTranscript(transcript);
+        config.onTraineeTranscript(transcript, itemId ? {
+          itemId,
+          audioStartMs: boundaries?.audioStartMs ?? null,
+          audioEndMs: boundaries?.audioEndMs ?? null,
+          durationMs:
+            boundaries?.audioStartMs != null && boundaries?.audioEndMs != null
+              ? Math.max(0, boundaries.audioEndMs - boundaries.audioStartMs)
+              : null,
+        } : undefined);
+        break;
+      }
+
+      case "input_audio_buffer.speech_started": {
+        const itemId = typeof msg.item_id === "string" ? msg.item_id : "";
+        const audioStartMs = typeof msg.audio_start_ms === "number" ? msg.audio_start_ms : null;
+        if (!itemId) break;
+
+        traineeSpeechBoundariesRef.current.set(itemId, {
+          audioStartMs,
+          audioEndMs: null,
+        });
+        startTraineeSegmentRecorder(itemId, audioStartMs, config);
+        break;
+      }
+
+      case "input_audio_buffer.speech_stopped": {
+        const itemId = typeof msg.item_id === "string" ? msg.item_id : "";
+        const audioEndMs = typeof msg.audio_end_ms === "number" ? msg.audio_end_ms : null;
+        if (!itemId) break;
+
+        const existing = traineeSpeechBoundariesRef.current.get(itemId) ?? {
+          audioStartMs: null,
+          audioEndMs: null,
+        };
+        traineeSpeechBoundariesRef.current.set(itemId, {
+          ...existing,
+          audioEndMs,
+        });
+        stopTraineeSegmentRecorder(itemId, audioEndMs);
         break;
       }
 
@@ -317,7 +487,7 @@ export function useRealtimeSession() {
         break;
       }
     }
-  }, [gateMic, ungateMic]);
+  }, [gateMic, startTraineeSegmentRecorder, stopTraineeSegmentRecorder, ungateMic]);
 
   const connect = useCallback(async (config: RealtimeSessionConfig) => {
     if (pcRef.current || dcRef.current || audioElRef.current || localStreamRef.current) {
@@ -742,6 +912,7 @@ export function useRealtimeSession() {
       audioElRef.current,
       localStreamRef.current
     );
+    resetTraineeSegmentRecorder();
     pcRef.current = null;
     dcRef.current = null;
     audioElRef.current = null;
@@ -754,8 +925,9 @@ export function useRealtimeSession() {
     micForcedOffRef.current = false;
     lastTraineeTextRef.current = "";
     lastTraineeTimeRef.current = 0;
+    traineeSpeechBoundariesRef.current.clear();
     setConnectionStatus("disconnected");
-  }, [setConnectionStatus]);
+  }, [resetTraineeSegmentRecorder, setConnectionStatus]);
 
   useEffect(() => {
     return () => {
