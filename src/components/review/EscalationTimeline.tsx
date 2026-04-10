@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   AreaChart,
   Area,
@@ -13,9 +13,11 @@ import {
 } from "recharts";
 import { Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { KeyMomentCard } from "@/components/review/KeyMoments";
+import { DIMENSION_LABELS, describeEvidence } from "@/components/review/KeyMoments";
 import type { ScoreEvidence } from "@/lib/engine/scoring";
 import type { SimulationStateEvent, TranscriptTurn } from "@/types/simulation";
+import { ESCALATION_LABELS } from "@/types/escalation";
+import { cn } from "@/lib/utils";
 
 interface EscalationTimelineProps {
   events: SimulationStateEvent[];
@@ -40,10 +42,15 @@ interface ChartPoint {
 
 interface KeyMomentEntry {
   index: number;
+  moment: ScoreEvidence;
   time: number;
+  turn: TranscriptTurn;
+  point: ChartPoint | null;
 }
 
 const CHART_MARGIN = { top: 8, right: 52, bottom: 6, left: 4 };
+const PLAYBACK_CARD_DURATION_MS = 15_000;
+const AI_RESPONSE_BUFFER_S = 3;
 
 function getLevelColor(level: number): string {
   if (level <= 2) return "#10b981";
@@ -51,6 +58,12 @@ function getLevelColor(level: number): string {
   if (level <= 6) return "#f97316";
   if (level <= 8) return "#ef4444";
   return "#991b1b";
+}
+
+function getEffectivenessColor(effectiveness: number): string {
+  if (effectiveness > 0.2) return "#10b981";
+  if (effectiveness < -0.2) return "#ef4444";
+  return "#94a3b8";
 }
 
 function getEventDotColor(type: string): string {
@@ -102,6 +115,147 @@ function formatTime(secs: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function estimateTurnCueTime(turnPosition: number, turns: TranscriptTurn[], startTime: number) {
+  const turn = turns[turnPosition];
+  const turnTime = getRelativeTime(turn.started_at, startTime);
+  const previousTurn = turnPosition > 0 ? turns[turnPosition - 1] : null;
+  if (!previousTurn) return turnTime;
+
+  const previousTurnTime = getRelativeTime(previousTurn.started_at, startTime);
+  if (turn.speaker === "trainee") {
+    return Math.min(turnTime, Math.max(0, previousTurnTime));
+  }
+  if (turn.speaker === "ai" || turn.speaker === "system") {
+    return Math.min(turnTime, Math.max(0, previousTurnTime - AI_RESPONSE_BUFFER_S));
+  }
+
+  return turnTime;
+}
+
+function TimelineMomentCard({
+  entry,
+  showNow,
+}: {
+  entry: KeyMomentEntry;
+  showNow: boolean;
+}) {
+  const { moment, turn, point, time } = entry;
+  const isPositive = moment.scoreImpact > 0;
+  const isNegative = moment.scoreImpact < 0;
+  const level = point?.level ?? null;
+  const levelColor = level !== null ? getLevelColor(level) : "#64748b";
+
+  return (
+    <div className="w-[26rem] max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-2xl ring-1 ring-black/5 backdrop-blur-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-slate-400">
+            Key moment
+          </span>
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+              isPositive && "bg-emerald-50 text-emerald-700",
+              isNegative && "bg-red-50 text-red-700",
+              !isPositive && !isNegative && "bg-slate-100 text-slate-600"
+            )}
+          >
+            {DIMENSION_LABELS[moment.dimension] ?? moment.dimension}
+          </span>
+          {showNow && (
+            <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
+              Now
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium text-slate-400">{formatTime(time)}</span>
+          {level !== null && (
+            <span
+              className="rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white"
+              style={{ backgroundColor: levelColor }}
+            >
+              Level {level}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {level !== null && (
+        <p className="mt-2 text-[13px] font-semibold text-slate-800">
+          {ESCALATION_LABELS[level] ?? `Level ${level}`}
+        </p>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="text-[12px] font-medium text-slate-600">Turn {moment.turnIndex + 1}</span>
+        {moment.scoreImpact !== 0 && (
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums",
+              isPositive && "bg-emerald-50 text-emerald-700",
+              isNegative && "bg-red-50 text-red-700",
+              !isPositive && !isNegative && "bg-slate-100 text-slate-600"
+            )}
+          >
+            {isPositive ? "+" : ""}
+            {Math.round(moment.scoreImpact)}
+          </span>
+        )}
+      </div>
+
+      {turn.content && (
+        <p className="mt-3 text-[13px] italic leading-relaxed text-slate-700">
+          &ldquo;{turn.content}&rdquo;
+        </p>
+      )}
+
+      <p className="mt-3 text-[13px] leading-relaxed text-slate-600">
+        {describeEvidence(moment)}
+      </p>
+
+      {(point?.technique || point?.effectiveness != null) && (
+        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2">
+          {point?.technique && (
+            <p className="text-[12px] text-slate-700">
+              <span className="font-medium">Technique:</span> {point.technique}
+            </p>
+          )}
+          {point?.effectiveness !== null && (
+            <p className="mt-1 text-[12px] text-slate-700">
+              <span className="font-medium">Effectiveness:</span>{" "}
+              <span
+                className="font-bold"
+                style={{ color: getEffectivenessColor(point.effectiveness) }}
+              >
+                {point.effectiveness > 0 ? "+" : ""}
+                {point.effectiveness.toFixed(2)}
+              </span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {point?.reasoning && (
+        <p className="mt-3 text-[12px] italic leading-relaxed text-slate-500">
+          {point.reasoning}
+        </p>
+      )}
+
+      {(point?.trust != null || point?.listening != null) && (
+        <div className="mt-3 flex flex-wrap gap-4 border-t border-slate-100 pt-3 text-[11px]">
+          {point?.trust != null && (
+            <span className="font-medium text-blue-600">Trust: {point.trust}/10</span>
+          )}
+          {point?.listening != null && (
+            <span className="font-medium text-violet-600">Listening: {point.listening}/10</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CustomDot(props: {
   cx?: number;
   cy?: number;
@@ -149,12 +303,19 @@ export function EscalationTimeline({
 }: EscalationTimelineProps) {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const overlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousPlaybackSecondRef = useRef<number | null>(null);
+  const previousTriggeredMomentIndexRef = useRef<number | null | undefined>(undefined);
   const [chartSize, setChartSize] = useState<{ width: number; height: number } | null>(null);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hoveredTime, setHoveredTime] = useState<number | null>(null);
+  const [playbackOverlayMomentIndex, setPlaybackOverlayMomentIndex] = useState<number | null>(null);
   const startTime = new Date(sessionStartedAt).getTime();
+  const syncPlaybackOverlayMomentIndex = useEffectEvent((index: number | null) => {
+    setPlaybackOverlayMomentIndex(index);
+  });
 
   useEffect(() => {
     const container = chartContainerRef.current;
@@ -274,18 +435,25 @@ export function EscalationTimeline({
     }
   }
 
+  const turnPositionByTurnIndex = new Map(turns.map((turn, index) => [turn.turn_index, index]));
   const keyMomentEntries: KeyMomentEntry[] = keyMoments
     .map((moment, index) => {
-      const turn = turns.find((candidate) => candidate.turn_index === moment.turnIndex);
-      if (!turn) return null;
+      const turnPosition = turnPositionByTurnIndex.get(moment.turnIndex);
+      if (turnPosition === undefined) return null;
 
+      const turn = turns[turnPosition];
+      const time = estimateTurnCueTime(turnPosition, turns, startTime);
       return {
         index,
-        time: getRelativeTime(turn.started_at, startTime),
+        moment,
+        time,
+        turn,
+        point: getChartPointAtTime(data, time),
       };
     })
     .filter((entry): entry is KeyMomentEntry => entry !== null)
     .sort((a, b) => a.time - b.time || a.index - b.index);
+  const keyMomentEntryByIndex = new Map(keyMomentEntries.map((entry) => [entry.index, entry]));
 
   const lastTurn = turns[turns.length - 1];
   const lastTurnTime = lastTurn ? getRelativeTime(lastTurn.started_at, startTime) : 0;
@@ -312,15 +480,55 @@ export function EscalationTimeline({
   const markerPoint = getChartPointAtTime(data, markerTime);
   const playbackKeyMomentIndex = getKeyMomentAtTime(keyMomentEntries, playbackSecond)?.index ?? null;
   const hoveredKeyMomentIndex = getKeyMomentAtTime(keyMomentEntries, hoveredSecond)?.index ?? null;
-  const displayedKeyMomentIndex = hoveredSecond !== null
-    ? hoveredKeyMomentIndex
-    : playbackActive
-      ? playbackKeyMomentIndex
-      : null;
+  const displayedKeyMomentIndex = hoveredKeyMomentIndex ?? playbackOverlayMomentIndex;
+  const displayedKeyMomentEntry = displayedKeyMomentIndex !== null
+    ? keyMomentEntryByIndex.get(displayedKeyMomentIndex) ?? null
+    : null;
 
   useEffect(() => {
     onActiveKeyMomentChange?.(displayedKeyMomentIndex);
   }, [displayedKeyMomentIndex, onActiveKeyMomentChange]);
+
+  useEffect(() => {
+    if (!playbackActive) {
+      previousTriggeredMomentIndexRef.current = undefined;
+      previousPlaybackSecondRef.current = playbackSecond;
+      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+      syncPlaybackOverlayMomentIndex(null);
+      return;
+    }
+
+    if (
+      playbackSecond !== null &&
+      previousPlaybackSecondRef.current !== null &&
+      playbackSecond < previousPlaybackSecondRef.current
+    ) {
+      previousTriggeredMomentIndexRef.current = undefined;
+      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+      syncPlaybackOverlayMomentIndex(null);
+    }
+    previousPlaybackSecondRef.current = playbackSecond;
+
+    if (
+      playbackKeyMomentIndex === null ||
+      playbackKeyMomentIndex === previousTriggeredMomentIndexRef.current
+    ) {
+      return;
+    }
+    previousTriggeredMomentIndexRef.current = playbackKeyMomentIndex;
+
+    if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+    syncPlaybackOverlayMomentIndex(playbackKeyMomentIndex);
+    overlayTimerRef.current = setTimeout(() => {
+      syncPlaybackOverlayMomentIndex(null);
+    }, PLAYBACK_CARD_DURATION_MS);
+  }, [playbackActive, playbackKeyMomentIndex, playbackSecond]);
+
+  useEffect(() => {
+    return () => {
+      if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
+    };
+  }, []);
 
   if (data.length === 0) {
     return (
@@ -630,20 +838,14 @@ export function EscalationTimeline({
           <div className="h-full w-full animate-pulse rounded-xl bg-slate-100/70" />
         )}
 
-        {displayedKeyMomentIndex !== null && (() => {
-          const moment = keyMoments[displayedKeyMomentIndex];
-          if (!moment) return null;
-          const turn = turns.find((t) => t.turn_index === moment.turnIndex);
-          return (
-            <div className="pointer-events-none absolute bottom-3 left-9 z-10 w-72 overflow-hidden rounded-xl bg-white shadow-xl ring-1 ring-black/5">
-              <KeyMomentCard
-                moment={moment}
-                turn={turn}
-                isActive={playbackActive && hoveredSecond === null}
-              />
-            </div>
-          );
-        })()}
+        {displayedKeyMomentEntry && (
+          <div className="pointer-events-none absolute bottom-3 left-4 z-10 max-w-[calc(100%-2rem)] overflow-hidden">
+            <TimelineMomentCard
+              entry={displayedKeyMomentEntry}
+              showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
+            />
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
