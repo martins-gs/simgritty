@@ -25,7 +25,7 @@ const CLINICIAN_TURN_SCHEMA = z.object({
   voiceProfile: VOICE_PROFILE_SCHEMA,
 });
 
-type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
 
 interface StructuredOutputRequest {
   systemPrompt: string;
@@ -257,7 +257,7 @@ Describe how this utterance likely sounded based on the words, the conversationa
     schemaName: "trainee_voice_profile",
     schema: VOICE_PROFILE_SCHEMA,
     maxTokens: 300,
-    reasoningEffort: "minimal",
+    reasoningEffort: "low",
   });
 }
 
