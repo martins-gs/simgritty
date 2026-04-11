@@ -29,6 +29,7 @@ export interface ScenarioVoiceConfig {
   sarcasm_expression: number; // 0-10
   pause_style: "natural" | "short_clipped" | "long_dramatic" | "minimal";
   interruption_style: "none" | "occasional" | "frequent" | "aggressive";
+  turn_pause_allowance_ms: number; // 0-1500 additional silence before the patient takes a turn
 }
 
 export interface EscalationRules {
@@ -119,6 +120,7 @@ export const DEFAULT_VOICE_CONFIG: ScenarioVoiceConfig = {
   sarcasm_expression: 2,
   pause_style: "natural",
   interruption_style: "none",
+  turn_pause_allowance_ms: 0,
 };
 
 export const DEFAULT_ESCALATION_RULES: EscalationRules = {

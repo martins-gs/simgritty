@@ -155,6 +155,7 @@ export const scenarioVoiceConfigSchema = z.object({
   sarcasm_expression: z.number().min(0).max(10),
   pause_style: z.enum(["natural", "short_clipped", "long_dramatic", "minimal"]),
   interruption_style: z.enum(["none", "occasional", "frequent", "aggressive"]),
+  turn_pause_allowance_ms: z.number().int().min(0).max(1500).default(0),
 });
 
 const escalationTriggerSchema = z.object({
@@ -304,6 +305,7 @@ export const realtimeSessionRequestBodySchema = z.object({
   voice: z.string().optional(),
   instructions: z.string().optional(),
   outputOnly: z.boolean().optional(),
+  turnPauseAllowanceMs: z.number().int().min(0).max(1500).optional(),
 });
 
 export const createSessionRequestBodySchema = z.object({

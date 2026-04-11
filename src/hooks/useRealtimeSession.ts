@@ -10,6 +10,10 @@ import {
   summarizeSdpCandidates,
   type GatheredIceCandidate,
 } from "@/lib/realtime/peerConnection";
+import {
+  clampTurnPauseAllowanceMs,
+  createTurnDetection,
+} from "@/lib/realtime/turnDetection";
 import { useSimulationStore } from "@/store/simulationStore";
 
 function getSupportedSegmentMimeType(): string | null {
@@ -44,6 +48,7 @@ export interface TraineeAudioSegment extends TraineeTranscriptMeta {
 interface RealtimeSessionConfig {
   voice: string;
   instructions: string;
+  turnPauseAllowanceMs?: number;
   onTraineeTranscript: (text: string, meta?: TraineeTranscriptMeta) => void;
   onTraineeAudioSegment?: (segment: TraineeAudioSegment) => void;
   onAiTranscript: (text: string) => void;
@@ -57,15 +62,6 @@ interface RealtimeSessionConfig {
   onAiPlaybackSafetyTimeout?: () => void;
   onError: (error: string) => void;
 }
-
-const DEFAULT_TURN_DETECTION = {
-  type: "server_vad" as const,
-  threshold: 0.55,
-  prefix_padding_ms: 300,
-  silence_duration_ms: 320,
-  interrupt_response: false,
-  create_response: true,
-};
 
 /** Max time (ms) to wait for the data channel to open before treating as a failure. */
 const CONNECTION_TIMEOUT_MS = 20_000;
@@ -94,6 +90,7 @@ export function useRealtimeSession() {
   const consecutivePlaybackSafetyTimeoutsRef = useRef(0);
   // Connection timeout: detect stuck "connecting" state
   const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const turnPauseAllowanceMsRef = useRef(0);
   // Deduplication
   const lastTraineeTextRef = useRef("");
   const lastTraineeTimeRef = useRef(0);
@@ -516,6 +513,7 @@ export function useRealtimeSession() {
     activeResponseIdRef.current = null;
     activeResponseTranscriptDoneRef.current = false;
     consecutivePlaybackSafetyTimeoutsRef.current = 0;
+    turnPauseAllowanceMsRef.current = clampTurnPauseAllowanceMs(config.turnPauseAllowanceMs);
     setConnectionStatus("connecting");
 
     let pc: RTCPeerConnection | null = null;
@@ -545,6 +543,7 @@ export function useRealtimeSession() {
         body: JSON.stringify({
           voice: config.voice,
           instructions: config.instructions,
+          turnPauseAllowanceMs: turnPauseAllowanceMsRef.current,
         }),
       });
 
@@ -859,7 +858,9 @@ export function useRealtimeSession() {
         type: "realtime",
         audio: {
           input: {
-            turn_detection: enabled ? { ...DEFAULT_TURN_DETECTION } : null,
+            turn_detection: enabled
+              ? createTurnDetection(turnPauseAllowanceMsRef.current)
+              : null,
           },
         },
       },

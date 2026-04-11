@@ -375,7 +375,9 @@ export default function SimulationPage() {
         }
 
         await connect({
-          voice: voiceConfig.voice_name || "marin", instructions,
+          voice: voiceConfig.voice_name || "marin",
+          instructions,
+          turnPauseAllowanceMs: voiceConfig.turn_pause_allowance_ms,
           onTraineeTranscript: handleTraineeTranscript,
           onTraineeAudioSegment: handleTraineeAudioSegment,
           onAiTranscript: handleAiTranscriptDone,

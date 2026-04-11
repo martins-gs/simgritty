@@ -43,7 +43,7 @@ export const ARCHETYPE_PRESETS: ArchetypePreset[] = [
     voice_config: {
       voice_name: "alloy", speaking_rate: 1.05, expressiveness_level: 6,
       anger_expression: 4, sarcasm_expression: 2, pause_style: "natural",
-      interruption_style: "occasional",
+      interruption_style: "occasional", turn_pause_allowance_ms: 0,
     },
     escalation_rules: {
       initial_level: 4, max_ceiling: 7, auto_end_threshold: null,
@@ -73,7 +73,7 @@ export const ARCHETYPE_PRESETS: ArchetypePreset[] = [
     voice_config: {
       voice_name: "onyx", speaking_rate: 1.1, expressiveness_level: 5,
       anger_expression: 3, sarcasm_expression: 4, pause_style: "short_clipped",
-      interruption_style: "frequent",
+      interruption_style: "frequent", turn_pause_allowance_ms: 0,
     },
     escalation_rules: {
       initial_level: 4, max_ceiling: 7, auto_end_threshold: null,
@@ -103,7 +103,7 @@ export const ARCHETYPE_PRESETS: ArchetypePreset[] = [
     voice_config: {
       voice_name: "echo", speaking_rate: 1.15, expressiveness_level: 8,
       anger_expression: 7, sarcasm_expression: 5, pause_style: "short_clipped",
-      interruption_style: "aggressive",
+      interruption_style: "aggressive", turn_pause_allowance_ms: 0,
     },
     escalation_rules: {
       initial_level: 6, max_ceiling: 9, auto_end_threshold: null,
@@ -133,7 +133,7 @@ export const ARCHETYPE_PRESETS: ArchetypePreset[] = [
     voice_config: {
       voice_name: "nova", speaking_rate: 0.9, expressiveness_level: 9,
       anger_expression: 1, sarcasm_expression: 0, pause_style: "long_dramatic",
-      interruption_style: "none",
+      interruption_style: "none", turn_pause_allowance_ms: 0,
     },
     escalation_rules: {
       initial_level: 3, max_ceiling: 7, auto_end_threshold: null,
@@ -163,7 +163,7 @@ export const ARCHETYPE_PRESETS: ArchetypePreset[] = [
     voice_config: {
       voice_name: "alloy", speaking_rate: 1.08, expressiveness_level: 8,
       anger_expression: 7, sarcasm_expression: 5, pause_style: "short_clipped",
-      interruption_style: "frequent",
+      interruption_style: "frequent", turn_pause_allowance_ms: 0,
     },
     escalation_rules: {
       initial_level: 5, max_ceiling: 9, auto_end_threshold: null,

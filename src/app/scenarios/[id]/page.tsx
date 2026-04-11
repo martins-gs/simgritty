@@ -105,6 +105,7 @@ export default function EditScenarioPage() {
             sarcasm_expression: voice.sarcasm_expression,
             pause_style: voice.pause_style,
             interruption_style: voice.interruption_style,
+            turn_pause_allowance_ms: voice.turn_pause_allowance_ms ?? 0,
           },
         }),
         ...(rules && {

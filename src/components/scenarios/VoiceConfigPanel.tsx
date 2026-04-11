@@ -3,6 +3,13 @@
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  DEFAULT_TURN_SILENCE_DURATION_MS,
+  MAX_TURN_PAUSE_ALLOWANCE_MS,
+  MIN_TURN_PAUSE_ALLOWANCE_MS,
+  TURN_PAUSE_ALLOWANCE_STEP_MS,
+  getTurnSilenceDurationMs,
+} from "@/lib/realtime/turnDetection";
 import type { ScenarioVoiceConfig } from "@/types/scenario";
 
 const VOICES = [
@@ -40,6 +47,8 @@ interface VoiceConfigPanelProps {
 }
 
 export function VoiceConfigPanel({ config, onChange, disabled }: VoiceConfigPanelProps) {
+  const effectiveTurnGapMs = getTurnSilenceDurationMs(config.turn_pause_allowance_ms);
+
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
@@ -144,6 +153,30 @@ export function VoiceConfigPanel({ config, onChange, disabled }: VoiceConfigPane
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <Label className="text-sm">Trainee Pause Allowance</Label>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            +{config.turn_pause_allowance_ms} ms
+          </span>
+        </div>
+        <Slider
+          value={[config.turn_pause_allowance_ms]}
+          min={MIN_TURN_PAUSE_ALLOWANCE_MS}
+          max={MAX_TURN_PAUSE_ALLOWANCE_MS}
+          step={TURN_PAUSE_ALLOWANCE_STEP_MS}
+          disabled={disabled}
+          onValueChange={(v) =>
+            onChange({ turn_pause_allowance_ms: Array.isArray(v) ? v[0] : v })
+          }
+        />
+        <p className="text-xs text-muted-foreground">
+          Patient turn detection fires after about {effectiveTurnGapMs} ms of silence
+          ({DEFAULT_TURN_SILENCE_DURATION_MS} ms baseline plus allowance). Keep most
+          scenarios between 0 and 500 ms; above 900 ms starts to feel markedly more deliberate.
+        </p>
       </div>
     </div>
   );

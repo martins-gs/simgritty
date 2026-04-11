@@ -431,6 +431,12 @@ function buildDelivery(
     parts.push("Allows a few heavier pauses to hang in the air when the emotional stakes hit.");
   }
 
+  if (voiceConfig.turn_pause_allowance_ms >= 350) {
+    parts.push("If the clinician pauses briefly to think, hold for a beat before jumping in.");
+  } else if (voiceConfig.turn_pause_allowance_ms >= 150) {
+    parts.push("Can tolerate a brief reflective pause before responding.");
+  }
+
   // Physical vocal characteristics at high levels
   if (level >= 7) {
     parts.push("Voice may crack, tremble, or break with the intensity of emotion.");

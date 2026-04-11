@@ -180,6 +180,7 @@ Base voice config:
 - Sarcasm expression: ${input.voiceConfig.sarcasm_expression}/10
 - Pause style: ${input.voiceConfig.pause_style}
 - Interruption style: ${input.voiceConfig.interruption_style}
+- Turn pause allowance: +${input.voiceConfig.turn_pause_allowance_ms} ms before taking the turn
 
 Recent turns:
 ${formatRecentTurns(input.recentTurns)}

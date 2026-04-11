@@ -1,20 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createTurnDetection } from "@/lib/realtime/turnDetection";
 import { parseRequestJson } from "@/lib/validation/http";
 import { realtimeSessionRequestBodySchema } from "@/lib/validation/schemas";
 
 const REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || "gpt-realtime-1.5";
 const DEFAULT_REALTIME_VOICE = process.env.OPENAI_REALTIME_DEFAULT_VOICE || "marin";
 const DEFAULT_INPUT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
-const DEFAULT_TURN_DETECTION = {
-  type: "server_vad",
-  threshold: 0.55,
-  prefix_padding_ms: 300,
-  silence_duration_ms: 320,
-  interrupt_response: false,
-  create_response: true,
-} as const;
-
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -23,7 +15,7 @@ export async function POST(request: Request) {
   const parsed = await parseRequestJson(request, realtimeSessionRequestBodySchema);
   if (!parsed.success) return parsed.response;
 
-  const { voice, instructions, outputOnly } = parsed.data;
+  const { voice, instructions, outputOnly, turnPauseAllowanceMs } = parsed.data;
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -50,7 +42,7 @@ export async function POST(request: Request) {
             transcription: {
               model: DEFAULT_INPUT_TRANSCRIPTION_MODEL,
             },
-            turn_detection: DEFAULT_TURN_DETECTION,
+            turn_detection: createTurnDetection(turnPauseAllowanceMs),
           },
           output: {
             voice: voice || DEFAULT_REALTIME_VOICE,
