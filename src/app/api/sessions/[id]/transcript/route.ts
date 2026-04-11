@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { mergeTraineeAudioDeliveryFromEvents } from "@/lib/review/traineeDelivery";
 import { createAdminClientIfAvailable, createClient } from "@/lib/supabase/server";
 import { parseRequestJson } from "@/lib/validation/http";
 import {
+  getStoredEventKind,
+  parseSimulationEvents,
   parseTraineeDeliveryAnalysis,
   transcriptTurnCreateRequestBodySchema,
   transcriptTurnPatchRequestBodySchema,
@@ -77,6 +80,52 @@ function resolveTurnDeliveryAnalysis(
   );
 }
 
+async function findDeliveryAnalysisFromRecentEvents(
+  supabase: Awaited<ReturnType<typeof createClient>> | NonNullable<ReturnType<typeof createAdminClientIfAvailable>>,
+  sessionId: string,
+  turnIndex: number
+): Promise<TraineeDeliveryAnalysis | null> {
+  const { data, error } = await supabase
+    .from("simulation_state_events")
+    .select("payload, event_index")
+    .eq("session_id", sessionId)
+    .eq("event_type", "classification_result")
+    .order("event_index", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    console.warn(
+      `[Transcript API] event fallback lookup failed turn=${turnIndex}: ${error.message}`
+    );
+    return null;
+  }
+
+  for (const row of data ?? []) {
+    const payload = row.payload;
+    if (!payload || typeof payload !== "object") continue;
+
+    const record = payload as Record<string, unknown>;
+    const eventKind = getStoredEventKind(record);
+    const source = typeof record.source === "string" ? record.source : null;
+    const eventTurnIndex = typeof record.turn_index === "number" ? record.turn_index : null;
+
+    if (eventKind !== "trainee_audio_delivery" && source !== "trainee_audio_delivery") {
+      continue;
+    }
+
+    if (eventTurnIndex !== turnIndex) {
+      continue;
+    }
+
+    const deliveryAnalysis = parseTraineeDeliveryAnalysis(record.delivery_analysis);
+    if (deliveryAnalysis) {
+      return deliveryAnalysis;
+    }
+  }
+
+  return null;
+}
+
 async function updateTranscriptTurnById(
   supabase: Awaited<ReturnType<typeof createClient>> | NonNullable<ReturnType<typeof createAdminClientIfAvailable>>,
   turnId: string,
@@ -110,7 +159,37 @@ export async function GET(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const analysedTurnIndexes = (turns ?? []).flatMap((turn) => {
+  const needsEventBackfill = (turns ?? []).some((turn) => {
+    if (turn.speaker !== "trainee") return false;
+    const storedDeliveryAnalysis =
+      parseDirectDeliveryAnalysis(turn.trainee_delivery_analysis) ??
+      getPersistedDeliveryAnalysis(turn.classifier_result);
+    return !storedDeliveryAnalysis;
+  });
+
+  let resolvedTurns = turns ?? [];
+
+  if (needsEventBackfill) {
+    const { data: eventRows, error: eventError } = await supabase
+      .from("simulation_state_events")
+      .select("*")
+      .eq("session_id", id)
+      .eq("event_type", "classification_result")
+      .order("event_index", { ascending: true });
+
+    if (eventError) {
+      console.warn(
+        `[Transcript API] event backfill fetch failed session=${id}: ${eventError.message}`
+      );
+    } else {
+      resolvedTurns = mergeTraineeAudioDeliveryFromEvents(
+        resolvedTurns,
+        parseSimulationEvents(eventRows ?? [])
+      );
+    }
+  }
+
+  const analysedTurnIndexes = resolvedTurns.flatMap((turn) => {
     const storedDeliveryAnalysis =
       parseDirectDeliveryAnalysis(turn.trainee_delivery_analysis) ??
       getPersistedDeliveryAnalysis(turn.classifier_result);
@@ -124,7 +203,7 @@ export async function GET(
     `[Transcript API] session=${id} total_turns=${turns?.length ?? 0} trainee_audio_delivery_turns=${analysedTurnIndexes.join(",") || "none"}`
   );
 
-  return NextResponse.json(turns, {
+  return NextResponse.json(resolvedTurns, {
     headers: {
       "Cache-Control": "no-store",
     },
@@ -373,15 +452,46 @@ export async function PATCH(
       parseDirectDeliveryAnalysis(confirmRead.data?.trainee_delivery_analysis) ??
       getPersistedDeliveryAnalysis(confirmRead.data?.classifier_result);
 
-    console.info(
-      `[Transcript API] confirm turn=${body.turn_index} trainee_audio_delivery=${confirmedDeliveryAnalysis ? "present" : "absent"}`
+    if (confirmedDeliveryAnalysis) {
+      console.info(
+        `[Transcript API] confirm turn=${body.turn_index} trainee_audio_delivery=present`
+      );
+
+      return NextResponse.json({
+        success: true,
+        turnIndex: confirmRead.data?.turn_index ?? body.turn_index,
+        hasTraineeDeliveryAnalysis: true,
+        markers: confirmedDeliveryAnalysis.markers,
+        confirmedFrom: "transcript_turn",
+      });
+    }
+
+    const eventFallbackDeliveryAnalysis = await findDeliveryAnalysisFromRecentEvents(
+      supabase,
+      id,
+      body.turn_index
     );
+
+    if (eventFallbackDeliveryAnalysis) {
+      console.info(
+        `[Transcript API] confirm turn=${body.turn_index} trainee_audio_delivery=event_fallback`
+      );
+
+      return NextResponse.json({
+        success: true,
+        turnIndex: confirmRead.data?.turn_index ?? body.turn_index,
+        hasTraineeDeliveryAnalysis: true,
+        markers: eventFallbackDeliveryAnalysis.markers,
+        confirmedFrom: "event_fallback",
+      });
+    }
 
     return NextResponse.json({
       success: true,
       turnIndex: confirmRead.data?.turn_index ?? body.turn_index,
-      hasTraineeDeliveryAnalysis: !!confirmedDeliveryAnalysis,
-      markers: confirmedDeliveryAnalysis?.markers ?? [],
+      hasTraineeDeliveryAnalysis: false,
+      markers: [],
+      confirmedFrom: "none",
     });
   }
 
@@ -394,5 +504,6 @@ export async function PATCH(
     turnIndex: resolvedUpdatedTurn.turn_index,
     hasTraineeDeliveryAnalysis: !!storedDeliveryAnalysis,
     markers: storedDeliveryAnalysis?.markers ?? [],
+    confirmedFrom: storedDeliveryAnalysis ? "transcript_turn" : "none",
   });
 }

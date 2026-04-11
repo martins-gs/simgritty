@@ -9,8 +9,8 @@ PROLOG is a Next.js 16 App Router application for NHS clinical communication tra
 - Real-time voice simulation using the OpenAI Realtime API over WebRTC
 - Scenario authoring with 14 numeric trait dials, a separate bias-category selector, voice settings, escalation rules, milestones, and scoring weights
 - AI clinician takeover with its own clinician voice path and HTTP TTS fallback
-- Review workflow with a saved reflection check-in, persisted educator-style session summaries, a coaching timeline, per-scenario progress review, retry CTA, score cards or short-session placeholders, audio playback, and session forking
-- Supabase-backed auth, session persistence, transcript/event storage, and mixed session-audio uploads
+- Review workflow with a saved reflection check-in, persisted educator-style session summaries, communication-move coaching, a coaching timeline, per-scenario progress review, retry CTA, score cards or short-session placeholders, audio playback, and session forking
+- Supabase-backed auth, session persistence, transcript/event storage, event-backed transcript recovery for trainee audio delivery, and mixed session-audio uploads
 
 ## Documentation Map
 
@@ -122,6 +122,7 @@ Without that base schema, the repo is not enough on its own to stand up a blank 
 Notes:
 
 - `POST /api/voice-profile/trainee` and `PATCH /api/sessions/[id]/transcript` are internal app endpoints used by the live simulation flow.
+- `GET /api/sessions/[id]/transcript` now backfills missing `trainee_delivery_analysis` from saved `classification_result` fallback events before returning transcript rows.
 - Middleware runs on app routes and API routes so Supabase auth is refreshed before long-lived simulations hit protected handlers.
 
 ## Current Implementation Notes
@@ -129,7 +130,9 @@ Notes:
 - The live simulation currently uses two realtime voice paths: the primary patient conversation path and a separate clinician renderer path.
 - Session audio is recorded as one mixed file and uploaded to the `simulation-audio` Supabase Storage bucket at session end.
 - The review page stores the Session Summary JSON on `simulation_sessions.review_summary` after first generation, so the learner sees the same summary on later visits instead of a fresh variant each time.
+- Review coaching now prefers communication moves and response structure over stock scripts, so summaries and key moments describe what to do differently rather than insisting on one canonical phrase.
 - The review page also builds a deterministic `Review your progress` panel from the current user's non-deleted sessions in the same scenario, so the session count reflects historical sessions rather than utterances.
+- Sessions of 3-6 trainee turns still score as preliminary sessions, but extreme dimension scores are now softened to avoid hard zeros or hundreds from sparse evidence.
 - `max_escalation_ceiling` and `max_session_duration_minutes` are actively enforced at runtime.
 - `allow_discriminatory_content` and `require_consent_gate` are stored in `org_settings`, but they are not yet used to disable discriminatory scenarios or bypass the consent gate. The briefing flow currently always shows the consent gate.
 - Access is limited to `@nhs.scot` email addresses through Supabase magic-link auth.

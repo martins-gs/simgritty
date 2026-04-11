@@ -119,7 +119,9 @@ Current flow:
 4. The audio model returns a structured `TraineeDeliveryAnalysis` object when it can, or a raw text analysis that is then re-structured through `gpt-5.4-mini`.
 5. The simulation page tries to persist the result directly onto `transcript_turns.trainee_delivery_analysis`.
 6. It also writes a fallback `classification_result` event with `__event_kind: "trainee_audio_delivery"` into `simulation_state_events`.
-7. The review page merges fallback event payloads back onto trainee turns before rendering and scoring.
+7. If the direct transcript write cannot be confirmed immediately, the transcript patch route accepts the matching fallback event as a valid confirmation source.
+8. `GET /api/sessions/[id]/transcript` now backfills missing trainee audio delivery from those fallback events before returning rows.
+9. The review page still performs the same merge defensively before rendering and scoring.
 
 The payload supports multiple markers per utterance. Allowed markers are:
 
@@ -231,7 +233,7 @@ When `trainee_delivery_analysis` is present, composure and de-escalation also re
 
 **Qualitative labels**: Strong (80–100), Developing (60–79), Needs practice (0–59).
 
-**Session validity gate**: sessions under 3 trainee turns show no score. Sessions of 3–6 trainee turns display scores with a "preliminary" caveat.
+**Session validity gate**: sessions under 3 trainee turns show no score. Sessions of 3–6 trainee turns display scores with a "preliminary" caveat, and their dimension scores are moderated toward the midpoint so sparse evidence does not produce hard zero or hundred scores too easily.
 
 **Evidence tracking**: every scoring event (marker detected, attempt made, milestone completed, support invoked) is recorded with its turn index and score impact. The review page shows the 2–3 highest-impact moments and a technique suggestion based on the weakest dimension when the session is long enough to score.
 
@@ -294,15 +296,15 @@ The review page displays:
 
 - **Top review section**: the `ReflectionPrompt` appears first and is always full width. Below it, the page shows either the persisted `ReviewSummaryCard` or the short-session placeholder when the session is too short to score.
 - **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data and kept at the top of the review page even for short sessions. The prompt text now asks, "How do you think that conversation went?" If saved reflection data cannot be loaded, the component stays visible and shows an inline error state rather than disappearing.
-- **Session summary**: one overview sentence block plus `What Helped`, `Why It Mattered`, and `Try Saying`. The summary also contains the scenario's learning objectives so the broader goals sit alongside the coach summary rather than in a separate panel. The summary is generated with structured output, but once persisted it is reused rather than regenerated on each visit.
+- **Session summary**: one overview sentence block plus `What Helped`, `Why It Mattered`, and `Try This Move`. The summary also contains the scenario's learning objectives so the broader goals sit alongside the coach summary rather than in a separate panel. The summary is generated with structured output, but once persisted it is reused rather than regenerated on each visit. Coaching now emphasises response function, timing, and structure over stock exemplar phrases.
 - **Conversation timeline**: always visible on the main screen (no longer in a tab), showing the conversation-intensity path with event markers, optional session-audio playback, a hover/playback cursor, and a persistent detail panel for the selected key moment.
-- **Timeline coaching cards**: up to 8 ranked scoring moments rendered as numbered tabs beneath the chart. The active card shows the headline, likely impact, one-turn-before/one-turn-after transcript context, what happened next, why it mattered here, and a replacement phrase when relevant.
+- **Timeline coaching cards**: up to 8 ranked scoring moments rendered as numbered tabs beneath the chart. The active card shows the headline, likely impact, one-turn-before/one-turn-after transcript context, what happened next, why it mattered here, and a suggested communication move when relevant.
 - **Review your progress**: a deterministic, coach-style scenario-history panel built from the current user's non-deleted sessions in the same scenario. Its count is session-based, not utterance-based.
 - **Ready to try again?**: a scenario-level retry CTA that creates a fresh session from the same scenario so the learner can immediately practise the coached move again.
-- **ScoreCard**: qualitative label badge (Strong / Developing / Needs practice), overall circular progress, and four dimension bars (0–100) with weight percentages. Sessions under 3 trainee turns show the short-session placeholder instead of the score card. The score block now sits below the progress/retry coaching content with more vertical spacing.
+- **ScoreCard**: qualitative label badge (Strong / Developing / Needs practice), an overall score badge, and four dimension bars (0–100) with weight percentages. Sessions under 3 trainee turns show the short-session placeholder instead of the score card. The score block now sits below the progress/retry coaching content with more vertical spacing.
 - **Section switcher**: Transcript, Event Log, and Educator Notes are shown one panel at a time using a segmented control rather than the previous tabs primitive.
 - **Audio delivery badges**: trainee turns can show a separate `Audio delivery` row with 0-3 markers and an assessment-confidence label. The confidence label refers to confidence in the audio reading itself, not the trainee's self-confidence.
-- **Fallback merge**: if `trainee_delivery_analysis` is missing on the transcript row but present in fallback events, the review page merges the fallback payload onto the turn before rendering and scoring.
+- **Fallback merge**: if `trainee_delivery_analysis` is missing on the transcript row but present in fallback events, the transcript API backfills it before returning rows, and the review page also merges the fallback payload defensively before rendering and scoring.
 
 ### Live Simulation Copy
 

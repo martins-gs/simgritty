@@ -52,6 +52,7 @@ export interface ScoringInput {
 
 const MIN_TRAINEE_TURNS_FOR_SCORING = 3;
 const PRELIMINARY_TRAINEE_TURN_THRESHOLD = 6;
+const PRELIMINARY_SCORE_CONFIDENCE_AT_MIN_TURNS = 0.6;
 const COMPOSURE_MARKER_WEIGHTS: Record<ComposureMarker, number> = {
   defensive_language: 10,
   dismissive_response: 14,
@@ -206,6 +207,25 @@ function getQualitativeLabel(score: number): QualitativeLabel {
   if (score >= 80) return "Strong";
   if (score >= 60) return "Developing";
   return "Needs practice";
+}
+
+function moderatePreliminaryScore(score: number, turnCount: number): number {
+  if (
+    turnCount < MIN_TRAINEE_TURNS_FOR_SCORING ||
+    turnCount >= PRELIMINARY_TRAINEE_TURN_THRESHOLD
+  ) {
+    return score;
+  }
+
+  const span = PRELIMINARY_TRAINEE_TURN_THRESHOLD - MIN_TRAINEE_TURNS_FOR_SCORING;
+  const progress = span > 0
+    ? (turnCount - MIN_TRAINEE_TURNS_FOR_SCORING) / span
+    : 1;
+  const confidence =
+    PRELIMINARY_SCORE_CONFIDENCE_AT_MIN_TURNS +
+    (1 - PRELIMINARY_SCORE_CONFIDENCE_AT_MIN_TURNS) * progress;
+
+  return Math.round(50 + (score - 50) * confidence);
 }
 
 // ---------------------------------------------------------------------------
@@ -923,12 +943,18 @@ export function computeScore(input: ScoringInput): ScoreBreakdown {
   const evidence: ScoreEvidence[] = [];
 
   // Compute each dimension
-  const composure = computeComposure(traineeTurns, allTurns, evidence);
-  const deEscalation = computeDeEscalation(traineeTurns, allTurns, evidence);
-  const clinicalTask = computeClinicalTask(traineeTurns, milestones, evidence);
-  const supportSeeking = computeSupportSeeking(
+  const rawComposure = computeComposure(traineeTurns, allTurns, evidence);
+  const rawDeEscalation = computeDeEscalation(traineeTurns, allTurns, evidence);
+  const rawClinicalTask = computeClinicalTask(traineeTurns, milestones, evidence);
+  const rawSupportSeeking = computeSupportSeeking(
     allTurns, events, supportThreshold, criticalThreshold, evidence
   );
+  const composure = moderatePreliminaryScore(rawComposure, turnCount);
+  const deEscalation = moderatePreliminaryScore(rawDeEscalation, turnCount);
+  const clinicalTask = rawClinicalTask == null
+    ? null
+    : moderatePreliminaryScore(rawClinicalTask, turnCount);
+  const supportSeeking = moderatePreliminaryScore(rawSupportSeeking, turnCount);
 
   // Weighted overall
   let overall =

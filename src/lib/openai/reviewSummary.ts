@@ -38,6 +38,12 @@ Rules:
 - Do not mention percentages, confidence scores, numerical effectiveness values, hidden model states, or score labels.
 - Prefer language like "likely", "seemed to", "appeared to", and "may have".
 - Ground every point in the supplied turns and outcomes. Do not invent dialogue, timings, or motives.
+- Treat any example phrases in these instructions or the fallback as illustrative only, not as required wording.
+- Judge the function of the trainee's response, not whether it matched a stock phrase.
+- If the trainee acknowledged emotion, explained the barrier, or gave a next step in substance, do not say the move was missing just because the wording differed.
+- If a helpful move arrived late, after reassurance, or got buried in a longer reply, describe it that way instead of calling it absent.
+- If the trainee was partly effective, coach the timing, order, or specificity of the move instead of replacing the whole response.
+- Do not treat explicit emotion-labelling as mandatory if the trainee clearly acknowledged the concern in another natural way.
 - The overview must read like the arc of the conversation, not a verdict.
 - Use at most one concrete time anchor, and only when it genuinely helps orient the learner.
 - Do not repeat the detailed timeline card content.
@@ -52,9 +58,12 @@ Rules:
 - coachingFocus may fold in the wider scenario aim and the person's needs, but do not list multiple missed milestones or multiple personality adaptations.
 - objectiveFocus should usually be null. Only populate it if one short scenario-goal point is essential and not already clear in coachingFocus.
 - personFocus should usually be null. Only populate it if one short person-specific adaptation is essential and not already clear in coachingFocus.
-- If there is a coaching phrase, make it something the trainee could realistically say next time.
-- whatToSayInstead should model the missing move in this case, not just generic empathy.
+- If there is coaching text, make it something the trainee could realistically do or say next time.
+- whatToSayInstead may be either a short communication move or a brief model line, depending on what best fits the case.
+- Prefer the structure of the missing move over one canonical script when the trainee partly achieved the move already.
+- Only give a full replacement line when the original turn genuinely missed the core move; otherwise, prefer a short behavioural prompt.
 - Prefer concrete teaching language such as "You acknowledged the emotion, but did not yet explain the main barrier or next step."
+- Avoid defaulting to stock phrasing such as "I can hear how upsetting this is" unless that sort of explicit acknowledgement was genuinely absent.
 - Avoid vague phrases like "practical concern unanswered", "guarded or muddled", or "became steadier" unless you immediately say what that meant in practice.
 - Keep overview to at most two short sentences.
 - Keep every other populated string to one short sentence.
@@ -109,7 +118,7 @@ export async function generateReviewSummary(
       ? `Objectives still missing or unclear:\n- ${input.outstandingObjectives.join("\n- ")}`
       : null,
     "",
-    "Draft fallback summary:",
+    "Draft fallback summary (rough draft only — correct or discard anything formulaic, overstated, or contradicted by the turns):",
     `- Overview: ${input.fallback.overview}`,
     `- Positive moment: ${input.fallback.positiveMoment ?? "None identified"}`,
     `- Coaching focus: ${input.fallback.coachingFocus ?? "None identified"}`,

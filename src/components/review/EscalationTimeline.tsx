@@ -197,10 +197,10 @@ function TimelineMomentCard({
       {narrative.tryInstead && (
         <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/80 p-3">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-700">
-            Try saying
+            Try this move
           </p>
           <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
-            &ldquo;{narrative.tryInstead}&rdquo;
+            {narrative.tryInstead}
           </p>
         </div>
       )}

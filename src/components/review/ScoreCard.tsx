@@ -98,7 +98,7 @@ export function ScoreCard({ score, preliminary }: ScoreCardProps) {
         </div>
         {preliminary && (
           <p className="mt-3 text-[11px] font-medium text-amber-700">
-            Short session: treat this breakdown as especially tentative.
+            Short session: treat this breakdown as especially tentative. Extreme scores are softened until there is more evidence.
           </p>
         )}
       </div>

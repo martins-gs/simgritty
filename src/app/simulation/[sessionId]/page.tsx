@@ -766,6 +766,10 @@ export default function SimulationPage() {
               markers: Array.isArray(record.markers)
                 ? record.markers.filter((value): value is string => typeof value === "string")
                 : [],
+              confirmedFrom:
+                typeof record.confirmedFrom === "string"
+                  ? record.confirmedFrom
+                  : null,
             };
           },
           null,
@@ -777,8 +781,11 @@ export default function SimulationPage() {
           );
           return;
         }
+        const confirmedFrom = patchAck.confirmedFrom === "event_fallback"
+          ? "event_fallback"
+          : "transcript_turn";
         console.info(
-          `[Simulation] Trainee audio analysis transcript save confirmed item_id=${itemId} turn_index=${turn.turnIndex} markers=${patchAck.markers.join(",") || "none"} confidence=${deliveryAnalysis.confidence.toFixed(2)}`
+          `[Simulation] Trainee audio analysis transcript save confirmed item_id=${itemId} turn_index=${turn.turnIndex} source=${confirmedFrom} markers=${patchAck.markers.join(",") || "none"} confidence=${deliveryAnalysis.confidence.toFixed(2)}`
         );
       } catch (error) {
         console.error("[Simulation] Trainee audio analysis error", error);

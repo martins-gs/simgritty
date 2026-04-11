@@ -358,6 +358,11 @@ export default function ReviewPage() {
   }
 
   async function handleRetryScenario() {
+    if (!session) {
+      toast.error("Review session is still loading");
+      return;
+    }
+
     setRetryingScenario(true);
 
     try {

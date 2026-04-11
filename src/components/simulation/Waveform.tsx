@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 interface WaveformProps {
@@ -26,64 +26,9 @@ export function Waveform({ audioEl, isActive, escalationLevel, className }: Wave
   const rafRef = useRef<number>(0);
   const connectedElRef = useRef<HTMLAudioElement | null>(null);
 
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const analyser = analyserRef.current;
-    if (!canvas || !analyser) {
-      rafRef.current = requestAnimationFrame(draw);
-      return;
-    }
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
-
-    const w = rect.width;
-    const h = rect.height;
-    const bufferLength = analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    analyser.getByteFrequencyData(dataArray);
-
-    ctx.clearRect(0, 0, w, h);
-
-    const barCount = 48;
-    const gap = 3;
-    const barWidth = (w - (barCount - 1) * gap) / barCount;
-    const color = getBarColor(escalationLevel);
-    const midY = h / 2;
-
-    for (let i = 0; i < barCount; i++) {
-      // Sample from frequency data — spread across the range
-      const dataIndex = Math.floor((i / barCount) * bufferLength * 0.6);
-      const value = dataArray[dataIndex] / 255;
-
-      // Minimum bar height for idle state
-      const minH = 2;
-      const barH = Math.max(minH, value * midY * 0.85);
-
-      const x = i * (barWidth + gap);
-
-      ctx.fillStyle = color;
-      ctx.globalAlpha = 0.15 + value * 0.85;
-
-      // Draw mirrored bars from centre
-      const radius = Math.min(barWidth / 2, 3);
-      roundRect(ctx, x, midY - barH, barWidth, barH, radius);
-      roundRect(ctx, x, midY, barWidth, barH, radius);
-    }
-
-    ctx.globalAlpha = 1;
-    rafRef.current = requestAnimationFrame(draw);
-  }, [escalationLevel]);
-
   useEffect(() => {
     // Connect analyser to the audio element when it changes
-    if (!audioEl || audioEl === connectedElRef.current) return;
+    if (!isActive || !audioEl || audioEl === connectedElRef.current) return;
 
     // Create or reuse AudioContext
     if (!audioCtxRef.current) {
@@ -93,8 +38,14 @@ export function Waveform({ audioEl, isActive, escalationLevel, className }: Wave
 
     // Create source from the audio element
     try {
+      if (audioCtx.state === "suspended") {
+        void audioCtx.resume().catch(() => {});
+      }
       if (sourceRef.current) {
         sourceRef.current.disconnect();
+      }
+      if (analyserRef.current) {
+        analyserRef.current.disconnect();
       }
       const source = audioCtx.createMediaElementSource(audioEl);
       const analyser = audioCtx.createAnalyser();
@@ -110,12 +61,87 @@ export function Waveform({ audioEl, isActive, escalationLevel, className }: Wave
     } catch {
       // May fail if source was already created for this element
     }
-  }, [audioEl]);
+  }, [audioEl, isActive]);
 
   useEffect(() => {
-    rafRef.current = requestAnimationFrame(draw);
+    function drawFrame() {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        rafRef.current = requestAnimationFrame(drawFrame);
+        return;
+      }
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        rafRef.current = requestAnimationFrame(drawFrame);
+        return;
+      }
+
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.scale(dpr, dpr);
+
+      const w = rect.width;
+      const h = rect.height;
+      const analyser = isActive ? analyserRef.current : null;
+      const bufferLength = analyser?.frequencyBinCount ?? 0;
+      const dataArray = bufferLength > 0 ? new Uint8Array(bufferLength) : null;
+      if (analyser && dataArray) {
+        analyser.getByteFrequencyData(dataArray);
+      }
+
+      ctx.clearRect(0, 0, w, h);
+
+      const barCount = 48;
+      const gap = 3;
+      const barWidth = (w - (barCount - 1) * gap) / barCount;
+      const color = getBarColor(escalationLevel);
+      const midY = h / 2;
+
+      for (let i = 0; i < barCount; i++) {
+        // Sample from frequency data — spread across the range
+        const dataIndex = bufferLength > 0
+          ? Math.floor((i / barCount) * bufferLength * 0.6)
+          : 0;
+        const value = dataArray ? dataArray[dataIndex] / 255 : 0;
+
+        // Minimum bar height for idle state
+        const minH = 2;
+        const barH = Math.max(minH, value * midY * 0.85);
+
+        const x = i * (barWidth + gap);
+
+        ctx.fillStyle = color;
+        ctx.globalAlpha = isActive ? 0.15 + value * 0.85 : 0.18;
+
+        // Draw mirrored bars from centre
+        const radius = Math.min(barWidth / 2, 3);
+        roundRect(ctx, x, midY - barH, barWidth, barH, radius);
+        roundRect(ctx, x, midY, barWidth, barH, radius);
+      }
+
+      ctx.globalAlpha = 1;
+      rafRef.current = requestAnimationFrame(drawFrame);
+    }
+
+    rafRef.current = requestAnimationFrame(drawFrame);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [draw]);
+  }, [escalationLevel, isActive]);
+
+  useEffect(() => {
+    return () => {
+      sourceRef.current?.disconnect();
+      analyserRef.current?.disconnect();
+      connectedElRef.current = null;
+
+      if (audioCtxRef.current) {
+        void audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <canvas

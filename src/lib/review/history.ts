@@ -231,7 +231,7 @@ function buildDevelopmentParagraph(
       return `The next step is ${coachingThemeLabel}. That is the move to practise until it starts to feel automatic rather than late.`;
     }
 
-    return "The next step is to acknowledge the emotion, explain the main barrier, and give the next step in one calm sequence.";
+    return "The next step is to make the sequence clearer: acknowledge the emotion, name the main barrier, and give the next step in one calm reply.";
   }
 
   if (coachingThemeLabel && weakestDimension) {
@@ -249,20 +249,54 @@ function buildDevelopmentParagraph(
   return "The main development edge is still consistency: do the helpful move earlier, and hold onto it once the pressure rises.";
 }
 
+function buildPracticeTargetFromSuggestion(suggestedLine: string) {
+  const normalized = suggestedLine.toLowerCase();
+
+  if (
+    normalized.includes("colleague") ||
+    normalized.includes("help us with this now") ||
+    normalized.includes("extra help")
+  ) {
+    return "On the next attempt, practise naming the safety concern clearly and bringing in support without delay.";
+  }
+
+  if (
+    normalized.includes("angry") ||
+    normalized.includes("unacceptable") ||
+    normalized.includes("most urgent") ||
+    normalized.includes("what is driving")
+  ) {
+    return "On the next attempt, practise naming the emotion or concern first, then inviting the person to say what is driving it.";
+  }
+
+  if (
+    normalized.includes("upsetting") ||
+    normalized.includes("what is happening") ||
+    normalized.includes("question") ||
+    normalized.includes("barrier") ||
+    normalized.includes("delay") ||
+    normalized.includes("next step")
+  ) {
+    return "On the next attempt, practise the sequence rather than the script: acknowledge the emotion, name the barrier, and give the next step in your own words.";
+  }
+
+  return "On the next attempt, practise the underlying move in your own words rather than memorising a script.";
+}
+
 function buildPracticeTarget(
   current: ScenarioHistorySessionInput,
   coachingThemeLabel: string | null
 ) {
   const suggestedLine = current.reviewSummary?.whatToSayInstead?.trim();
   if (suggestedLine) {
-    return `On the next attempt, practise leading with something as concrete as: “${suggestedLine}”`;
+    return buildPracticeTargetFromSuggestion(suggestedLine);
   }
 
   if (coachingThemeLabel) {
     return `On the next attempt, make ${coachingThemeLabel} your first deliberate move, not your recovery move.`;
   }
 
-  return "On the next attempt, aim for one calm sentence that acknowledges the emotion, names the barrier, and gives the next step.";
+  return "On the next attempt, aim for one calm reply that acknowledges the emotion, names the barrier, and gives the next step in your own words.";
 }
 
 export function buildScenarioHistoryCoachSummary(

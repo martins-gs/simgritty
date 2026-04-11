@@ -257,12 +257,12 @@ export function ReviewSummaryCard({
 
         <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
-            Try Saying
+            Try This Move
           </p>
           <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
             {summary.whatToSayInstead
-              ? `“${summary.whatToSayInstead}”`
-              : "A suggested replacement line will appear here when the review identifies a clear coaching opportunity."}
+              ? summary.whatToSayInstead
+              : "A suggested communication move will appear here when the review identifies a clear coaching opportunity."}
           </p>
         </div>
       </div>

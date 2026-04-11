@@ -214,22 +214,22 @@ function describeOutcomeShift(
   return `The next patient/relative reply was: "${nextTurnQuote}".`;
 }
 
-function getReplacementLine(moment: ScoreEvidence): string | null {
+function getTryInsteadText(moment: ScoreEvidence): string | null {
   switch (moment.evidenceType) {
     case "de_escalation_harm":
     case "composure_marker":
     case "low_substance_response":
-      return "I can hear how upsetting this is. Let me explain what is happening, and then I will answer your questions.";
+      return "Lead with the emotion, then name the immediate barrier and the next step in concrete terms.";
     case "support_not_requested":
     case "critical_no_support":
-      return "I want to handle this safely, so I am going to bring a colleague in to help us with this now.";
+      return "State the safety concern clearly and bring a colleague in straight away.";
     case "support_invoked":
       return moment.evidenceData.appropriate === false
-        ? "I want to understand what is most urgent for you first, and then I will decide whether I need extra help."
+        ? "Pause long enough to find the main concern first, then decide whether extra help is actually needed."
         : null;
     case "de_escalation_attempt":
       return moment.evidenceData.effective === false
-        ? "I can see you are angry, and I want to understand what has made this feel so unacceptable to you."
+        ? "Name the emotion or concern more directly, then invite the person to say what is driving it."
         : null;
     default:
       return null;
@@ -427,7 +427,7 @@ export function buildReviewMomentNarrative(
     likelyImpact: narrative.likelyImpact,
     whatHappenedNext: describeOutcomeShift(turns, moment),
     whyItMattered: narrative.whyItMattered,
-    tryInstead: getReplacementLine(moment),
+    tryInstead: getTryInsteadText(moment),
     positive,
     turnIndex: moment.turnIndex,
   };
@@ -584,6 +584,20 @@ function getEndingPhrase(finalLevel: number | null | undefined, exitType: ExitTy
   return "It finished with the interaction still highly strained.";
 }
 
+function summarizePositiveMoment(moment: ReviewMomentNarrative | null) {
+  if (!moment) return null;
+  return sentenceCase(stripTrailingPeriod(moment.likelyImpact)) + ".";
+}
+
+function summarizeCoachingFocus(args: {
+  challengingMoment: ReviewMomentNarrative | null;
+  objectiveFocus: string | null;
+  personFocus: string | null;
+}) {
+  const { challengingMoment, objectiveFocus, personFocus } = args;
+  return challengingMoment?.whyItMattered ?? objectiveFocus ?? personFocus;
+}
+
 export function buildFallbackReviewSummary(
   session: SimulationSession,
   score: ScoreBreakdown,
@@ -647,12 +661,12 @@ export function buildFallbackReviewSummary(
 
   return {
     overview: overviewParts.join(" "),
-    positiveMoment: positiveMoment?.whyItMattered ?? null,
-    coachingFocus: [
-      challengingMoment?.whyItMattered ?? null,
-      objectiveCoverage.objectiveFocus,
+    positiveMoment: summarizePositiveMoment(positiveMoment),
+    coachingFocus: summarizeCoachingFocus({
+      challengingMoment,
+      objectiveFocus: objectiveCoverage.objectiveFocus,
       personFocus,
-    ].filter(Boolean).join(" "),
+    }),
     whatToSayInstead: challengingMoment?.tryInstead ?? null,
     objectiveFocus: objectiveCoverage.objectiveFocus,
     personFocus,
