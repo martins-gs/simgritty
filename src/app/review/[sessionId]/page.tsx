@@ -10,10 +10,12 @@ import { EducatorNotes } from "@/components/review/EducatorNotes";
 import { ScoreCard } from "@/components/review/ScoreCard";
 import { ReflectionPrompt } from "@/components/review/ReflectionPrompt";
 import { ReviewSummaryCard } from "@/components/review/ReviewSummaryCard";
+import { ScenarioHistoryCoachCard } from "@/components/review/ScenarioHistoryCoachCard";
 import { computeScore, isSessionPreliminary, pickKeyMoments } from "@/lib/engine/scoring";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { mergeTraineeAudioDeliveryFromEvents } from "@/lib/review/traineeDelivery";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type {
@@ -31,7 +33,6 @@ import {
   parseSimulationEvents,
   parseSimulationSession,
   parseStringIdRecord,
-  parseTraineeDeliveryAnalysis,
   parseTranscriptTurns,
 } from "@/lib/validation/schemas";
 
@@ -95,57 +96,6 @@ function needsReviewRefresh(
   );
 
   return missingSessionSummary || missingClinicianAudio || missingTraineeDeliveryAnalysis;
-}
-
-function mergeTraineeAudioDeliveryFromEvents(
-  turns: TranscriptTurn[],
-  events: SimulationStateEvent[]
-): TranscriptTurn[] {
-  const deliveryByTurnIndex = new Map<number, TranscriptTurn["trainee_delivery_analysis"]>();
-
-  for (const event of events) {
-    if (event.event_type !== "classification_result") continue;
-    const payload = event.payload;
-    if (!payload || typeof payload !== "object") continue;
-
-    const record = payload as Record<string, unknown>;
-    const eventKind = getStoredEventKind(payload);
-    const source = typeof record.source === "string" ? record.source : null;
-    if (eventKind !== "trainee_audio_delivery" && source !== "trainee_audio_delivery") {
-      continue;
-    }
-
-    const turnIndex = typeof record.turn_index === "number" ? record.turn_index : null;
-    const deliveryAnalysis = parseTraineeDeliveryAnalysis(record.delivery_analysis);
-    if (turnIndex == null || !deliveryAnalysis) continue;
-
-    deliveryByTurnIndex.set(turnIndex, deliveryAnalysis);
-  }
-
-  if (deliveryByTurnIndex.size === 0) {
-    return turns;
-  }
-
-  return turns.map((turn) => {
-    if (turn.speaker !== "trainee") return turn;
-    if (turn.trainee_delivery_analysis || turn.classifier_result?.trainee_delivery_analysis) {
-      return turn;
-    }
-
-    const fallbackAnalysis = deliveryByTurnIndex.get(turn.turn_index);
-    if (!fallbackAnalysis) return turn;
-
-    return {
-      ...turn,
-      trainee_delivery_analysis: fallbackAnalysis,
-      classifier_result: turn.classifier_result
-        ? {
-            ...turn.classifier_result,
-            trainee_delivery_analysis: turn.classifier_result.trainee_delivery_analysis ?? fallbackAnalysis,
-          }
-        : null,
-    };
-  });
 }
 
 function ScorePlaceholderCard({
@@ -213,6 +163,7 @@ export default function ReviewPage() {
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [restarting, setRestarting] = useState(false);
+  const [retryingScenario, setRetryingScenario] = useState(false);
   const [activePanel, setActivePanel] = useState<ReviewPanel>("transcript");
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [recordingStartedAt, setRecordingStartedAt] = useState<string | null>(null);
@@ -406,6 +357,36 @@ export default function ReviewPage() {
     }
   }
 
+  async function handleRetryScenario() {
+    setRetryingScenario(true);
+
+    try {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scenario_id: session.scenario_id,
+        }),
+      });
+
+      if (!res.ok) {
+        toast.error("Failed to start another practice run");
+        return;
+      }
+
+      const nextSession = parseStringIdRecord(await res.json());
+      if (!nextSession) {
+        throw new Error("Session response invalid");
+      }
+
+      router.push(`/simulation/${nextSession.id}`);
+    } catch {
+      toast.error("Failed to start another practice run");
+    } finally {
+      setRetryingScenario(false);
+    }
+  }
+
   const reviewPanels: Array<{ value: ReviewPanel; label: string }> = [
     { value: "transcript", label: "Transcript" },
     { value: "events", label: "Event Log" },
@@ -459,19 +440,6 @@ export default function ReviewPage() {
                 restarting={restarting}
               />
             )}
-
-            {!score.sessionValid && learningObjectives && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
-                <h3 className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Learning Objectives
-                </h3>
-                <ul className="space-y-1">
-                  {learningObjectives.split("\n").filter(Boolean).map((objective, index) => (
-                    <li key={index} className="text-[13px] text-slate-700">{objective}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
           </div>
         </div>
 
@@ -495,28 +463,49 @@ export default function ReviewPage() {
           </CardContent>
         </Card>
 
-        {score.sessionValid && (
-          <div className={cn(
-            "grid gap-4 xl:items-start",
-            learningObjectives && "xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"
-          )}>
-            {learningObjectives && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
-                <h3 className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Learning Objectives
-                </h3>
-                <ul className="space-y-1">
-                  {learningObjectives.split("\n").filter(Boolean).map((objective, index) => (
-                    <li key={index} className="text-[13px] text-slate-700">{objective}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <ScoreCard score={score} preliminary={preliminary} />
-          </div>
-        )}
+        <div className="space-y-6 pt-8 sm:space-y-8 sm:pt-10">
+          <ScenarioHistoryCoachCard sessionId={sessionId} />
 
-        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-amber-50 p-5 shadow-sm">
+            <div className="max-w-3xl">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Next practice run
+              </p>
+              <h2 className="mt-2 text-lg font-semibold text-slate-900">
+                Ready to try again?
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                Practice makes progress. Run the same scenario again and see if you can apply the coaching above earlier, more clearly, and with less effort.
+              </p>
+            </div>
+
+            <Button
+              size="lg"
+              onClick={handleRetryScenario}
+              disabled={retryingScenario}
+              className="mt-4"
+            >
+              {retryingScenario ? "Starting another run..." : "Retry This Scenario"}
+            </Button>
+          </div>
+
+          {score.sessionValid && (
+            <div className="pt-2 sm:pt-4">
+              <ScoreCard score={score} preliminary={preliminary} />
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4 pt-10 sm:pt-14">
+          <div className="max-w-3xl space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Session breakdown
+            </p>
+            <p className="text-[13px] leading-relaxed text-slate-500">
+              Use the transcript, event log, and educator notes if you want to revisit the raw detail behind the coaching above.
+            </p>
+          </div>
+
           <div
             role="tablist"
             aria-label="Review sections"

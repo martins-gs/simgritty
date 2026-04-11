@@ -130,6 +130,12 @@ export function ReviewSummaryCard({
       !parts.slice(0, index).some((existing) => existing.includes(part) || part.includes(existing))
     )).join(" ");
   }, [summary]);
+  const objectiveItems = useMemo(() => (
+    (learningObjectives ?? "")
+      .split("\n")
+      .map((line) => line.replace(/^[-*]\s*/, "").trim())
+      .filter(Boolean)
+  ), [learningObjectives]);
 
   useEffect(() => {
     if (!shouldRequestGeneratedSummary) {
@@ -260,6 +266,26 @@ export function ReviewSummaryCard({
           </p>
         </div>
       </div>
+
+      {objectiveItems.length > 0 && (
+        <div className="border-t border-slate-100 px-5 py-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+              Learning Objectives
+            </p>
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+              {objectiveItems.map((objective) => (
+                <li
+                  key={objective}
+                  className="rounded-lg border border-white/90 bg-white/80 px-3 py-2 text-[13px] leading-relaxed text-slate-700"
+                >
+                  {objective}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
