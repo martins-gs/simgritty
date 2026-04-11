@@ -257,13 +257,21 @@ export default async function LandingPage() {
               <br />
               <HeroTextRotator />
             </h1>
-            <p className="mx-auto mt-6 max-w-xl text-[15px] leading-relaxed text-muted-foreground sm:text-base">
-              Realistic voice simulations that let NHS staff,
-              care workers, and social workers rehearse difficult conversations
-              with patients, relatives, and staff, using AI speech models that
-              adapt to every word you say — on any device with a browser and
-              microphone.
+            <p className="mx-auto mt-6 max-w-3xl text-[15px] font-medium leading-relaxed text-foreground/80 sm:text-base">
+              Practice tough conversations with patients, families, and colleagues using AI voice simulations that
+              respond in real time. Start speaking with an ai counterpart and then get feedback that helps you improve
+              fast.
             </p>
+            <div className="mx-auto mt-8 max-w-xl">
+              <Image
+                src="/hero-conversation-loop.png"
+                alt="Diagram showing a three-step cycle: practice difficult conversation, get feedback, then refine and repeat"
+                width={1536}
+                height={1024}
+                className="h-auto w-full"
+                priority
+              />
+            </div>
             <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
               <CtaButtons user={user} />
             </div>
