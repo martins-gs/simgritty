@@ -1,8 +1,14 @@
 # ElevenLabs TTS Integration — Feasibility & Implementation Plan
 
+> Status: proposal only. As of 2026-04-11, the current codebase does not use ElevenLabs in the runtime, settings UI, or environment configuration.
+>
+> Treat this as a design note, not a description of shipped functionality. Re-check ElevenLabs' current docs, pricing, latency, and model capabilities before implementation.
+
 ## Summary
 
-ElevenLabs integration is **technically feasible and recommended** for the clinician voice pipeline. The Eleven v3 model's audio tag system provides rich emotional delivery control that maps well to PROLOG's existing `StructuredVoiceProfile` architecture. Latency is not a blocker. The patient voice pipeline remains on OpenAI Realtime (no viable ElevenLabs equivalent). Structured output generation (voice profiles, clinician turns) also stays on OpenAI.
+This document describes a **feasibility assessment and implementation proposal** for adding ElevenLabs to the clinician voice pipeline. It is not active product behaviour.
+
+At the time of writing, the patient voice pipeline remains on OpenAI Realtime, clinician voice remains OpenAI Realtime plus OpenAI TTS fallback, and structured output generation stays on OpenAI.
 
 ---
 

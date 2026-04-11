@@ -121,7 +121,7 @@ export function PrivacyStatement() {
           <section>
             <h3 className="mb-1.5 text-[13.5px] font-semibold text-foreground">5. Your Voice and Session Data</h3>
             <p>
-              Your voice is transmitted to OpenAI's Realtime API during simulation sessions for the
+              Your voice is transmitted to OpenAI&apos;s Realtime API during simulation sessions for the
               purpose of generating AI patient responses and automated transcription. Session audio
               may be recorded and stored for review. You are responsible for ensuring that no real
               patient data or sensitive clinical information is spoken or described during simulation
@@ -141,17 +141,17 @@ export function PrivacyStatement() {
                 {
                   name: "Supabase",
                   role: "database, authentication, and file storage",
-                  desc: "Stores all application data including user accounts, scenario content, session transcripts, performance scores, reflections, educator notes, and session audio recordings. Also provides user authentication. Supabase is SOC 2 Type II certified, HIPAA compliant, and provides a GDPR-compliant Data Processing Agreement. Data is encrypted at rest (AES-256) and in transit (TLS). Our project is hosted in a European AWS region.",
+                  desc: "Stores application data including user accounts, scenario content, session transcripts, reflections, educator notes, and session audio recordings. Also provides user authentication.",
                 },
                 {
                   name: "OpenAI",
                   role: "AI voice, transcription, and classification",
-                  desc: "Powers the core simulation experience including real-time voice conversation (Realtime API via WebRTC), input transcription, communication technique classification, voice profile generation, the AI clinician bot, and text-to-speech. API data is not used for model training by default. A Data Processing Agreement is in place. Data in transit is encrypted.",
+                  desc: "Processes simulation text and audio sent by the app to power real-time voice conversation, transcription, communication-technique classification, voice-profile generation, the AI clinician bot, and text-to-speech.",
                 },
                 {
                   name: "Vercel",
                   role: "frontend and API hosting",
-                  desc: "Hosts and serves the website and API routes. Serverless functions are configured to run in European regions where possible. Vercel is certified under the EU-U.S. Data Privacy Framework including the UK Extension. Some network-level data (such as IP addresses) may be processed through US-based infrastructure for security purposes.",
+                  desc: "Hosts the web application and server-side route handlers that serve the frontend and API.",
                 },
               ].map(({ name, role, desc }) => (
                 <div key={name} className="rounded-lg border border-border/60 bg-card px-3.5 py-3">
@@ -163,8 +163,8 @@ export function PrivacyStatement() {
               ))}
             </div>
             <p className="mt-3 text-[12px] text-muted-foreground">
-              All providers are contractually required to handle your data securely and only for the
-              purposes of delivering the service. Data Processing Agreements are in place with each provider.
+              Each provider has its own privacy, security, and compliance documentation. The deploying
+              organisation should review those current terms and any signed supplier agreements separately.
             </p>
           </section>
 
@@ -172,11 +172,10 @@ export function PrivacyStatement() {
           <section>
             <h3 className="mb-1.5 text-[13.5px] font-semibold text-foreground">7. International Data Transfers</h3>
             <p>
-              We are based in the United Kingdom and use European server regions wherever available.
-              Some of our third-party providers are US-based companies and limited data transfers to
-              the United States may occur. Where this is the case, transfers are protected by
-              appropriate safeguards including Data Processing Agreements and, where available,
-              certification under the EU-U.S. Data Privacy Framework (including the UK Extension).
+              Some third-party providers operate internationally. Depending on how the service is
+              deployed and configured, personal information may be processed outside the United Kingdom.
+              Cross-border transfer safeguards should be documented in the deploying organisation&apos;s
+              supplier agreements and operational privacy documentation.
             </p>
           </section>
 
@@ -184,10 +183,10 @@ export function PrivacyStatement() {
           <section>
             <h3 className="mb-1.5 text-[13.5px] font-semibold text-foreground">8. Data Retention</h3>
             <p>
-              We retain your personal information only for as long as necessary to provide the service.
-              Session transcripts, audio recordings, and conversation data are retained for the duration
-              of your active use and deleted within a reasonable period after you cease using the service
-              or request deletion.
+              We retain personal information only for as long as needed to operate the service,
+              support review workflows, and meet applicable organisational or legal requirements.
+              Exact retention periods for transcripts, reflections, notes, and audio recordings
+              should be defined by the deploying organisation&apos;s operational policy.
             </p>
           </section>
 
@@ -197,12 +196,11 @@ export function PrivacyStatement() {
             <p className="mb-2">We take appropriate technical and organisational measures to protect your personal information, including:</p>
             <ul className="space-y-1 pl-3">
               {[
-                "Encryption of data in transit (TLS/HTTPS) and at rest (AES-256).",
-                "Use of European data regions where available.",
+                "Encryption of data in transit and, where supported by the configured providers, at rest.",
                 "Access controls limiting who can view your data.",
                 "Error monitoring and logging to detect and respond to incidents.",
-                "Regular review of our security practices and those of our providers.",
-                "Data Processing Agreements with all third-party providers.",
+                "Regular review of service configuration and third-party provider documentation.",
+                "Controlled use of authenticated routes and server-side secrets for privileged operations.",
               ].map((item) => (
                 <li key={item} className="flex gap-2">
                   <span className="mt-0.5 shrink-0 text-muted-foreground">•</span>
@@ -247,7 +245,7 @@ export function PrivacyStatement() {
             <h3 className="mb-1.5 text-[13.5px] font-semibold text-foreground">12. Complaints</h3>
             <p>
               If you are unhappy with how we handle your personal information, you have the right to
-              raise a concern with the Information Commissioner's Office (ICO) at{" "}
+              raise a concern with the Information Commissioner&apos;s Office (ICO) at{" "}
               <a
                 href="https://ico.org.uk"
                 target="_blank"

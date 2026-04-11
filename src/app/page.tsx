@@ -340,9 +340,10 @@ export default async function LandingPage() {
               </div>
               <h3 className="text-[14px] font-semibold">Scenario Builder</h3>
               <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-                Educators create custom scenarios with 15 personality dials,
-                configurable voice settings, bias categories, escalation rules,
-                and clinical milestones — or start from archetype presets.
+                Educators create custom scenarios with 14 numeric trait dials,
+                a bias-category selector, configurable voice settings,
+                escalation rules, and clinical milestones — or start from
+                archetype presets.
               </p>
             </div>
             <div className="rounded-xl border border-border/60 bg-background p-5">
@@ -376,8 +377,8 @@ export default async function LandingPage() {
               <h3 className="text-[14px] font-semibold">Detailed Post-Session Review</h3>
               <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
                 Review full transcripts with audio playback, an escalation
-                timeline, key moment highlights, and AI-generated suggestions
-                for what to try next time.
+                timeline, key moment highlights, and suggestions for what to
+                try next time.
               </p>
             </div>
             <div className="rounded-xl border border-border/60 bg-background p-5">

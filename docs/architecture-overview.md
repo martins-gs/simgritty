@@ -1,6 +1,8 @@
 # PROLOG Architecture Overview
 
-This document reflects the architecture currently implemented in the codebase, not an older prompt or model mix.
+Last verified against the codebase on 2026-04-11.
+
+This document reflects the architecture currently implemented in the repository. It is an implementation reference, not a roadmap. The separate `docs/elevenlabs-plan.md` file is proposal-only.
 
 ## System Diagram
 
@@ -237,13 +239,13 @@ The current review flow computes score and evidence on demand from transcript tu
 
 ## 8. Scenario Authoring: Traits And Archetypes
 
-`src/lib/engine/traitDials.ts` defines 15 scenario trait dials across three categories:
+`src/lib/engine/traitDials.ts` defines **14 numeric trait dials** across three categories, plus a separate bias-category selector:
 
-- **Emotional**: intensity, hostility, frustration, impatience, trust
-- **Behavioural**: listening, sarcasm, volatility, boundary respect, interruption, coherence, repetition
-- **Cognitive**: entitlement, bias intensity, escalation tendency
+- **Emotional**: hostility, frustration, impatience, trust
+- **Behavioural**: willingness_to_listen, sarcasm, volatility, boundary_respect, interruption_likelihood
+- **Cognitive / contextual**: coherence, repetition, entitlement, bias_intensity, escalation_tendency
 
-Each trait has a 0–10 range with human-readable low/high labels and is paired with a bias category selector (none, gender, racial, age, accent, class/status, role/status, mixed).
+Each numeric trait has a 0–10 range with human-readable low/high labels. Bias category is configured separately (`none`, `gender`, `racial`, `age`, `accent`, `class_status`, `role_status`, `mixed`).
 
 `src/lib/engine/archetypePresets.ts` provides five ready-made scenario configurations:
 
@@ -274,7 +276,7 @@ The session APIs persist transcript turns and state events during the live run, 
 
 The review page (`src/app/review/[sessionId]/page.tsx`) loads session, transcript, events, and educator notes in parallel. It includes a retry mechanism (up to 8 attempts at 750 ms intervals) that re-fetches if the session data appears incomplete — specifically if `exit_type`, `peak_escalation_level`, or `ended_at` are missing, if clinician turns are present but no `clinician_audio` events have arrived yet, or if trainee turns exist but audio-delivery results have not arrived yet. This handles the race between the simulation page's final persistence flush and the review page load.
 
-Valid `exit_type` values: `normal`, `instant_exit` (early exit button or abandoned session), `educator_ended`, `timeout`, `auto_ceiling` (escalation ceiling reached), `max_duration` (org session duration limit reached).
+The schema supports `exit_type` values `normal`, `instant_exit`, `educator_ended`, `timeout`, `auto_ceiling`, and `max_duration`. The current UI/runtime paths actively emit `normal`, `instant_exit`, `auto_ceiling`, and `max_duration`.
 
 ### Responsive Layout
 
@@ -351,6 +353,22 @@ The dashboard hides delete buttons for items the current user does not own. The 
 
 Read access to sessions, transcripts, events, educator notes, audio, and scenarios is currently open to all authenticated users. This is intentional for the current phase to allow management visibility across the platform. Row-level security policies are planned for a future release.
 
+### Organisation Settings
+
+`org_settings` currently stores four governance fields:
+
+- `max_escalation_ceiling`
+- `max_session_duration_minutes`
+- `allow_discriminatory_content`
+- `require_consent_gate`
+
+Runtime enforcement is mixed:
+
+- `max_escalation_ceiling` is enforced in scenario editing and live simulation.
+- `max_session_duration_minutes` is enforced in live simulation via auto-end.
+- `allow_discriminatory_content` is persisted and editable, but is not yet wired to block discriminatory scenario authoring or runtime behaviour.
+- `require_consent_gate` is persisted and editable, but the briefing flow currently always shows the consent gate.
+
 ### User Identity
 
 `user_profiles` stores `display_name` and `email` (added via migration, backfilled from `auth.users`, and kept in sync by the `handle_new_user` trigger). The dashboard displays the user's name as a greeting, session lists show the trainee's full identity as "Display Name (email)", and the scenario edit page shows the creator's name. A lightweight profile API (`GET /api/profile`) returns the current user's profile for client-side identity checks.
@@ -362,7 +380,7 @@ The dashboard (`src/app/dashboard/page.tsx`) currently has a welcome header plus
 - **Scenarios available to you**: a tinted panel (`bg-muted/40`) containing compact fixed-width cards (220px) for published scenarios, each linking directly to the briefing page. Cards show difficulty, title, and setting.
 - **Recent sessions**: the 6 most recent sessions across all users, showing scenario title, trainee identity, session date/time (preferring `started_at`, then `ended_at`, then `created_at`), peak escalation level, exit status, and an owner-only delete button.
 
-## 11. Landing Page
+## 12. Landing Page
 
 The landing page (`src/app/page.tsx`) is a marketing-style overview rather than a redirect. It uses real session screenshots (`/public/screenshots/`) for the escalation timeline and transcript demos, an `IsometricDiagramV3` component for the system architecture section, and inline "prolog" text rendered in the Host Grotesk Bold logo font in dark teal (`#0d2d3a`) via a `<P />` helper component, with a lighter variant (`#7ec8c8`) for use on dark backgrounds. The page includes feature, outputs, configuration, workflow, audience, architecture, privacy, roadmap, and CTA sections; the configuration demo still uses interactive mock sliders.
 
