@@ -971,9 +971,43 @@ export function isSessionPreliminary(turnCount: number): boolean {
 
 /** Pick the 2-3 highest-impact evidence items for "key moments" display. */
 export function pickKeyMoments(evidence: ScoreEvidence[], maxCount = 3): ScoreEvidence[] {
-  return [...evidence]
-    .sort((a, b) => Math.abs(b.scoreImpact) - Math.abs(a.scoreImpact))
-    .slice(0, maxCount);
+  const ranked = [...evidence].sort((a, b) => Math.abs(b.scoreImpact) - Math.abs(a.scoreImpact));
+  const selected: ScoreEvidence[] = [];
+  const selectedTurnIndexes = new Set<number>();
+
+  function canSelect(item: ScoreEvidence) {
+    return !selectedTurnIndexes.has(item.turnIndex);
+  }
+
+  function pushIfSelectable(item: ScoreEvidence | undefined) {
+    if (!item || !canSelect(item)) return false;
+    selected.push(item);
+    selectedTurnIndexes.add(item.turnIndex);
+    return true;
+  }
+
+  const strongestPositive = ranked.find((item) => (
+    canSelect(item) && (
+      item.scoreImpact > 0 ||
+      item.evidenceType === "milestone_completed" ||
+      (item.evidenceType === "de_escalation_attempt" && item.evidenceData.effective === true)
+    )
+  ));
+
+  pushIfSelectable(strongestPositive);
+  const strongestNegative = ranked.find((item) => canSelect(item) && item.scoreImpact < 0);
+  pushIfSelectable(strongestNegative);
+
+  for (const item of ranked) {
+    if (selected.length >= maxCount) break;
+    if (!canSelect(item)) continue;
+    selected.push(item);
+    selectedTurnIndexes.add(item.turnIndex);
+  }
+
+  return selected
+    .slice(0, maxCount)
+    .sort((a, b) => a.turnIndex - b.turnIndex);
 }
 
 /** Get a technique suggestion based on the weakest dimension. */

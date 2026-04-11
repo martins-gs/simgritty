@@ -35,6 +35,27 @@ function formatMarkerLabel(marker: string): string {
   return marker.replace(/_/g, " ");
 }
 
+function getImpactBadge(effectiveness: number) {
+  if (effectiveness > 0.3) {
+    return {
+      className: "border-green-500 text-green-700",
+      label: "Likely helped settle things",
+    };
+  }
+
+  if (effectiveness < -0.3) {
+    return {
+      className: "border-red-500 text-red-700",
+      label: "Likely increased tension",
+    };
+  }
+
+  return {
+    className: "border-yellow-500 text-yellow-700",
+    label: "Little clear shift",
+  };
+}
+
 function EscalationImpact({
   levelBefore,
   levelAfter,
@@ -240,19 +261,22 @@ export function TranscriptViewer({
               )}
               {classifier && (turn.speaker === "trainee" || turn.speaker === "system") && (
                 <div className="mt-2 flex flex-wrap gap-1">
+                  {(() => {
+                    const impactBadge = getImpactBadge(classifier.effectiveness);
+                    return (
+                      <Badge
+                        variant="outline"
+                        className={cn("text-[10px]", impactBadge.className)}
+                      >
+                        {impactBadge.label}
+                      </Badge>
+                    );
+                  })()}
                   <Badge
                     variant="outline"
-                    className={cn(
-                      "text-[10px]",
-                      classifier.effectiveness > 0.3
-                        ? "border-green-500 text-green-700"
-                        : classifier.effectiveness < -0.3
-                        ? "border-red-500 text-red-700"
-                        : "border-yellow-500 text-yellow-700"
-                    )}
+                    className="text-[10px]"
                   >
-                    {classifier.technique} ({classifier.effectiveness > 0 ? "+" : ""}
-                    {classifier.effectiveness.toFixed(1)})
+                    {classifier.technique}
                   </Badge>
                   {classifier.tags.map((tag) => (
                     <Badge key={tag} variant="outline" className="text-[10px]">
@@ -261,6 +285,11 @@ export function TranscriptViewer({
                   ))}
                 </div>
               )}
+              {classifier?.reasoning && (turn.speaker === "trainee" || turn.speaker === "system") && (
+                <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                  {classifier.reasoning}
+                </p>
+              )}
               {deliveryAnalysis && (
                 <div className="mt-2 space-y-1">
                   <div className="flex flex-wrap gap-1">
@@ -268,10 +297,7 @@ export function TranscriptViewer({
                       variant="outline"
                       className="border-sky-500 text-[10px] text-sky-700"
                     >
-                      Audio delivery
-                    </Badge>
-                    <Badge variant="outline" className="text-[10px]">
-                      {Math.round(deliveryAnalysis.confidence * 100)}% confidence
+                      Audio delivery note
                     </Badge>
                     {deliveryAnalysis.markers.map((marker) => (
                       <Badge key={marker} variant="outline" className="text-[10px]">

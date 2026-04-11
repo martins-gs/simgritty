@@ -27,13 +27,6 @@ function getBarColor(ratio: number) {
   return "bg-red-400";
 }
 
-function getRingColor(ratio: number) {
-  if (ratio >= 0.8) return "#10b981";
-  if (ratio >= 0.6) return "#3b82f6";
-  if (ratio >= 0.4) return "#f59e0b";
-  return "#ef4444";
-}
-
 function ScoreBar({
   label,
   value,
@@ -76,74 +69,38 @@ function ScoreBar({
 
 export function ScoreCard({ score, preliminary }: ScoreCardProps) {
   const labelColors = getLabelColors(score.qualitativeLabel);
-  const overallRatio = score.overall / 100;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-      {/* Top section — stacks on mobile, side-by-side on sm+ */}
-      <div className="flex flex-col sm:flex-row sm:items-stretch border-b border-slate-100">
-        {/* Qualitative label + overall score — combined row on mobile */}
-        <div className={cn(
-          "flex items-center gap-4 px-4 py-4 sm:flex-col sm:justify-center sm:px-6 sm:py-5 sm:border-r border-b sm:border-b-0 border-slate-100",
-          labelColors.bg
-        )}>
-          <span className={cn("text-lg font-bold leading-tight", labelColors.text)}>
-            {score.qualitativeLabel}
-          </span>
-          {/* Ring visible inline on mobile */}
-          <div className="relative h-12 w-12 shrink-0 sm:hidden">
-            <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
-              <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e2e8f0" strokeWidth="3" />
-              <circle
-                cx="18" cy="18" r="15.5" fill="none"
-                stroke={getRingColor(overallRatio)}
-                strokeWidth="3" strokeLinecap="round"
-                strokeDasharray={`${overallRatio * 97.4} 97.4`}
-              />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-[13px] font-bold tabular-nums text-slate-900">{score.overall}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Desktop score ring + summary */}
-        <div className="hidden sm:flex flex-1 items-center gap-5 px-5 py-4">
-          <div className="relative h-16 w-16 shrink-0">
-            <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
-              <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e2e8f0" strokeWidth="3" />
-              <circle
-                cx="18" cy="18" r="15.5" fill="none"
-                stroke={getRingColor(overallRatio)}
-                strokeWidth="3" strokeLinecap="round"
-                strokeDasharray={`${overallRatio * 97.4} 97.4`}
-                className="transition-all duration-700"
-              />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-[15px] font-bold tabular-nums text-slate-900">{score.overall}</span>
-            </div>
-          </div>
+      <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[13px] font-semibold text-slate-900">Performance Score</p>
-            <p className="mt-0.5 text-[12px] leading-relaxed text-slate-500">{score.summary}</p>
-            {preliminary && (
-              <p className="mt-1 text-[10px] text-amber-600 font-medium">
-                Short session — scores are preliminary.
-              </p>
-            )}
+            <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+              Score Breakdown
+            </p>
+            <p className="mt-2 text-[13px] leading-relaxed text-slate-600">
+              These numbers are a rough guide to the communication patterns in this session, not a final verdict.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[12px] font-semibold text-slate-700">
+              Overall {score.overall}/100
+            </span>
+            <span className={cn(
+              "rounded-full border px-3 py-1 text-[12px] font-semibold",
+              labelColors.border,
+              labelColors.bg,
+              labelColors.text
+            )}>
+              {score.qualitativeLabel}
+            </span>
           </div>
         </div>
-
-        {/* Mobile summary text */}
-        <div className="sm:hidden px-4 py-3">
-          <p className="text-[13px] leading-relaxed text-slate-500">{score.summary}</p>
-          {preliminary && (
-            <p className="mt-1 text-[10px] text-amber-600 font-medium">
-              Short session — scores are preliminary.
-            </p>
-          )}
-        </div>
+        {preliminary && (
+          <p className="mt-3 text-[11px] font-medium text-amber-700">
+            Short session: treat this breakdown as especially tentative.
+          </p>
+        )}
       </div>
 
       {/* Score breakdown — single column on mobile */}

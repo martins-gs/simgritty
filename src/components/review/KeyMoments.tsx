@@ -1,12 +1,18 @@
 "use client";
 
 import type { ScoreEvidence } from "@/lib/engine/scoring";
+import {
+  buildReviewMomentNarrative,
+  getMomentTurnContext,
+} from "@/lib/review/feedback";
 import type { TranscriptTurn } from "@/types/simulation";
 import { cn } from "@/lib/utils";
+import { MomentTranscriptContext } from "@/components/review/MomentTranscriptContext";
 
 interface KeyMomentsProps {
   moments: ScoreEvidence[];
   turns: TranscriptTurn[];
+  sessionStartedAt: string | null | undefined;
   activeMomentIndex?: number | null;
 }
 
@@ -21,95 +27,28 @@ const EVIDENCE_DESCRIPTIONS: Record<string, (data: Record<string, unknown>) => s
   composure_marker: (data) => {
     const markers = data.markers as string[] | undefined;
     if (!markers?.length) return "Composure marker detected";
-    const labels = markers.map((m) => m.replace(/_/g, " "));
-    return labels.join(", ");
+    return markers.map((marker) => marker.replace(/_/g, " ")).join(", ");
   },
-  low_substance_response: (data) => {
-    const technique = data.technique as string | undefined;
-    const effectiveness = data.effectiveness as number | undefined;
-    if (technique && typeof effectiveness === "number") {
-      return `${technique.replace(/_/g, " ")} gave little useful engagement (${effectiveness.toFixed(1)})`;
-    }
-    return "This response stayed low-substance and did not meaningfully engage with the concern";
-  },
+  low_substance_response: () => "Low-substance response",
   delivery_marker: (data) => {
-    const markers = data.markers as string[] | undefined;
     const summary = data.summary as string | undefined;
-    const confidence = typeof data.confidence === "number"
-      ? Math.round(data.confidence * 100)
-      : null;
-    const pairedWithAttempt = data.pairedWithAttempt as boolean | undefined;
-
-    if (summary) {
-      return pairedWithAttempt && confidence != null
-        ? `${summary} (${confidence}% confidence during the de-escalation attempt)`
-        : pairedWithAttempt
-          ? `${summary} during the de-escalation attempt`
-          : confidence != null
-            ? `${summary} (${confidence}% confidence)`
-            : summary;
-    }
-
-    const labels = markers?.map((marker) => marker.replace(/_/g, " ")) ?? [];
-    if (!labels.length) {
-      return "Audio-derived delivery affected scoring";
-    }
-
-    const markerText = labels.join(", ");
-    return pairedWithAttempt
-      ? `Audio delivery during the de-escalation attempt sounded ${markerText}`
-      : `Audio delivery sounded ${markerText}`;
+    return summary ?? "Audio delivery note";
   },
   de_escalation_attempt: (data) => {
     const technique = data.technique as string | undefined;
-    const effective = data.effective as boolean;
-    const clinicianIntervened = data.clinicianIntervened as boolean | undefined;
-    if (clinicianIntervened) {
-      return technique
-        ? `${technique.replace(/_/g, " ")} — not credited because the AI clinician intervened before the next patient response`
-        : "Not credited because the AI clinician intervened before the next patient response";
-    }
-    if (technique) {
-      return `${technique.replace(/_/g, " ")} — ${effective ? "effective" : "not effective"}`;
-    }
-    return effective ? "Effective de-escalation" : "De-escalation attempt did not reduce escalation";
+    return technique ? `${technique.replace(/_/g, " ")} attempt` : "De-escalation attempt";
   },
   de_escalation_harm: (data) => {
     const technique = data.technique as string | undefined;
-    const effectiveness = data.effectiveness as number | undefined;
-    if (technique && effectiveness != null) {
-      return `${technique.replace(/_/g, " ")} increased tension (${effectiveness.toFixed(1)})`;
-    }
-    return "This turn increased the patient or relative's emotional intensity";
+    return technique ? `${technique.replace(/_/g, " ")} backfired` : "Escalating response";
   },
   milestone_completed: (data) => {
-    const desc = data.description as string | undefined;
-    return desc ? `Addressed the clinical need: ${desc}` : "Addressed a clinical need during the conversation";
+    const description = data.description as string | undefined;
+    return description ? `Clinical task: ${description}` : "Clinical task maintained";
   },
-  support_invoked: (data) => {
-    const appropriate = data.appropriate as boolean;
-    const level = data.escalationLevel as number | undefined;
-    return appropriate
-      ? `Appropriately sought help (escalation at ${level})`
-      : `Sought help prematurely (escalation at ${level})`;
-  },
-  support_not_requested: (data) => {
-    const level = data.escalationLevel as number | undefined;
-    return `Support was indicated at level ${level}, but the trainee continued without requesting intervention`;
-  },
-  critical_no_support: (data) => {
-    const level = data.escalationLevel as number | undefined;
-    if (data.crisisReached) {
-      return `The conversation reached level ${level} without support after earlier missed intervention opportunities`;
-    }
-    if (data.delayedEscalation) {
-      return `After missed support opportunities, the conversation worsened to level ${level}`;
-    }
-    if (data.missedOpportunity) {
-      return `Critical support opportunity missed at level ${level}`;
-    }
-    return `Critical escalation at level ${level} without seeking support`;
-  },
+  support_invoked: () => "Support requested",
+  support_not_requested: () => "Support opportunity missed",
+  critical_no_support: () => "Critical support opportunity missed",
 };
 
 export function describeEvidence(evidence: ScoreEvidence): string {
@@ -118,81 +57,130 @@ export function describeEvidence(evidence: ScoreEvidence): string {
   return evidence.evidenceType.replace(/_/g, " ");
 }
 
-export function KeyMomentCard({
+function KeyMomentCard({
   moment,
-  turn,
+  turns,
+  sessionStartedAt,
   isActive = false,
 }: {
   moment: ScoreEvidence;
-  turn: TranscriptTurn | undefined;
+  turns: TranscriptTurn[];
+  sessionStartedAt: string | null | undefined;
   isActive?: boolean;
 }) {
-  const isPositive = moment.scoreImpact > 0;
-  const isNegative = moment.scoreImpact < 0;
+  const narrative = buildReviewMomentNarrative(moment, turns, sessionStartedAt);
+  const context = getMomentTurnContext(turns, moment.turnIndex);
 
   return (
     <div
       aria-current={isActive ? "step" : undefined}
       className={cn(
-        "rounded-lg border p-3 transition-all",
-        isPositive && "border-emerald-200 bg-emerald-50/50",
-        isNegative && "border-red-200 bg-red-50/50",
-        !isPositive && !isNegative && "border-slate-200 bg-slate-50/50",
+        "rounded-2xl border p-4 transition-all",
+        narrative.positive
+          ? "border-emerald-200 bg-emerald-50/60"
+          : "border-amber-200 bg-amber-50/60",
         isActive && "ring-2 ring-slate-900/15 shadow-md"
       )}
     >
-      <div className="flex items-center gap-2 mb-1">
-        <span className={cn(
-          "text-[10px] font-medium uppercase tracking-wide",
-          isPositive ? "text-emerald-600" : isNegative ? "text-red-600" : "text-slate-500"
-        )}>
-          {DIMENSION_LABELS[moment.dimension] ?? moment.dimension} — Turn {moment.turnIndex + 1}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+          {narrative.timecode} • {DIMENSION_LABELS[moment.dimension] ?? moment.dimension}
         </span>
-        {moment.scoreImpact !== 0 && (
-          <span className={cn(
-            "text-[10px] font-bold tabular-nums",
-            isPositive ? "text-emerald-600" : "text-red-600"
-          )}>
-            {isPositive ? "+" : ""}{Math.round(moment.scoreImpact)}
-          </span>
-        )}
+        <span
+          className={cn(
+            "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+            narrative.positive
+              ? "bg-emerald-100 text-emerald-700"
+              : "bg-amber-100 text-amber-800"
+          )}
+        >
+          {narrative.positive ? "Helpful moment" : "Moment to revisit"}
+        </span>
         {isActive && (
           <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
-            Now
+            In focus
           </span>
         )}
       </div>
-      {turn && (
-        <p className="text-[12px] text-slate-700 italic line-clamp-2">
-          &ldquo;{turn.content}&rdquo;
-        </p>
-      )}
-      <p className="mt-1 text-[12px] text-slate-500">
-        {describeEvidence(moment)}
+
+      <h3 className="mt-3 text-base font-semibold text-slate-900">
+        {narrative.headline}
+      </h3>
+      <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
+        {narrative.likelyImpact}
       </p>
+
+      <div className="mt-4">
+        <MomentTranscriptContext
+          previousTurn={context.previousTurn}
+          focusTurn={context.focusTurn}
+          nextTurn={context.nextTurn}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-white/90 bg-white/80 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            What happened next
+          </p>
+          <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
+            {narrative.whatHappenedNext}
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/90 bg-white/80 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Why it mattered here
+          </p>
+          <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
+            {narrative.whyItMattered}
+          </p>
+        </div>
+      </div>
+
+      {narrative.tryInstead && (
+        <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/80 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+            Try saying
+          </p>
+          <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
+            &ldquo;{narrative.tryInstead}&rdquo;
+          </p>
+        </div>
+      )}
     </div>
   );
 }
 
-export function KeyMoments({ moments, turns, activeMomentIndex = null }: KeyMomentsProps) {
+export function KeyMoments({
+  moments,
+  turns,
+  sessionStartedAt,
+  activeMomentIndex = null,
+}: KeyMomentsProps) {
   if (moments.length === 0) return null;
 
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-slate-900">Key moments</h3>
-      <div className="space-y-2">
-        {moments.map((moment, i) => {
-          const turn = turns.find((t) => t.turn_index === moment.turnIndex);
-          return (
-            <KeyMomentCard
-              key={i}
-              moment={moment}
-              turn={turn}
-              isActive={activeMomentIndex === i}
-            />
-          );
-        })}
+      <div>
+        <h3 className="text-sm font-semibold text-slate-900">
+          Moments That Shaped The Conversation
+        </h3>
+        <p className="mt-1 text-[13px] leading-relaxed text-slate-500">
+          Each moment shows what was said, how it likely landed, what happened next, and how you might handle a similar moment next time.
+        </p>
+      </div>
+      <div className="space-y-3">
+        {moments.map((moment, index) => (
+          <KeyMomentCard
+            key={`${moment.dimension}-${moment.turnIndex}-${moment.evidenceType}-${index}`}
+            moment={moment}
+            turns={turns}
+            sessionStartedAt={sessionStartedAt}
+            isActive={activeMomentIndex === index}
+          />
+        ))}
       </div>
     </div>
   );
 }
+

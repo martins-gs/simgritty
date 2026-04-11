@@ -86,7 +86,7 @@ async function updateTranscriptTurnById(
     .from("transcript_turns")
     .update(update)
     .eq("id", turnId)
-    .select("turn_index, classifier_result, trainee_delivery_analysis")
+    .select("turn_index, classifier_result, trainee_delivery_analysis, trigger_type, state_after, patient_voice_profile_after, patient_prompt_after")
     .maybeSingle();
 }
 
@@ -231,7 +231,7 @@ export async function PATCH(
 
   const { data: existingTurn, error: existingTurnError } = await supabase
     .from("transcript_turns")
-    .select("id, classifier_result, trainee_delivery_analysis")
+    .select("id, classifier_result, trainee_delivery_analysis, trigger_type, state_after, patient_voice_profile_after, patient_prompt_after")
     .eq("session_id", id)
     .eq("turn_index", body.turn_index)
     .maybeSingle();
@@ -271,10 +271,16 @@ export async function PATCH(
   const snapshotUpdate = {
     classifier_result: mergedClassifierResult,
     trainee_delivery_analysis: mergedDeliveryAnalysis,
-    trigger_type: body.trigger_type || null,
-    state_after: body.state_after || null,
-    patient_voice_profile_after: body.patient_voice_profile_after || null,
-    patient_prompt_after: body.patient_prompt_after || null,
+    trigger_type: body.trigger_type === undefined ? existingTurn.trigger_type : body.trigger_type,
+    state_after: body.state_after === undefined ? existingTurn.state_after : body.state_after,
+    patient_voice_profile_after:
+      body.patient_voice_profile_after === undefined
+        ? existingTurn.patient_voice_profile_after
+        : body.patient_voice_profile_after,
+    patient_prompt_after:
+      body.patient_prompt_after === undefined
+        ? existingTurn.patient_prompt_after
+        : body.patient_prompt_after,
   };
 
   const minimalUpdate = {
@@ -314,7 +320,7 @@ export async function PATCH(
   if (!resolvedUpdatedTurn) {
     const followUp = await supabase
       .from("transcript_turns")
-      .select("turn_index, classifier_result, trainee_delivery_analysis")
+      .select("turn_index, classifier_result, trainee_delivery_analysis, trigger_type, state_after, patient_voice_profile_after, patient_prompt_after")
       .eq("id", existingTurn.id)
       .maybeSingle();
 
@@ -341,6 +347,44 @@ export async function PATCH(
   const storedDeliveryAnalysis =
     parseDirectDeliveryAnalysis(resolvedUpdatedTurn.trainee_delivery_analysis) ??
     getPersistedDeliveryAnalysis(resolvedUpdatedTurn.classifier_result);
+
+  if (!storedDeliveryAnalysis && requestedTraineeDeliveryAnalysis) {
+    console.warn(
+      `[Transcript API] delivery analysis missing after patch turn=${body.turn_index}; retrying confirmation read`
+    );
+
+    const confirmRead = await supabase
+      .from("transcript_turns")
+      .select("turn_index, classifier_result, trainee_delivery_analysis")
+      .eq("id", existingTurn.id)
+      .maybeSingle();
+
+    if (confirmRead.error) {
+      if (isTraineeDeliveryColumnError(confirmRead.error.message)) {
+        return NextResponse.json(
+          { error: "Database missing transcript_turns.trainee_delivery_analysis column" },
+          { status: 500 }
+        );
+      }
+      return NextResponse.json({ error: confirmRead.error.message }, { status: 500 });
+    }
+
+    const confirmedDeliveryAnalysis =
+      parseDirectDeliveryAnalysis(confirmRead.data?.trainee_delivery_analysis) ??
+      getPersistedDeliveryAnalysis(confirmRead.data?.classifier_result);
+
+    console.info(
+      `[Transcript API] confirm turn=${body.turn_index} trainee_audio_delivery=${confirmedDeliveryAnalysis ? "present" : "absent"}`
+    );
+
+    return NextResponse.json({
+      success: true,
+      turnIndex: confirmRead.data?.turn_index ?? body.turn_index,
+      hasTraineeDeliveryAnalysis: !!confirmedDeliveryAnalysis,
+      markers: confirmedDeliveryAnalysis?.markers ?? [],
+    });
+  }
+
   console.info(
     `[Transcript API] stored turn=${resolvedUpdatedTurn.turn_index} trainee_audio_delivery=${storedDeliveryAnalysis ? "present" : "absent"}`
   );

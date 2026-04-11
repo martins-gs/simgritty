@@ -403,6 +403,7 @@ export const simulationSessionSchema: z.ZodType<SimulationSession> = z.object({
   peak_escalation_level: nullableNumberSchema,
   recording_path: nullableStringSchema,
   recording_started_at: nullableStringSchema.optional(),
+  review_summary: looseObjectSchema.nullish().transform((value) => value ?? null).catch(null),
   created_at: z.string(),
   scenario_templates: scenarioTemplatesSummarySchema.nullable().optional(),
 });

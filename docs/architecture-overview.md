@@ -262,7 +262,7 @@ Each preset bundles scenario defaults, a full trait profile, voice configuration
 Supabase stores:
 
 - authored scenarios (`scenario_templates`, `scenario_traits`, `scenario_voice_config`, `escalation_rules`, `scenario_milestones`)
-- live and completed sessions (`simulation_sessions` with frozen `scenario_snapshot`, `recording_path`, `recording_started_at`)
+- live and completed sessions (`simulation_sessions` with frozen `scenario_snapshot`, `recording_path`, `recording_started_at`, `review_summary`)
 - session audio recordings (Supabase Storage bucket `simulation-audio`, private, one `.webm` file per session)
 - transcript turns (`transcript_turns` with per-turn snapshots: `classifier_result`, `trainee_delivery_analysis`, `trigger_type`, `state_after`, `patient_voice_profile_after`, `patient_prompt_after`)
 - simulation state events (`simulation_state_events` — event types: `session_started`, `session_ended`, `escalation_change`, `de_escalation_change`, `ceiling_reached`, `trainee_exit`, `classification_result`, `clinician_audio`, `prompt_update`, `error`; trainee audio delivery fallback events are stored as `classification_result` with `__event_kind: "trainee_audio_delivery"`)
@@ -278,24 +278,26 @@ The review page (`src/app/review/[sessionId]/page.tsx`) loads session, transcrip
 
 The schema supports `exit_type` values `normal`, `instant_exit`, `educator_ended`, `timeout`, `auto_ceiling`, and `max_duration`. The current UI/runtime paths actively emit `normal`, `instant_exit`, `auto_ceiling`, and `max_duration`.
 
+`POST /api/sessions/[id]/review-summary` now behaves as a populate-if-missing route rather than a pure regeneration endpoint. It verifies session ownership, returns the saved `simulation_sessions.review_summary` when present, and otherwise generates one educator-style summary, persists the JSON, and reuses that stored version on later visits. `ReviewSummaryCard` prefers the stored summary immediately and only falls back to generation for sessions that do not have one yet.
+
 ### Responsive Layout
 
 Both the simulation page and the review page are designed to work on mobile phones as well as desktops:
 
 - **AppShell**: the sidebar nav (`w-56`) is hidden below the `md` breakpoint. The TopBar renders compact icon-based navigation links and a sign-out button on mobile instead.
 - **Simulation page**: uses a tab bar (Simulation / Transcript / Scenario) below `lg`, switching to the three-panel layout on larger screens.
-- **Review page**: ScoreCard stacks vertically on mobile (label + ring inline, summary below). Summary cards use a 2-column grid on mobile, 3 on `sm`, 5 on `lg`. The escalation timeline chart height reduces from `h-80` to `h-56` on mobile. Transcript/Event Log/Notes use `60vh` height on mobile instead of a fixed 500px. The Transcript / Event Log / Educator Notes section switcher is rendered as an explicit three-button segmented control, and mobile places the "Restart From Turn" action in its own full-width action area below the transcript list.
+- **Review page**: the reflection check-in and the Session Summary both sit in a full-width vertical stack. The Session Summary uses a single narrative header plus a 3-card coaching grid. The escalation timeline chart height reduces from `h-72` to `h-56` on mobile. Transcript/Event Log/Notes use `60vh` height on mobile instead of a fixed 500px. The Transcript / Event Log / Educator Notes section switcher is rendered as an explicit three-button segmented control, and mobile places the "Restart From Turn" action in its own full-width action area below the transcript list.
 
 The review page displays:
 
-- **Top review section**: a two-column layout with score content on the left and trainee reflection on the right on large screens. The left side shows either a full `ScoreCard` or a score placeholder card explaining that the session was too short to score.
+- **Top review section**: the `ReflectionPrompt` appears first and is always full width. Below it, the page shows either the persisted `ReviewSummaryCard` or the short-session placeholder when the session is too short to score.
+- **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data and kept at the top of the review page even for short sessions. The prompt text now asks, "How do you think that conversation went?" If saved reflection data cannot be loaded, the component stays visible and shows an inline error state rather than disappearing.
+- **Session summary**: one overview sentence block plus `What Helped`, `Why It Mattered`, and `Try Saying`. The summary is generated with structured output, but once persisted it is reused rather than regenerated on each visit.
 - **ScoreCard**: qualitative label badge (Strong / Developing / Needs practice), overall circular progress, and four dimension bars (0–100) with weight percentages. Sessions under 3 trainee turns show the short-session placeholder instead of the score card.
-- **Patient/relative state timeline**: always visible on the main screen (no longer in a tab), showing patient/relative state and trust over time with event markers.
-- **Key moments**: 2–3 highest-impact scoring events with transcript excerpts and context.
-- **Technique suggestion**: one "Next time, try" recommendation based on the weakest scoring dimension.
-- **Summary cards**: turns, events, peak level, exit type, and a **Supervisor intervention** card that summarises AI clinician usage and whether audio telemetry was captured.
+- **Conversation timeline**: always visible on the main screen (no longer in a tab), showing the conversation-intensity path with event markers, optional session-audio playback, a hover/playback cursor, and a persistent detail panel for the selected key moment.
+- **Timeline coaching cards**: up to 8 ranked scoring moments rendered as numbered tabs beneath the chart. The active card shows the headline, likely impact, one-turn-before/one-turn-after transcript context, what happened next, why it mattered here, and a replacement phrase when relevant.
+- **Learning objectives + score**: for score-valid sessions, the learning objectives panel sits alongside the `ScoreCard` beneath the timeline instead of in the top row.
 - **Section switcher**: Transcript, Event Log, and Educator Notes are shown one panel at a time using a segmented control rather than the previous tabs primitive.
-- **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data and kept near the top of the review page even for short sessions. If saved reflection data cannot be loaded, the component stays visible and shows an inline error state rather than disappearing.
 - **Audio delivery badges**: trainee turns can show a separate `Audio delivery` row with 0-3 markers and an assessment-confidence label. The confidence label refers to confidence in the audio reading itself, not the trainee's self-confidence.
 - **Fallback merge**: if `trainee_delivery_analysis` is missing on the transcript row but present in fallback events, the review page merges the fallback payload onto the turn before rendering and scoring.
 
@@ -313,7 +315,7 @@ The `TranscriptViewer` displays per-turn audio delivery badges, including multip
 
 ### Session Audio Recording And Playback
 
-Each simulation session is continuously recorded as a single mixed audio file (trainee mic + AI remote audio). The recording is uploaded to Supabase Storage (`simulation-audio` bucket) at session end via `POST /api/sessions/:id/audio`, which also persists `recording_path` and `recording_started_at` on the session record.
+Each simulation session is continuously recorded as a single mixed audio file (trainee mic + AI remote audio). The recording is uploaded to Supabase Storage (`simulation-audio` bucket) at session end via `POST /api/sessions/:id/audio`, which also persists `recording_path` and `recording_started_at` on the session record. The route verifies that the authenticated user owns the session, then performs the Storage write via the admin Supabase client so bucket RLS does not block uploads for valid sessions.
 
 On the review page, `GET /api/sessions/:id/audio` returns a time-limited signed URL. The `TranscriptViewer` calculates per-turn seek offsets relative to `recording_started_at` (the exact timestamp when `MediaRecorder.start()` was called, not `session.started_at` which is set earlier during session init). Offset calculation accounts for the fact that transcript `started_at` timestamps represent speech *end* rather than speech *start*:
 

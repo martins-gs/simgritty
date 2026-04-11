@@ -198,7 +198,7 @@ export function ReflectionPrompt({ sessionId }: ReflectionPromptProps) {
           setErrorMessage(null);
           setFreeText(e.target.value);
         }}
-        placeholder="Anything else you'd like to note? (optional)"
+        placeholder="How do you think that conversation went? (optional)"
         rows={2}
         className="border-amber-200 bg-white/95 text-sm shadow-sm placeholder:text-slate-400 focus-visible:border-amber-400 focus-visible:ring-amber-200/60"
       />

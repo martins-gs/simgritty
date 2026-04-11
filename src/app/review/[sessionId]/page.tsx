@@ -8,9 +8,9 @@ import { EscalationTimeline } from "@/components/review/EscalationTimeline";
 import { EventLog } from "@/components/review/EventLog";
 import { EducatorNotes } from "@/components/review/EducatorNotes";
 import { ScoreCard } from "@/components/review/ScoreCard";
-import { KeyMoments } from "@/components/review/KeyMoments";
 import { ReflectionPrompt } from "@/components/review/ReflectionPrompt";
-import { computeScore, isSessionPreliminary, pickKeyMoments, getNextTimeTrySuggestion } from "@/lib/engine/scoring";
+import { ReviewSummaryCard } from "@/components/review/ReviewSummaryCard";
+import { computeScore, isSessionPreliminary, pickKeyMoments } from "@/lib/engine/scoring";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -216,7 +216,6 @@ export default function ReviewPage() {
   const [activePanel, setActivePanel] = useState<ReviewPanel>("transcript");
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [recordingStartedAt, setRecordingStartedAt] = useState<string | null>(null);
-  const [activeKeyMomentIndex, setActiveKeyMomentIndex] = useState<number | null>(null);
   const audioFetchedRef = useRef(false);
 
   useEffect(() => {
@@ -341,8 +340,11 @@ export default function ReviewPage() {
   const supportThreshold = snapshot.support_threshold;
   const criticalThreshold = snapshot.critical_threshold;
   const learningObjectives = snapshot.learning_objectives;
+  const scenarioTraits = snapshot.scenario_traits[0] ?? null;
+  const scenarioBackstory = snapshot.backstory;
+  const scenarioEmotionalDriver = snapshot.emotional_driver;
+  const scenarioAiRole = snapshot.ai_role;
 
-  // Clinician audio stats (unchanged from before)
   const clinicianAudioEvents = events
     .filter(isClinicianAudioEvent)
     .flatMap((event) => {
@@ -353,31 +355,6 @@ export default function ReviewPage() {
   for (const { payload } of clinicianAudioEvents) {
     clinicianAudioByTurnIndex.set(payload.turn_index, payload);
   }
-  const clinicianAudioStats = clinicianAudioEvents.reduce(
-    (acc, { payload }) => {
-      acc.total++;
-      if (payload.path === "tts") acc.tts++;
-      if (payload.path === "realtime" && payload.realtime_outcome === "completed") acc.realtimeCompleted++;
-      if (payload.path === "realtime" && payload.realtime_outcome === "partial") acc.realtimePartial++;
-      if (payload.path === "none") acc.none++;
-      return acc;
-    },
-    { total: 0, realtimeCompleted: 0, realtimePartial: 0, tts: 0, none: 0 }
-  );
-  const clinicianAudioSuccessRate = clinicianAudioStats.total > 0
-    ? Math.round((clinicianAudioStats.realtimeCompleted / clinicianAudioStats.total) * 100)
-    : null;
-  const clinicianAudioExpected = expectsClinicianAudio(turns, events);
-  const clinicianAudioHeadline = clinicianAudioSuccessRate !== null
-    ? `${clinicianAudioSuccessRate}% RT`
-    : clinicianAudioExpected
-      ? "Missing"
-      : "Not used";
-  const clinicianAudioSubtext = clinicianAudioStats.total > 0
-    ? `${clinicianAudioStats.realtimeCompleted} realtime, ${clinicianAudioStats.realtimePartial} partial, ${clinicianAudioStats.tts} TTS`
-    : clinicianAudioExpected
-      ? "Supervisor intervention turns were present, but no audio telemetry was saved."
-      : null;
 
   // Compute score with new system
   const score = computeScore({
@@ -393,7 +370,6 @@ export default function ReviewPage() {
   const preliminary = isSessionPreliminary(score.turnCount);
   const keyMoments = pickKeyMoments(score.evidence);
   const timelineKeyMoments = pickKeyMoments(score.evidence, 8);
-  const suggestion = getNextTimeTrySuggestion(score);
 
   const selectedTurn = turns.find((turn) => turn.id === selectedTurnId) ?? null;
   const canRestartFromSelectedTurn = Boolean(selectedTurn?.state_after && selectedTurn?.patient_prompt_after);
@@ -439,23 +415,12 @@ export default function ReviewPage() {
   return (
     <AppShell>
       <div className="space-y-4 sm:space-y-6 px-1 sm:px-0">
-        {/* Header */}
         <div>
           <h1 className="text-xl sm:text-2xl font-bold">{scenarioTitle}</h1>
           <div className="mt-2 flex flex-wrap gap-2">
             <Badge variant={session.status === "completed" ? "default" : "destructive"}>
               {session.exit_type === "instant_exit" ? "Exited early" : session.status}
             </Badge>
-            {session.peak_escalation_level && (
-              <Badge variant="outline">
-                Peak escalation: {session.peak_escalation_level}
-              </Badge>
-            )}
-            {session.final_escalation_level && (
-              <Badge variant="outline">
-                Final: {session.final_escalation_level}
-              </Badge>
-            )}
             {duration && (
               <Badge variant="secondary">{formatDuration(duration)}</Badge>
             )}
@@ -467,10 +432,24 @@ export default function ReviewPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] xl:items-start">
+        <div className="space-y-4">
+          <ReflectionPrompt sessionId={sessionId} />
+
           <div className="space-y-4">
             {score.sessionValid ? (
-              <ScoreCard score={score} preliminary={preliminary} />
+              <ReviewSummaryCard
+                sessionId={sessionId}
+                session={session}
+                score={score}
+                turns={turns}
+                keyMoments={keyMoments}
+                learningObjectives={learningObjectives}
+                milestones={milestones}
+                aiRole={scenarioAiRole}
+                backstory={scenarioBackstory}
+                emotionalDriver={scenarioEmotionalDriver}
+                traits={scenarioTraits}
+              />
             ) : (
               <ScorePlaceholderCard
                 turnCount={score.turnCount}
@@ -481,95 +460,24 @@ export default function ReviewPage() {
               />
             )}
 
-            {score.sessionValid && learningObjectives && (
+            {!score.sessionValid && learningObjectives && (
               <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
-                <h3 className="text-[12px] font-medium uppercase tracking-wide text-muted-foreground mb-2">
+                <h3 className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
                   Learning Objectives
                 </h3>
                 <ul className="space-y-1">
-                  {learningObjectives.split("\n").filter(Boolean).map((obj, i) => (
-                    <li key={i} className="text-[13px] text-slate-700">{obj}</li>
+                  {learningObjectives.split("\n").filter(Boolean).map((objective, index) => (
+                    <li key={index} className="text-[13px] text-slate-700">{objective}</li>
                   ))}
                 </ul>
               </div>
             )}
-
-            {score.sessionValid && (
-              <KeyMoments
-                moments={keyMoments}
-                turns={turns}
-                activeMomentIndex={activeKeyMomentIndex}
-              />
-            )}
-
-            {score.sessionValid && suggestion && (
-              <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-4">
-                <h3 className="text-[12px] font-medium uppercase tracking-wide text-blue-600 mb-1">
-                  Next time, try
-                </h3>
-                <p className="text-[13px] text-slate-700">{suggestion}</p>
-              </div>
-            )}
           </div>
-
-          <ReflectionPrompt sessionId={sessionId} />
         </div>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 sm:gap-4">
-          <Card>
-            <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
-              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Turns</CardTitle>
-            </CardHeader>
-            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
-              <p className="text-xl sm:text-2xl font-bold">{turns.length}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
-              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Peak Level</CardTitle>
-            </CardHeader>
-            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
-              <p className="text-xl sm:text-2xl font-bold">{session.peak_escalation_level ?? "N/A"}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
-              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Exit Type</CardTitle>
-            </CardHeader>
-            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
-              <p className="text-xl sm:text-2xl font-bold capitalize">
-                {session.exit_type?.replace(/_/g, " ") ?? "N/A"}
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="hidden sm:block">
-            <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
-              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Events</CardTitle>
-            </CardHeader>
-            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
-              <p className="text-xl sm:text-2xl font-bold">{events.length}</p>
-            </CardContent>
-          </Card>
-          <Card className="hidden lg:block">
-            <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-6 pt-3 sm:pt-6">
-              <CardTitle className="text-xs sm:text-sm text-muted-foreground">Supervisor intervention</CardTitle>
-            </CardHeader>
-            <CardContent className="px-3 sm:px-6 pb-3 sm:pb-6">
-              <p className="text-xl sm:text-2xl font-bold">{clinicianAudioHeadline}</p>
-              {clinicianAudioSubtext && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {clinicianAudioSubtext}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Escalation Timeline — always visible on main screen */}
         <Card>
           <CardHeader>
-            <CardTitle>Patient/Relative State Over Time</CardTitle>
+            <CardTitle>Conversation Timeline</CardTitle>
           </CardHeader>
           <CardContent>
             {session.started_at ? (
@@ -580,7 +488,6 @@ export default function ReviewPage() {
                 maxCeiling={snapshot.escalation_rules[0]?.max_ceiling ?? 8}
                 sessionStartedAt={recordingStartedAt ?? session.started_at}
                 recordingUrl={recordingUrl}
-                onActiveKeyMomentChange={setActiveKeyMomentIndex}
               />
             ) : (
               <p className="text-muted-foreground text-sm">No timeline data available</p>
@@ -588,7 +495,27 @@ export default function ReviewPage() {
           </CardContent>
         </Card>
 
-        {/* Transcript + Event Log + Educator Notes */}
+        {score.sessionValid && (
+          <div className={cn(
+            "grid gap-4 xl:items-start",
+            learningObjectives && "xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"
+          )}>
+            {learningObjectives && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
+                <h3 className="mb-2 text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Learning Objectives
+                </h3>
+                <ul className="space-y-1">
+                  {learningObjectives.split("\n").filter(Boolean).map((objective, index) => (
+                    <li key={index} className="text-[13px] text-slate-700">{objective}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <ScoreCard score={score} preliminary={preliminary} />
+          </div>
+        )}
+
         <div className="space-y-4">
           <div
             role="tablist"

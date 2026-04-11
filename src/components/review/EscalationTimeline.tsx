@@ -2,21 +2,25 @@
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
-  AreaChart,
   Area,
-  XAxis,
-  YAxis,
+  AreaChart,
   CartesianGrid,
-  ReferenceLine,
   ReferenceArea,
   ReferenceDot,
+  ReferenceLine,
+  XAxis,
+  YAxis,
 } from "recharts";
 import { Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DIMENSION_LABELS, describeEvidence } from "@/components/review/KeyMoments";
+import { DIMENSION_LABELS } from "@/components/review/KeyMoments";
+import { MomentTranscriptContext } from "@/components/review/MomentTranscriptContext";
 import type { ScoreEvidence } from "@/lib/engine/scoring";
+import {
+  buildReviewMomentNarrative,
+  getMomentTurnContext,
+} from "@/lib/review/feedback";
 import type { SimulationStateEvent, TranscriptTurn } from "@/types/simulation";
-import { ESCALATION_LABELS } from "@/types/escalation";
 import { cn } from "@/lib/utils";
 
 interface EscalationTimelineProps {
@@ -32,48 +36,39 @@ interface EscalationTimelineProps {
 interface ChartPoint {
   time: number;
   level: number;
-  trust: number | null;
-  listening: number | null;
   type: string;
-  reasoning: string | null;
-  technique: string | null;
-  effectiveness: number | null;
 }
 
 interface KeyMomentEntry {
   index: number;
   moment: ScoreEvidence;
   time: number;
-  turn: TranscriptTurn;
 }
 
-const CHART_MARGIN = { top: 8, right: 52, bottom: 6, left: 4 };
+const CHART_MARGIN = { top: 8, right: 24, bottom: 6, left: 0 };
 const PLAYBACK_CARD_DURATION_MS = 15_000;
 
-function getLevelColor(level: number): string {
-  if (level <= 2) return "#10b981";
-  if (level <= 4) return "#f59e0b";
-  if (level <= 6) return "#f97316";
-  if (level <= 8) return "#ef4444";
-  return "#991b1b";
-}
-
-function getEffectivenessColor(effectiveness: number): string {
-  if (effectiveness > 0.2) return "#10b981";
-  if (effectiveness < -0.2) return "#ef4444";
-  return "#94a3b8";
-}
-
-function getEventDotColor(type: string): string {
+function getEventDotColor(type: string) {
   if (type === "escalation_change") return "#ef4444";
   if (type === "de_escalation_change") return "#10b981";
   if (type === "ceiling_reached") return "#991b1b";
-  if (type === "session_started" || type === "session_ended") return "#6366f1";
+  if (type === "session_started" || type === "session_ended") return "#64748b";
   return "#94a3b8";
 }
 
 function getRelativeTime(timestamp: string, startTime: number) {
   return Math.max(0, (new Date(timestamp).getTime() - startTime) / 1000);
+}
+
+function getTurnCueTime(turn: TranscriptTurn, startTime: number) {
+  return getRelativeTime(turn.started_at, startTime);
+}
+
+function formatTime(secs: number) {
+  const wholeSeconds = Math.max(0, Math.floor(secs));
+  const minutes = Math.floor(wholeSeconds / 60);
+  const seconds = wholeSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function snapToSecond(seconds: number | null) {
@@ -96,212 +91,120 @@ function getChartPointAtTime(data: ChartPoint[], time: number | null) {
 function getKeyMomentAtTime(entries: KeyMomentEntry[], time: number | null) {
   if (!entries.length || time === null) return null;
 
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    if (entries[i].time <= time) {
-      return entries[i];
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (entries[index].time <= time) {
+      return entries[index];
     }
   }
 
   return null;
 }
 
-
-function formatTime(secs: number) {
-  const wholeSeconds = Math.max(0, Math.floor(secs));
-  const m = Math.floor(wholeSeconds / 60);
-  const s = wholeSeconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-function getSupportDetail(moment: ScoreEvidence) {
-  if (moment.dimension !== "support_seeking") return null;
-
-  const levelValue = moment.evidenceData.escalationLevel;
-  const level = typeof levelValue === "number" ? levelValue : null;
-  const appropriate = moment.evidenceData.appropriate as boolean | undefined;
-
-  if (moment.evidenceType === "support_invoked") {
-    if (appropriate) {
-      return `Good decision to seek support — the situation (level ${level}) warranted calling for help.`;
-    }
-    return `Support was requested, but the situation (level ${level}) hadn't yet reached the point where it was needed. This can be seen as premature.`;
-  }
-
-  if (moment.evidenceType === "critical_no_support") {
-    if (moment.evidenceData.crisisReached) {
-      return `The situation reached crisis point (level ${level}) without support being requested. Earlier intervention could have prevented this.`;
-    }
-    if (moment.evidenceData.delayedEscalation) {
-      return `After earlier missed opportunities to seek help, the situation worsened to level ${level}. Requesting support sooner would have helped.`;
-    }
-    return `The situation was critical (level ${level}) and support should have been requested. Continuing alone at this point risks harm.`;
-  }
-
-  if (moment.evidenceType === "support_not_requested") {
-    return `At level ${level}, this was an opportunity to call for support. Continuing without help at this intensity makes de-escalation harder.`;
-  }
-
-  return describeEvidence(moment);
-}
-
-function getTurnCueTime(turn: TranscriptTurn, startTime: number) {
-  return getRelativeTime(turn.started_at, startTime);
-}
-
-function TimelineMomentCard({
-  entry,
-  showNow,
-}: {
-  entry: KeyMomentEntry;
-  showNow: boolean;
-}) {
-  const { moment, turn, time } = entry;
-  const cr = turn.classifier_result;
-  const sa = turn.state_after;
-  const isPositive = moment.scoreImpact > 0;
-  const isNegative = moment.scoreImpact < 0;
-  const level = sa?.level ?? null;
-  const levelColor = level !== null ? getLevelColor(level) : "#64748b";
-  const supportDetail = getSupportDetail(moment);
-  const impactLabel = supportDetail ? "Seeking support" : "Impact";
-  const impactText = supportDetail ?? describeEvidence(moment);
-
-  return (
-    <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-xl backdrop-blur-sm">
-      <div className="mb-2 flex items-start justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-medium text-slate-400">
-            {formatTime(time)} • Turn {moment.turnIndex + 1}
-          </span>
-          {showNow && (
-            <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
-              Now
-            </span>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {moment.scoreImpact !== 0 && (
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums",
-                isPositive && "bg-emerald-50 text-emerald-700",
-                isNegative && "bg-red-50 text-red-700",
-                !isPositive && !isNegative && "bg-slate-100 text-slate-600"
-              )}
-            >
-              {isPositive ? "+" : ""}
-              {Math.round(moment.scoreImpact)}
-            </span>
-          )}
-          {level !== null && (
-            <span
-              className="rounded-full px-2.5 py-0.5 text-[11px] font-bold text-white"
-              style={{ backgroundColor: levelColor }}
-            >
-              Level {level}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {turn.content && (
-        <div className="mt-1">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-            Trainee said
-          </p>
-          <p className="mt-1 text-[12px] italic leading-relaxed text-slate-700">
-            &ldquo;{turn.content}&rdquo;
-          </p>
-        </div>
-      )}
-
-      {level !== null && (
-        <p className="mt-2 text-[12px] font-semibold text-slate-800">
-          Patient/relative state: {ESCALATION_LABELS[level] ?? `Level ${level}`}
-        </p>
-      )}
-
-      <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
-        {cr?.reasoning && (
-          <p className="text-[12px] leading-relaxed text-slate-600">
-            {cr.reasoning}
-          </p>
-        )}
-
-        <p className="text-[12px] leading-relaxed text-slate-500">
-          <span className="font-medium text-slate-600">{impactLabel}:</span> {impactText}
-        </p>
-
-        {(cr?.technique || cr?.effectiveness != null) && (
-          <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2">
-          {cr?.technique && (
-            <p className="text-[12px] text-slate-700">
-              <span className="font-medium">Technique:</span> {cr.technique}
-            </p>
-          )}
-          {cr?.effectiveness != null && (
-            <p className="mt-1 text-[12px] text-slate-700">
-              <span className="font-medium">Effectiveness:</span>{" "}
-              <span
-                className="font-bold"
-                style={{ color: getEffectivenessColor(cr.effectiveness) }}
-              >
-                {cr.effectiveness > 0 ? "+" : ""}
-                {cr.effectiveness.toFixed(2)}
-              </span>
-            </p>
-          )}
-          </div>
-        )}
-
-        {(sa?.trust != null || sa?.willingness_to_listen != null) && (
-          <div className="flex flex-wrap gap-4 text-[11px]">
-          {sa?.trust != null && (
-            <span className="font-medium text-blue-600">Trust: {sa.trust}/10</span>
-          )}
-          {sa?.willingness_to_listen != null && (
-            <span className="font-medium text-violet-600">Listening: {sa.willingness_to_listen}/10</span>
-          )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function CustomDot(props: {
   cx?: number;
   cy?: number;
   payload?: ChartPoint;
-  index?: number;
 }) {
   const { cx, cy, payload } = props;
   if (!cx || !cy || !payload) return null;
 
   const color = getEventDotColor(payload.type);
-  const isEscalation = payload.type === "escalation_change";
-  const isDeescalation = payload.type === "de_escalation_change";
-  const isCeiling = payload.type === "ceiling_reached";
-  const isSessionBoundary = payload.type === "session_started" || payload.type === "session_ended";
-  const size = isCeiling ? 7 : isEscalation || isDeescalation ? 5 : isSessionBoundary ? 4 : 3;
+  const radius = payload.type === "ceiling_reached"
+    ? 5
+    : payload.type === "session_started" || payload.type === "session_ended"
+      ? 3
+      : 4;
 
   return (
     <g>
-      <circle cx={cx} cy={cy} r={size + 3} fill={color} opacity={0.15} />
-      <circle cx={cx} cy={cy} r={size} fill="white" stroke={color} strokeWidth={2.5} />
-      {(isEscalation || isCeiling) && (
-        <path
-          d={`M${cx} ${cy - 2} l-2.5 4 h5 z`}
-          fill={color}
-        />
-      )}
-      {isDeescalation && (
-        <path
-          d={`M${cx} ${cy + 2} l-2.5 -4 h5 z`}
-          fill={color}
-        />
-      )}
+      <circle cx={cx} cy={cy} r={radius + 2} fill={color} opacity={0.12} />
+      <circle cx={cx} cy={cy} r={radius} fill="white" stroke={color} strokeWidth={2} />
     </g>
+  );
+}
+
+function TimelineMomentCard({
+  entry,
+  turns,
+  sessionStartedAt,
+  showNow,
+}: {
+  entry: KeyMomentEntry;
+  turns: TranscriptTurn[];
+  sessionStartedAt: string;
+  showNow: boolean;
+}) {
+  const narrative = buildReviewMomentNarrative(entry.moment, turns, sessionStartedAt);
+  const context = getMomentTurnContext(turns, entry.moment.turnIndex);
+
+  return (
+    <div className="w-full rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-lg backdrop-blur-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+          {narrative.timecode} • {DIMENSION_LABELS[entry.moment.dimension] ?? entry.moment.dimension}
+        </span>
+        <span
+          className={cn(
+            "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
+            narrative.positive
+              ? "bg-emerald-100 text-emerald-700"
+              : "bg-amber-100 text-amber-800"
+          )}
+        >
+          {narrative.positive ? "Helpful moment" : "Moment to revisit"}
+        </span>
+        {showNow && (
+          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
+            Now
+          </span>
+        )}
+      </div>
+
+      <h3 className="mt-3 text-base font-semibold text-slate-900">
+        {narrative.headline}
+      </h3>
+      <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
+        {narrative.likelyImpact}
+      </p>
+
+      <div className="mt-4">
+        <MomentTranscriptContext
+          previousTurn={context.previousTurn}
+          focusTurn={context.focusTurn}
+          nextTurn={context.nextTurn}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            What happened next
+          </p>
+          <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
+            {narrative.whatHappenedNext}
+          </p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Why it mattered here
+          </p>
+          <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
+            {narrative.whyItMattered}
+          </p>
+        </div>
+      </div>
+
+      {narrative.tryInstead && (
+        <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/80 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+            Try saying
+          </p>
+          <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
+            &ldquo;{narrative.tryInstead}&rdquo;
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -320,16 +223,21 @@ export function EscalationTimeline({
   const previousPlaybackSecondRef = useRef<number | null>(null);
   const previousTriggeredMomentIndexRef = useRef<number | null | undefined>(undefined);
   const keyMomentEntriesRef = useRef<KeyMomentEntry[]>([]);
+
   const [chartSize, setChartSize] = useState<{ width: number; height: number } | null>(null);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hoveredTime, setHoveredTime] = useState<number | null>(null);
   const [playbackOverlayMomentIndex, setPlaybackOverlayMomentIndex] = useState<number | null>(null);
+  const [selectedMomentIndex, setSelectedMomentIndex] = useState<number | null>(null);
+
   const startTime = new Date(sessionStartedAt).getTime();
+
   const syncPlaybackOverlayMomentIndex = useEffectEvent((index: number | null) => {
     setPlaybackOverlayMomentIndex(index);
   });
+
   const syncPlaybackMomentFromTime = useEffectEvent((currentTime: number) => {
     const currentSecond = snapToSecond(currentTime);
     if (
@@ -341,11 +249,11 @@ export function EscalationTimeline({
       if (overlayTimerRef.current) clearTimeout(overlayTimerRef.current);
       syncPlaybackOverlayMomentIndex(null);
     }
+
     previousPlaybackSecondRef.current = currentSecond;
 
     const activeEntry = getKeyMomentAtTime(keyMomentEntriesRef.current, currentSecond);
     const nextIndex = activeEntry?.index ?? null;
-
     if (nextIndex === null || nextIndex === previousTriggeredMomentIndexRef.current) {
       return;
     }
@@ -367,9 +275,9 @@ export function EscalationTimeline({
       const height = Math.floor(container.clientHeight);
       if (width < 1 || height < 1) return;
 
-      setChartSize((prev) => (
-        prev?.width === width && prev.height === height
-          ? prev
+      setChartSize((previous) => (
+        previous?.width === width && previous.height === height
+          ? previous
           : { width, height }
       ));
     };
@@ -446,37 +354,20 @@ export function EscalationTimeline({
   }, [recordingUrl]);
 
   const data: ChartPoint[] = events
-    .filter((e) => e.escalation_after !== null)
-    .map((e) => {
-      const classifierPayload = e.payload?.classifier as {
-        technique?: string;
-        effectiveness?: number;
-        reasoning?: string;
-      } | undefined;
-      return {
-        time: getRelativeTime(e.created_at, startTime),
-        level: e.escalation_after!,
-        trust: e.trust_after,
-        listening: e.listening_after,
-        type: e.event_type,
-        reasoning: classifierPayload?.reasoning ?? null,
-        technique: classifierPayload?.technique ?? null,
-        effectiveness: classifierPayload?.effectiveness ?? null,
-      };
-    });
+    .filter((event) => event.escalation_after !== null)
+    .map((event) => ({
+      time: getRelativeTime(event.created_at, startTime),
+      level: event.escalation_after!,
+      type: event.event_type,
+    }));
 
   if (data.length > 0 && data[0].time > 0) {
-    const firstEvent = events.find((e) => e.event_type === "session_started");
+    const firstEvent = events.find((event) => event.event_type === "session_started");
     if (firstEvent) {
       data.unshift({
         time: 0,
         level: firstEvent.escalation_after ?? data[0].level,
-        trust: firstEvent.trust_after,
-        listening: firstEvent.listening_after,
         type: "session_started",
-        reasoning: null,
-        technique: null,
-        effectiveness: null,
       });
     }
   }
@@ -488,17 +379,14 @@ export function EscalationTimeline({
       if (turnPosition === undefined) return null;
 
       const turn = turns[turnPosition];
-      const time = getTurnCueTime(turn, startTime);
       return {
         index,
         moment,
-        time,
-        turn,
+        time: getTurnCueTime(turn, startTime),
       };
     })
     .filter((entry): entry is KeyMomentEntry => entry !== null)
     .sort((a, b) => a.time - b.time || a.index - b.index);
-  const keyMomentEntryByIndex = new Map(keyMomentEntries.map((entry) => [entry.index, entry]));
 
   useEffect(() => {
     keyMomentEntriesRef.current = keyMomentEntries;
@@ -509,6 +397,7 @@ export function EscalationTimeline({
   const resolvedPlaybackTime = recordingUrl ? playbackTime : 0;
   const resolvedAudioDuration = recordingUrl ? audioDuration : 0;
   const playbackActive = recordingUrl ? isPlaying : false;
+
   const timelineMaxTime = Math.max(
     data[data.length - 1]?.time ?? 0,
     keyMomentEntries[keyMomentEntries.length - 1]?.time ?? 0,
@@ -517,22 +406,24 @@ export function EscalationTimeline({
     resolvedPlaybackTime,
     1
   );
-  const peakLevel = Math.max(...data.map((d) => d.level));
-  const finalLevel = data[data.length - 1].level;
-  const escalationEvents = data.filter((d) => d.type === "escalation_change").length;
-  const deescalationEvents = data.filter((d) => d.type === "de_escalation_change").length;
+
   const playbackSecond = snapToSecond(resolvedPlaybackTime);
   const hoveredSecond = snapToSecond(hoveredTime);
-  const markerTime = !playbackActive && hoveredSecond !== null
+  const markerTime = hoveredSecond !== null && !playbackActive
     ? hoveredSecond
     : playbackSecond;
   const markerPoint = getChartPointAtTime(data, markerTime);
   const hoveredKeyMomentIndex = getKeyMomentAtTime(keyMomentEntries, hoveredSecond)?.index ?? null;
-  const displayedKeyMomentIndex = hoveredKeyMomentIndex ?? playbackOverlayMomentIndex;
+  const resolvedSelectedMomentIndex = selectedMomentIndex !== null
+    && keyMomentEntries.some((entry) => entry.index === selectedMomentIndex)
+    ? selectedMomentIndex
+    : keyMomentEntries[0]?.index ?? null;
+  const displayedKeyMomentIndex = playbackOverlayMomentIndex
+    ?? hoveredKeyMomentIndex
+    ?? resolvedSelectedMomentIndex;
   const displayedKeyMomentEntry = displayedKeyMomentIndex !== null
-    ? keyMomentEntryByIndex.get(displayedKeyMomentIndex) ?? null
+    ? keyMomentEntries.find((entry) => entry.index === displayedKeyMomentIndex) ?? null
     : null;
-  const reserveCardSpace = playbackActive || playbackOverlayMomentIndex !== null;
 
   useEffect(() => {
     onActiveKeyMomentChange?.(displayedKeyMomentIndex);
@@ -563,38 +454,14 @@ export function EscalationTimeline({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-2">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px]">
-            <span className="text-slate-400">Peak </span>
-            <span className="font-bold" style={{ color: getLevelColor(peakLevel) }}>
-              {peakLevel}
-            </span>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px]">
-            <span className="text-slate-400">Final </span>
-            <span className="font-bold" style={{ color: getLevelColor(finalLevel) }}>
-              {finalLevel}
-            </span>
-          </div>
-          {escalationEvents > 0 && (
-            <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-1.5 text-[11px]">
-              <span className="font-bold text-red-600">{escalationEvents}</span>
-              <span className="text-red-400"> escalation{escalationEvents !== 1 ? "s" : ""}</span>
-            </div>
-          )}
-          {deescalationEvents > 0 && (
-            <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-[11px]">
-              <span className="font-bold text-emerald-600">{deescalationEvents}</span>
-              <span className="text-emerald-400"> de-escalation{deescalationEvents !== 1 ? "s" : ""}</span>
-            </div>
-          )}
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px]">
-            <span className="text-slate-400">Duration </span>
-            <span className="font-bold text-slate-700">
-              {formatTime(timelineMaxTime)}
-            </span>
-          </div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="max-w-2xl">
+          <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Conversation path
+          </p>
+          <p className="mt-1 text-[13px] leading-relaxed text-slate-600">
+            Hover the line, or play the recording, to see the moments that most changed the conversation.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -604,7 +471,6 @@ export function EscalationTimeline({
           <Button
             type="button"
             size="sm"
-            variant="default"
             disabled={!recordingUrl}
             onClick={() => {
               const audio = audioRef.current;
@@ -636,15 +502,20 @@ export function EscalationTimeline({
 
       <div
         ref={chartContainerRef}
-        className={`relative h-56 w-full sm:h-80${recordingUrl ? " cursor-pointer" : ""}`}
+        className={cn(
+          "relative h-56 w-full rounded-2xl border border-slate-200 bg-white/80 p-2 sm:h-72",
+          recordingUrl && "cursor-pointer"
+        )}
         style={{ minWidth: 1, minHeight: 1 }}
         onClick={(event) => {
           if (!recordingUrl || !chartSize) return;
           const audio = audioRef.current;
           if (!audio) return;
+
           const rect = event.currentTarget.getBoundingClientRect();
           const usableWidth = chartSize.width - CHART_MARGIN.left - CHART_MARGIN.right;
           if (usableWidth <= 0 || timelineMaxTime <= 0) return;
+
           const x = event.clientX - rect.left - CHART_MARGIN.left;
           const clampedX = Math.min(Math.max(x, 0), usableWidth);
           const seekTime = (clampedX / usableWidth) * timelineMaxTime;
@@ -674,27 +545,19 @@ export function EscalationTimeline({
           >
             <defs>
               <linearGradient id="escalationGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#ef4444" stopOpacity={0.3} />
-                <stop offset="40%" stopColor="#f59e0b" stopOpacity={0.15} />
-                <stop offset="100%" stopColor="#10b981" stopOpacity={0.05} />
-              </linearGradient>
-              <linearGradient id="trustGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.15} />
-                <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+                <stop offset="0%" stopColor="#ef4444" stopOpacity={0.18} />
+                <stop offset="40%" stopColor="#f59e0b" stopOpacity={0.08} />
+                <stop offset="100%" stopColor="#10b981" stopOpacity={0.03} />
               </linearGradient>
             </defs>
 
-            <ReferenceArea y1={0} y2={2.5} fill="#10b981" fillOpacity={0.04} />
-            <ReferenceArea y1={2.5} y2={4.5} fill="#f59e0b" fillOpacity={0.04} />
-            <ReferenceArea y1={4.5} y2={6.5} fill="#f97316" fillOpacity={0.04} />
-            <ReferenceArea y1={6.5} y2={8.5} fill="#ef4444" fillOpacity={0.04} />
-            <ReferenceArea y1={8.5} y2={10} fill="#991b1b" fillOpacity={0.04} />
+            <ReferenceArea y1={0} y2={2.5} fill="#10b981" fillOpacity={0.03} />
+            <ReferenceArea y1={2.5} y2={4.5} fill="#f59e0b" fillOpacity={0.03} />
+            <ReferenceArea y1={4.5} y2={6.5} fill="#f97316" fillOpacity={0.03} />
+            <ReferenceArea y1={6.5} y2={8.5} fill="#ef4444" fillOpacity={0.03} />
+            <ReferenceArea y1={8.5} y2={10} fill="#991b1b" fillOpacity={0.03} />
 
-            <CartesianGrid
-              strokeDasharray="3 6"
-              stroke="#e2e8f0"
-              vertical={false}
-            />
+            <CartesianGrid strokeDasharray="3 6" stroke="#e2e8f0" vertical={false} />
 
             <XAxis
               dataKey="time"
@@ -708,13 +571,12 @@ export function EscalationTimeline({
             />
             <YAxis
               domain={[0, 10]}
-              ticks={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
+              ticks={[1, 3, 5, 7, 9]}
               stroke="#94a3b8"
               fontSize={11}
               tickLine={false}
               axisLine={false}
-              width={28}
-              tickFormatter={(value) => `${value}`}
+              width={24}
             />
 
             {markerTime !== null && markerPoint && (
@@ -738,8 +600,7 @@ export function EscalationTimeline({
                           cy={props.cy}
                           r={10}
                           fill={hoveredSecond !== null && !playbackActive ? "#0f172a" : "#2563eb"}
-                          opacity={0.16}
-                          className="animate-pulse"
+                          opacity={0.14}
                         />
                         <circle
                           cx={props.cx}
@@ -760,25 +621,14 @@ export function EscalationTimeline({
               y={maxCeiling}
               stroke="#ef4444"
               strokeDasharray="6 4"
-              strokeWidth={1.5}
+              strokeWidth={1.25}
               label={{
-                value: `Scenario cap ${maxCeiling}`,
+                value: `Cap ${maxCeiling}`,
                 position: "right",
                 fontSize: 10,
                 fill: "#ef4444",
                 fontWeight: 600,
               }}
-            />
-
-            <Area
-              type="monotone"
-              dataKey="trust"
-              stroke="#3b82f6"
-              strokeWidth={1.5}
-              strokeDasharray="4 3"
-              fill="url(#trustGradient)"
-              dot={false}
-              connectNulls
             />
 
             <Area
@@ -795,108 +645,75 @@ export function EscalationTimeline({
               strokeWidth={2.5}
               fill="none"
               dot={<CustomDot />}
-              activeDot={{ r: 8, fill: "#334155", stroke: "white", strokeWidth: 3 }}
-            />
-
-            <ReferenceLine
-              y={1.5}
-              stroke="none"
-              label={{
-                value: "Settled",
-                position: "right",
-                fontSize: 9,
-                fill: "#10b981",
-                fontWeight: 500,
-              }}
-            />
-            <ReferenceLine
-              y={3.5}
-              stroke="none"
-              label={{
-                value: "Guarded",
-                position: "right",
-                fontSize: 9,
-                fill: "#f59e0b",
-                fontWeight: 500,
-              }}
-            />
-            <ReferenceLine
-              y={5.5}
-              stroke="none"
-              label={{
-                value: "Hostile",
-                position: "right",
-                fontSize: 9,
-                fill: "#f97316",
-                fontWeight: 500,
-              }}
-            />
-            <ReferenceLine
-              y={7.5}
-              stroke="none"
-              label={{
-                value: "Abusive",
-                position: "right",
-                fontSize: 9,
-                fill: "#ef4444",
-                fontWeight: 500,
-              }}
-            />
-            <ReferenceLine
-              y={9.5}
-              stroke="none"
-              label={{
-                value: "Critical",
-                position: "right",
-                fontSize: 9,
-                fill: "#991b1b",
-                fontWeight: 500,
-              }}
+              activeDot={{ r: 7, fill: "#334155", stroke: "white", strokeWidth: 3 }}
             />
           </AreaChart>
         ) : (
           <div className="h-full w-full animate-pulse rounded-xl bg-slate-100/70" />
         )}
-
       </div>
 
-      {(reserveCardSpace || displayedKeyMomentEntry) && (
-        <div className={cn("transition-[min-height] duration-200", reserveCardSpace && "min-h-56")}>
-          {displayedKeyMomentEntry ? (
-            <TimelineMomentCard
-              entry={displayedKeyMomentEntry}
-              showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
-            />
-          ) : reserveCardSpace ? (
-            <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50/50">
-              <p className="text-[12px] text-slate-400">
-                Feedback on key moments will appear here automatically during playback
-              </p>
-            </div>
-          ) : null}
+      {keyMomentEntries.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {keyMomentEntries.map((entry, tabIndex) => {
+              const isSelected = entry.index === resolvedSelectedMomentIndex;
+              const isPreviewed = entry.index === displayedKeyMomentIndex && !isSelected;
+
+              return (
+                <button
+                  key={`${entry.index}-${entry.time}`}
+                  type="button"
+                  onClick={() => setSelectedMomentIndex(entry.index)}
+                  className={cn(
+                    "rounded-full border px-3 py-1.5 text-left text-[11px] transition-colors",
+                    isSelected
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : isPreviewed
+                        ? "border-blue-300 bg-blue-50 text-blue-700"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+                  )}
+                >
+                  <span className="font-semibold">{tabIndex + 1}.</span>{" "}
+                  {formatTime(entry.time)} • {DIMENSION_LABELS[entry.moment.dimension] ?? entry.moment.dimension}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="min-h-[30rem]">
+            {displayedKeyMomentEntry ? (
+              <TimelineMomentCard
+                entry={displayedKeyMomentEntry}
+                turns={turns}
+                sessionStartedAt={sessionStartedAt}
+                showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
+              />
+            ) : (
+              <div className="flex min-h-[18rem] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50">
+                <p className="text-[12px] text-slate-400">
+                  Select a numbered moment above to keep one coaching detail panel in view.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
         <span className="flex items-center gap-1.5">
-          <svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#334155" strokeWidth="2.5" /></svg>
-          Patient/relative state
-        </span>
-        <span className="flex items-center gap-1.5">
-          <svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="4 3" /></svg>
-          Trust
+          <svg width="16" height="4">
+            <line x1="0" y1="2" x2="16" y2="2" stroke="#334155" strokeWidth="2.5" />
+          </svg>
+          Conversation intensity
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full border-2 border-blue-500 bg-white" />
-          Playback marker
+          Hover or playback marker
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-full border-2 border-red-400 bg-white" />
-          Escalation event
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full border-2 border-emerald-400 bg-white" />
-          De-escalation event
+          Change point
         </span>
       </div>
     </div>

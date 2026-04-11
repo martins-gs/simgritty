@@ -52,6 +52,7 @@ export interface SimulationSession {
   peak_escalation_level: number | null;
   recording_path: string | null;
   recording_started_at?: string | null;
+  review_summary?: Record<string, unknown> | null;
   created_at: string;
   scenario_templates?: {
     title?: string;
