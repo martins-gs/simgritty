@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { computeScore, pickKeyMoments } from "@/lib/engine/scoring";
-import { buildFallbackReviewSummary, reviewSummaryResponseSchema } from "@/lib/review/feedback";
+import { generateScenarioHistoryCoachSummary } from "@/lib/openai/scenarioHistoryCoach";
+import {
+  buildFallbackReviewSummary,
+  getStoredReviewSummarySource,
+  getStoredReviewSummaryVersion,
+  REVIEW_SUMMARY_VERSION,
+  reviewSummaryResponseSchema,
+} from "@/lib/review/feedback";
 import { buildScenarioHistoryCoachSummary } from "@/lib/review/history";
 import { mergeTraineeAudioDeliveryFromEvents } from "@/lib/review/traineeDelivery";
 import { createClient } from "@/lib/supabase/server";
@@ -97,6 +104,12 @@ export async function GET(
     eventsBySession.set(event.session_id, existing);
   }
 
+  const currentSnapshot = parseScenarioSnapshot(
+    sessions.find((session) => session.id === id)?.scenario_snapshot
+      ?? sessions.at(-1)?.scenario_snapshot
+      ?? null
+  );
+
   const history = sessions.map((session) => {
     const sessionTurns = mergeTraineeAudioDeliveryFromEvents(
       turnsBySession.get(session.id) ?? [],
@@ -128,7 +141,11 @@ export async function GET(
       }
     );
     const storedSummary = reviewSummaryResponseSchema.safeParse(session.review_summary);
+    const storedVersion = getStoredReviewSummaryVersion(session.review_summary);
+    const storedSource = getStoredReviewSummarySource(session.review_summary);
     const reviewSummary = storedSummary.success
+      && storedVersion >= REVIEW_SUMMARY_VERSION
+      && storedSource === "generated"
       ? {
           ...storedSummary.data,
           overallDelivery: storedSummary.data.overallDelivery ?? fallbackSummary.overallDelivery,
@@ -143,9 +160,33 @@ export async function GET(
     };
   });
 
-  const summary = buildScenarioHistoryCoachSummary(history, id, totalSessionCount);
+  const fallbackSummary = buildScenarioHistoryCoachSummary(history, id, totalSessionCount);
 
-  return NextResponse.json(summary, {
+  try {
+    const generatedSummary = await generateScenarioHistoryCoachSummary({
+      scenarioTitle: currentSnapshot.title,
+      scenarioSetting: currentSnapshot.setting,
+      traineeRole: currentSnapshot.trainee_role,
+      aiRole: currentSnapshot.ai_role,
+      learningObjectives: currentSnapshot.learning_objectives,
+      backstory: currentSnapshot.backstory,
+      emotionalDriver: currentSnapshot.emotional_driver,
+      traits: currentSnapshot.scenario_traits[0] ?? null,
+      currentSessionId: id,
+      totalSessionCount,
+      sessions: history,
+    });
+
+    return NextResponse.json(generatedSummary ?? fallbackSummary, {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (error) {
+    console.error("[Scenario History] Falling back to local coach summary", error);
+  }
+
+  return NextResponse.json(fallbackSummary, {
     headers: {
       "Cache-Control": "no-store",
     },

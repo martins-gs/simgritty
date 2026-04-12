@@ -9,7 +9,7 @@ PROLOG is a Next.js 16 App Router application for NHS clinical communication tra
 - Real-time voice simulation using the OpenAI Realtime API over WebRTC
 - Scenario authoring with 14 numeric trait dials, a separate bias-category selector, voice settings, escalation rules, milestones, and scoring weights
 - AI clinician takeover with its own clinician voice path and HTTP TTS fallback
-- Review workflow with a saved reflection check-in, persisted educator-style session summaries, optional overall-delivery synthesis, communication-move coaching, a coaching timeline, per-scenario progress review with one primary target plus up to two secondary patterns, retry CTA, score cards or short-session placeholders, audio playback, and session forking
+- Review workflow with a saved reflection check-in, persisted educator-style session summaries, optional overall-delivery synthesis, AI-generated key-moment coaching, per-scenario progress review with one primary target plus up to two secondary patterns, retry CTA, a bottom-of-page score block or short-session placeholder, audio playback, and session forking
 - Supabase-backed auth, session persistence, transcript/event storage, event-backed transcript recovery for trainee audio delivery, and mixed session-audio uploads
 
 ## Documentation Map
@@ -116,7 +116,7 @@ Without that base schema, the repo is not enough on its own to stand up a blank 
 
 - Realtime and voice: `/api/realtime/session`, `/api/classify`, `/api/deescalate`, `/api/voice-profile/patient`, `/api/voice-profile/trainee`, `/api/analysis/trainee-delivery`, `/api/tts`
 - Scenarios: `/api/scenarios`, `/api/scenarios/[id]`, `/api/scenarios/[id]/publish`
-- Sessions: `/api/sessions`, `/api/sessions/recent`, `/api/sessions/[id]`, `/api/sessions/[id]/start`, `/api/sessions/[id]/end`, `/api/sessions/[id]/delete`, `/api/sessions/[id]/fork`, `/api/sessions/[id]/transcript`, `/api/sessions/[id]/events`, `/api/sessions/[id]/educator-notes`, `/api/sessions/[id]/reflection`, `/api/sessions/[id]/review-summary`, `/api/sessions/[id]/scenario-history`, `/api/sessions/[id]/audio`
+- Sessions: `/api/sessions`, `/api/sessions/recent`, `/api/sessions/[id]`, `/api/sessions/[id]/start`, `/api/sessions/[id]/end`, `/api/sessions/[id]/delete`, `/api/sessions/[id]/fork`, `/api/sessions/[id]/transcript`, `/api/sessions/[id]/events`, `/api/sessions/[id]/educator-notes`, `/api/sessions/[id]/reflection`, `/api/sessions/[id]/review-summary`, `/api/sessions/[id]/timeline-feedback`, `/api/sessions/[id]/scenario-history`, `/api/sessions/[id]/audio`
 - Identity and governance: `/api/profile`, `/api/org-settings`
 
 Notes:
@@ -129,12 +129,14 @@ Notes:
 
 - The live simulation currently uses two realtime voice paths: the primary patient conversation path and a separate clinician renderer path.
 - Session audio is recorded as one mixed file and uploaded to the `simulation-audio` Supabase Storage bucket at session end.
-- The review page stores the Session Summary JSON on `simulation_sessions.review_summary` after first generation, so the learner sees the same summary on later visits instead of a fresh variant each time.
+- The review page stores only successfully generated Session Summary JSON on `simulation_sessions.review_summary`, versioned inside the JSON payload itself, so newer prompt/schema changes can invalidate older summaries and regenerate them.
 - Review coaching now prefers communication moves and response structure over stock scripts, so summaries and key moments describe what to do differently rather than insisting on one canonical phrase.
 - The Session Summary can now add an `Overall Delivery` note when the trainee's delivery shows a noticeable conversation-level pattern or a clear shift under pressure.
-- The review page also builds a deterministic `Review your progress` panel from the current user's non-deleted sessions in the same scenario. It prioritises one main target plus up to two secondary patterns instead of collapsing all coaching into a single line, and its session count reflects historical sessions rather than utterances.
+- Timeline cards are generated post-session through a dedicated `/api/sessions/[id]/timeline-feedback` route, while deterministic local narratives remain as the fallback if structured generation fails.
+- The review page also builds an AI-generated `Review your progress` panel from the current user's non-deleted sessions in the same scenario, with deterministic local fallback. It prioritises one main target plus up to two secondary patterns instead of collapsing all coaching into a single line, and its session count reflects historical sessions rather than utterances.
 - Scenario milestones directly affect clinical-task scoring and review coaching. Free-text learning objectives do not change the numeric score directly, but they are still fed into the review summary as narrative objective guidance.
 - Sessions of 3-6 trainee turns still score as preliminary sessions, but extreme dimension scores are now softened to avoid hard zeros or hundreds from sparse evidence.
+- Sessions with fewer than 3 trainee turns do not show the Session Summary. They still show reflection, timeline, transcript, and coaching context, and the short-session score placeholder now sits at the very bottom of the page where the full score would normally appear.
 - `max_escalation_ceiling` and `max_session_duration_minutes` are actively enforced at runtime.
 - `allow_discriminatory_content` and `require_consent_gate` are stored in `org_settings`, but they are not yet used to disable discriminatory scenarios or bypass the consent gate. The briefing flow currently always shows the consent gate.
 - Access is limited to `@nhs.scot` email addresses through Supabase magic-link auth.

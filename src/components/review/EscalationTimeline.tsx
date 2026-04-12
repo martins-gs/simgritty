@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -18,12 +18,15 @@ import { MomentTranscriptContext } from "@/components/review/MomentTranscriptCon
 import type { ScoreEvidence } from "@/lib/engine/scoring";
 import {
   buildReviewMomentNarrative,
+  generatedTimelineNarrativeSchema,
   getMomentTurnContext,
+  type GeneratedTimelineNarrative,
 } from "@/lib/review/feedback";
 import type { SimulationStateEvent, TranscriptTurn } from "@/types/simulation";
 import { cn } from "@/lib/utils";
 
 interface EscalationTimelineProps {
+  sessionId: string;
   events: SimulationStateEvent[];
   turns: TranscriptTurn[];
   keyMoments: ScoreEvidence[];
@@ -44,6 +47,15 @@ interface KeyMomentEntry {
   moment: ScoreEvidence;
   time: number;
 }
+
+const timelineNarrativeResultCache = new Map<string, {
+  status: "ready" | "fallback";
+  narratives: GeneratedTimelineNarrative[];
+}>();
+const timelineNarrativeRequestCache = new Map<string, Promise<{
+  status: "ready" | "fallback";
+  narratives: GeneratedTimelineNarrative[];
+}>>();
 
 const CHART_MARGIN = { top: 8, right: 24, bottom: 6, left: 0 };
 const PLAYBACK_CARD_DURATION_MS = 15_000;
@@ -126,15 +138,14 @@ function CustomDot(props: {
 function TimelineMomentCard({
   entry,
   turns,
-  sessionStartedAt,
+  narrative,
   showNow,
 }: {
   entry: KeyMomentEntry;
   turns: TranscriptTurn[];
-  sessionStartedAt: string;
+  narrative: GeneratedTimelineNarrative;
   showNow: boolean;
 }) {
-  const narrative = buildReviewMomentNarrative(entry.moment, turns, sessionStartedAt);
   const context = getMomentTurnContext(turns, entry.moment.turnIndex);
 
   return (
@@ -209,6 +220,7 @@ function TimelineMomentCard({
 }
 
 export function EscalationTimeline({
+  sessionId,
   events,
   turns,
   keyMoments,
@@ -231,8 +243,21 @@ export function EscalationTimeline({
   const [hoveredTime, setHoveredTime] = useState<number | null>(null);
   const [playbackOverlayMomentIndex, setPlaybackOverlayMomentIndex] = useState<number | null>(null);
   const [selectedMomentIndex, setSelectedMomentIndex] = useState<number | null>(null);
+  const [narrativeState, setNarrativeState] = useState<{
+    requestKey: string;
+    status: "ready" | "fallback";
+    narratives: GeneratedTimelineNarrative[];
+  } | null>(null);
 
   const startTime = new Date(sessionStartedAt).getTime();
+  const requestKey = useMemo(
+    () => JSON.stringify({
+      sessionId,
+      turnIndexes: keyMoments.map((moment) => moment.turnIndex),
+      startedAt: sessionStartedAt,
+    }),
+    [keyMoments, sessionId, sessionStartedAt]
+  );
 
   const syncPlaybackOverlayMomentIndex = useEffectEvent((index: number | null) => {
     setPlaybackOverlayMomentIndex(index);
@@ -373,6 +398,22 @@ export function EscalationTimeline({
   }
 
   const turnPositionByTurnIndex = new Map(turns.map((turn, index) => [turn.turn_index, index]));
+  const fallbackNarratives = useMemo(
+    () => keyMoments.map((moment) => {
+      const narrative = buildReviewMomentNarrative(moment, turns, sessionStartedAt);
+      return {
+        turnIndex: narrative.turnIndex,
+        timecode: narrative.timecode,
+        headline: narrative.headline,
+        likelyImpact: narrative.likelyImpact,
+        whatHappenedNext: narrative.whatHappenedNext,
+        whyItMattered: narrative.whyItMattered,
+        tryInstead: narrative.tryInstead,
+        positive: narrative.positive,
+      };
+    }),
+    [keyMoments, sessionStartedAt, turns]
+  );
   const keyMomentEntries: KeyMomentEntry[] = keyMoments
     .map((moment, index) => {
       const turnPosition = turnPositionByTurnIndex.get(moment.turnIndex);
@@ -391,6 +432,80 @@ export function EscalationTimeline({
   useEffect(() => {
     keyMomentEntriesRef.current = keyMomentEntries;
   }, [keyMomentEntries]);
+
+  useEffect(() => {
+    if (keyMoments.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadNarratives() {
+      const cachedResult = timelineNarrativeResultCache.get(requestKey);
+      if (cachedResult) {
+        setNarrativeState({
+          requestKey,
+          ...cachedResult,
+        });
+        return;
+      }
+
+      let requestPromise = timelineNarrativeRequestCache.get(requestKey);
+      if (!requestPromise) {
+        requestPromise = (async () => {
+          try {
+            const res = await fetch(`/api/sessions/${sessionId}/timeline-feedback`, {
+              cache: "no-store",
+            });
+            const payload = await res.json().catch(() => null);
+
+            const parsedNarratives = Array.isArray((payload as { narratives?: unknown } | null)?.narratives)
+              ? (payload as { narratives: unknown[] }).narratives
+                .flatMap((item) => {
+                  const parsed = generatedTimelineNarrativeSchema.safeParse(item);
+                  return parsed.success ? [parsed.data] : [];
+                })
+              : [];
+
+            if (parsedNarratives.length > 0) {
+              return {
+                status: "ready" as const,
+                narratives: parsedNarratives,
+              };
+            }
+
+            return {
+              status: "fallback" as const,
+              narratives: fallbackNarratives,
+            };
+          } catch {
+            return {
+              status: "fallback" as const,
+              narratives: fallbackNarratives,
+            };
+          }
+        })().finally(() => {
+          timelineNarrativeRequestCache.delete(requestKey);
+        });
+        timelineNarrativeRequestCache.set(requestKey, requestPromise);
+      }
+
+      const result = await requestPromise;
+      if (cancelled) return;
+
+      timelineNarrativeResultCache.set(requestKey, result);
+      setNarrativeState({
+        requestKey,
+        ...result,
+      });
+    }
+
+    void loadNarratives();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fallbackNarratives, keyMoments.length, requestKey, sessionId]);
 
   const lastTurn = turns[turns.length - 1];
   const lastTurnTime = lastTurn ? getRelativeTime(lastTurn.started_at, startTime) : 0;
@@ -423,6 +538,21 @@ export function EscalationTimeline({
     ?? resolvedSelectedMomentIndex;
   const displayedKeyMomentEntry = displayedKeyMomentIndex !== null
     ? keyMomentEntries.find((entry) => entry.index === displayedKeyMomentIndex) ?? null
+    : null;
+  const resolvedNarrativeState = narrativeState?.requestKey === requestKey ? narrativeState : null;
+  const resolvedNarratives = useMemo(
+    () => resolvedNarrativeState?.narratives ?? [],
+    [resolvedNarrativeState]
+  );
+  const loadingNarratives = keyMoments.length > 0 && !resolvedNarrativeState;
+  const narrativeByTurnIndex = useMemo(
+    () => new Map(resolvedNarratives.map((narrative) => [narrative.turnIndex, narrative])),
+    [resolvedNarratives]
+  );
+  const displayedNarrative = displayedKeyMomentEntry
+    ? narrativeByTurnIndex.get(displayedKeyMomentEntry.moment.turnIndex)
+      ?? fallbackNarratives.find((narrative) => narrative.turnIndex === displayedKeyMomentEntry.moment.turnIndex)
+      ?? null
     : null;
 
   useEffect(() => {
@@ -682,11 +812,26 @@ export function EscalationTimeline({
           </div>
 
           <div className="min-h-[30rem]">
-            {displayedKeyMomentEntry ? (
+            {loadingNarratives && !displayedNarrative ? (
+              <div className="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-lg">
+                <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
+                  Tailored coaching
+                </div>
+                <p className="mt-3 text-[13px] leading-relaxed text-slate-500">
+                  Analysing these moments and tailoring the coaching to this dialogue. This can take up to a minute.
+                </p>
+                <div className="mt-4 space-y-3">
+                  <div className="h-4 w-2/3 animate-pulse rounded bg-slate-100" />
+                  <div className="h-4 w-full animate-pulse rounded bg-slate-100" />
+                  <div className="h-4 w-[88%] animate-pulse rounded bg-slate-100" />
+                  <div className="h-24 w-full animate-pulse rounded-xl bg-slate-100" />
+                </div>
+              </div>
+            ) : displayedKeyMomentEntry && displayedNarrative ? (
               <TimelineMomentCard
                 entry={displayedKeyMomentEntry}
                 turns={turns}
-                sessionStartedAt={sessionStartedAt}
+                narrative={displayedNarrative}
                 showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
               />
             ) : (

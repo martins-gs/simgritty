@@ -20,6 +20,9 @@ const FALLBACK_HISTORY_SUMMARY: ScenarioHistoryCoachResponse = {
   practiceTarget: "On the next attempt, choose one phrase you want to say more clearly and use it earlier.",
 };
 
+const scenarioHistoryResultCache = new Map<string, ScenarioHistoryCoachResponse>();
+const scenarioHistoryRequestCache = new Map<string, Promise<ScenarioHistoryCoachResponse>>();
+
 export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCardProps) {
   const [summary, setSummary] = useState<ScenarioHistoryCoachResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -30,23 +33,37 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
     async function loadSummary() {
       setLoading(true);
 
-      try {
-        const res = await fetch(`/api/sessions/${sessionId}/scenario-history`, {
-          cache: "no-store",
-        });
-        const payload = await res.json().catch(() => null);
-        if (cancelled) return;
+      const cachedResult = scenarioHistoryResultCache.get(sessionId);
+      if (cachedResult) {
+        setSummary(cachedResult);
+        setLoading(false);
+        return;
+      }
 
-        const parsed = scenarioHistoryCoachResponseSchema.safeParse(payload);
-        setSummary(parsed.success ? parsed.data : FALLBACK_HISTORY_SUMMARY);
-      } catch {
-        if (!cancelled) {
-          setSummary(FALLBACK_HISTORY_SUMMARY);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+      let requestPromise = scenarioHistoryRequestCache.get(sessionId);
+      if (!requestPromise) {
+        requestPromise = (async () => {
+          try {
+            const res = await fetch(`/api/sessions/${sessionId}/scenario-history`, {
+              cache: "no-store",
+            });
+            const payload = await res.json().catch(() => null);
+            const parsed = scenarioHistoryCoachResponseSchema.safeParse(payload);
+            return parsed.success ? parsed.data : FALLBACK_HISTORY_SUMMARY;
+          } catch {
+            return FALLBACK_HISTORY_SUMMARY;
+          }
+        })().finally(() => {
+          scenarioHistoryRequestCache.delete(sessionId);
+        });
+        scenarioHistoryRequestCache.set(sessionId, requestPromise);
+      }
+
+      const result = await requestPromise;
+      if (!cancelled) {
+        scenarioHistoryResultCache.set(sessionId, result);
+        setSummary(result);
+        setLoading(false);
       }
     }
 
@@ -64,6 +81,9 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
           <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
             Review your progress
           </div>
+          <p className="mt-3 text-[13px] leading-relaxed text-slate-500">
+            Analysing repeated runs of this scenario and tailoring the coaching. This can take up to a minute.
+          </p>
           <div className="mt-4 space-y-2">
             <div className="h-4 w-full animate-pulse rounded bg-slate-100" />
             <div className="h-4 w-[90%] animate-pulse rounded bg-slate-100" />

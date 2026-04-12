@@ -5,11 +5,23 @@ import type { ScoreBreakdown, ScoreEvidence } from "@/lib/engine/scoring";
 import {
   buildFallbackReviewSummary,
   buildReviewSummaryMomentInput,
+  getStoredReviewSummarySource,
+  getStoredReviewSummaryVersion,
+  REVIEW_SUMMARY_VERSION,
   reviewSummaryResponseSchema,
   type ReviewSummaryData,
 } from "@/lib/review/feedback";
 import type { ScenarioMilestone, ScenarioTraits } from "@/types/scenario";
 import type { SimulationSession, TranscriptTurn } from "@/types/simulation";
+
+const reviewSummaryResultCache = new Map<string, {
+  status: "ready" | "fallback";
+  data: ReviewSummaryData;
+}>();
+const reviewSummaryRequestCache = new Map<string, Promise<{
+  status: "ready" | "fallback";
+  data: ReviewSummaryData;
+}>>();
 
 interface ReviewSummaryCardProps {
   sessionId: string;
@@ -38,6 +50,14 @@ export function ReviewSummaryCard({
   emotionalDriver,
   traits,
 }: ReviewSummaryCardProps) {
+  const storedSummaryVersion = useMemo(
+    () => getStoredReviewSummaryVersion(session.review_summary),
+    [session.review_summary]
+  );
+  const storedSummarySource = useMemo(
+    () => getStoredReviewSummarySource(session.review_summary),
+    [session.review_summary]
+  );
   const rawStoredSummary = useMemo(() => {
     const parsed = reviewSummaryResponseSchema.safeParse(session.review_summary);
     return parsed.success ? parsed.data : null;
@@ -62,18 +82,39 @@ export function ReviewSummaryCard({
     turns,
   ]);
   const storedSummary = useMemo(() => {
-    if (!rawStoredSummary) return null;
+    if (
+      !rawStoredSummary ||
+      storedSummaryVersion < REVIEW_SUMMARY_VERSION ||
+      storedSummarySource !== "generated"
+    ) {
+      return null;
+    }
     return {
       ...rawStoredSummary,
       overallDelivery: rawStoredSummary.overallDelivery ?? fallbackSummary.overallDelivery,
     };
-  }, [fallbackSummary.overallDelivery, rawStoredSummary]);
-  const shouldRequestGeneratedSummary = !rawStoredSummary && score.sessionValid && keyMoments.length > 0;
+  }, [
+    fallbackSummary.overallDelivery,
+    rawStoredSummary,
+    storedSummarySource,
+    storedSummaryVersion,
+  ]);
+  const shouldRequestGeneratedSummary = !storedSummary && score.sessionValid && keyMoments.length > 0;
   const reviewSummaryRequest = useMemo(() => ({
     scenarioTitle: session.scenario_templates?.title || "Simulation",
+    scenarioSetting: session.scenario_templates?.setting ?? null,
+    traineeRole: session.scenario_templates?.trainee_role ?? null,
+    aiRole: aiRole ?? null,
     learningObjectives: learningObjectives ?? null,
     backstory: backstory ?? null,
     emotionalDriver: emotionalDriver ?? null,
+    traits: traits ?? null,
+    milestones: milestones.map((milestone) => ({
+      id: milestone.id,
+      order: milestone.order,
+      description: milestone.description,
+      classifier_hint: milestone.classifier_hint,
+    })),
     personSummary: fallbackSummary.personFocus,
     finalEscalationLevel: session.final_escalation_level ?? null,
     exitType: session.exit_type ?? null,
@@ -81,36 +122,31 @@ export function ReviewSummaryCard({
     achievedObjectives: fallbackSummary.achievedObjectives,
     outstandingObjectives: fallbackSummary.outstandingObjectives,
     moments: keyMoments
-      .slice(0, 4)
+      .slice(0, 3)
       .map((moment) => buildReviewSummaryMomentInput(moment, turns, session.started_at)),
   }), [
+    aiRole,
     backstory,
     emotionalDriver,
     fallbackSummary,
     keyMoments,
     learningObjectives,
+    milestones,
     session.exit_type,
     session.final_escalation_level,
+    session.scenario_templates?.setting,
+    session.scenario_templates?.trainee_role,
     session.scenario_templates?.title,
     session.started_at,
+    traits,
     turns,
   ]);
   const requestKey = useMemo(() => JSON.stringify({
     sessionId,
     request: reviewSummaryRequest,
-    aiRole: aiRole ?? null,
-    traits: traits ?? null,
-    milestones: milestones.map((milestone) => ({
-      id: milestone.id,
-      order: milestone.order,
-      description: milestone.description,
-    })),
   }), [
-    aiRole,
-    milestones,
     reviewSummaryRequest,
     sessionId,
-    traits,
   ]);
   const [summaryState, setSummaryState] = useState<{
     requestKey: string;
@@ -158,38 +194,58 @@ export function ReviewSummaryCard({
     let cancelled = false;
 
     async function loadSummary() {
-      try {
-        const res = await fetch(`/api/sessions/${sessionId}/review-summary`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(reviewSummaryRequest),
-        });
-        const payload = await res.json().catch(() => null);
-        if (cancelled) return;
-
-        const parsed = reviewSummaryResponseSchema.safeParse(payload);
-        if (parsed.success) {
-          setSummaryState({
-            requestKey,
-            status: "ready",
-            data: parsed.data,
-          });
-          return;
-        }
-
+      const cachedResult = reviewSummaryResultCache.get(requestKey);
+      if (cachedResult) {
         setSummaryState({
           requestKey,
-          status: "fallback",
-          data: fallbackSummary,
+          ...cachedResult,
         });
-      } catch {
-        if (cancelled) return;
-        setSummaryState({
-          requestKey,
-          status: "fallback",
-          data: fallbackSummary,
-        });
+        return;
       }
+
+      let requestPromise = reviewSummaryRequestCache.get(requestKey);
+      if (!requestPromise) {
+        requestPromise = (async () => {
+          try {
+            const res = await fetch(`/api/sessions/${sessionId}/review-summary`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(reviewSummaryRequest),
+            });
+            const payload = await res.json().catch(() => null);
+            const parsed = reviewSummaryResponseSchema.safeParse(payload);
+
+            if (parsed.success) {
+              return {
+                status: "ready" as const,
+                data: parsed.data,
+              };
+            }
+
+            return {
+              status: "fallback" as const,
+              data: fallbackSummary,
+            };
+          } catch {
+            return {
+              status: "fallback" as const,
+              data: fallbackSummary,
+            };
+          }
+        })().finally(() => {
+          reviewSummaryRequestCache.delete(requestKey);
+        });
+        reviewSummaryRequestCache.set(requestKey, requestPromise);
+      }
+
+      const result = await requestPromise;
+      if (cancelled) return;
+
+      reviewSummaryResultCache.set(requestKey, result);
+      setSummaryState({
+        requestKey,
+        ...result,
+      });
     }
 
     void loadSummary();
@@ -213,7 +269,7 @@ export function ReviewSummaryCard({
             Session summary
           </div>
           <p className="mt-3 text-[13px] leading-relaxed text-slate-500">
-            Preparing educator-style review...
+            Analysing the conversation and tailoring coaching to this case. This can take up to a minute.
           </p>
           <div className="mt-4 space-y-2">
             <div className="h-4 w-full animate-pulse rounded bg-slate-100" />

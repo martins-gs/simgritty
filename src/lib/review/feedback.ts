@@ -28,6 +28,8 @@ export interface ReviewMomentNarrative {
 }
 
 export interface ReviewSummaryData {
+  version: number;
+  source: "generated" | "fallback";
   overview: string;
   overallDelivery: string | null;
   positiveMoment: string | null;
@@ -39,9 +41,39 @@ export interface ReviewSummaryData {
   outstandingObjectives: string[];
 }
 
+export const REVIEW_SUMMARY_VERSION = 3;
+
+const reviewScenarioTraitsSchema = z.object({
+  hostility: z.number().min(0).max(10),
+  frustration: z.number().min(0).max(10),
+  impatience: z.number().min(0).max(10),
+  trust: z.number().min(0).max(10),
+  willingness_to_listen: z.number().min(0).max(10),
+  sarcasm: z.number().min(0).max(10),
+  bias_intensity: z.number().min(0).max(10),
+  bias_category: z.string().default("none"),
+  volatility: z.number().min(0).max(10),
+  boundary_respect: z.number().min(0).max(10),
+  coherence: z.number().min(0).max(10),
+  repetition: z.number().min(0).max(10),
+  entitlement: z.number().min(0).max(10),
+  interruption_likelihood: z.number().min(0).max(10),
+  escalation_tendency: z.number().min(0).max(10),
+});
+
+const reviewMilestoneSchema = z.object({
+  id: z.string(),
+  order: z.number().int().nonnegative(),
+  description: z.string().min(1).max(160),
+  classifier_hint: z.string().max(300).default(""),
+});
+
 const reviewSummaryMomentSchema = z.object({
   turnIndex: z.number().int().min(0),
   timecode: z.string().min(1),
+  dimension: z.string().min(1),
+  evidenceType: z.string().min(1),
+  evidenceSignals: z.array(z.string()).max(8).default([]),
   positive: z.boolean(),
   whatTraineeSaid: z.string().nullable(),
   previousTurn: z.object({
@@ -59,6 +91,8 @@ const reviewSummaryMomentSchema = z.object({
 });
 
 export const reviewSummaryResponseSchema = z.object({
+  version: z.number().int().default(REVIEW_SUMMARY_VERSION),
+  source: z.enum(["generated", "fallback"]).default("generated"),
   overview: z.string(),
   overallDelivery: z.string().nullable().default(null),
   positiveMoment: z.string().nullable().default(null),
@@ -72,9 +106,14 @@ export const reviewSummaryResponseSchema = z.object({
 
 export const reviewSummaryRequestSchema = z.object({
   scenarioTitle: z.string().min(1),
+  scenarioSetting: z.string().nullable().optional(),
+  traineeRole: z.string().nullable().optional(),
+  aiRole: z.string().nullable().optional(),
   learningObjectives: z.string().nullable().optional(),
   backstory: z.string().nullable().optional(),
   emotionalDriver: z.string().nullable().optional(),
+  traits: reviewScenarioTraitsSchema.nullable().optional(),
+  milestones: z.array(reviewMilestoneSchema).max(12).optional().default([]),
   personSummary: z.string().nullable().optional(),
   finalEscalationLevel: z.number().int().min(1).max(10).nullable().optional(),
   exitType: z.string().nullable().optional(),
@@ -84,9 +123,27 @@ export const reviewSummaryRequestSchema = z.object({
   moments: z.array(reviewSummaryMomentSchema).max(6),
 });
 
+export const generatedTimelineNarrativeSchema = z.object({
+  turnIndex: z.number().int().min(0),
+  timecode: z.string().min(1),
+  headline: z.string(),
+  likelyImpact: z.string(),
+  whatHappenedNext: z.string(),
+  whyItMattered: z.string(),
+  tryInstead: z.string().nullable().default(null),
+  positive: z.boolean(),
+});
+
+export const reviewTimelineResponseSchema = z.object({
+  version: z.number().int().default(REVIEW_SUMMARY_VERSION),
+  narratives: z.array(generatedTimelineNarrativeSchema).max(12).default([]),
+});
+
 export type ReviewSummaryMomentInput = z.infer<typeof reviewSummaryMomentSchema>;
 export type ReviewSummaryRequest = z.infer<typeof reviewSummaryRequestSchema>;
 export type ReviewSummaryResponse = z.infer<typeof reviewSummaryResponseSchema>;
+export type GeneratedTimelineNarrative = z.infer<typeof generatedTimelineNarrativeSchema>;
+export type ReviewTimelineResponse = z.infer<typeof reviewTimelineResponseSchema>;
 
 const DELIVERY_CONFIDENCE_THRESHOLD = 0.45;
 const POSITIVE_DELIVERY_MARKERS = new Set<TraineeDeliveryMarker>([
@@ -130,6 +187,24 @@ function humanizeIdentifier(value: string) {
   return value.replace(/_/g, " ");
 }
 
+export function getStoredReviewSummaryVersion(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    return 0;
+  }
+
+  const version = (value as Record<string, unknown>).version;
+  return typeof version === "number" && Number.isFinite(version) ? version : 0;
+}
+
+export function getStoredReviewSummarySource(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    return "fallback" as const;
+  }
+
+  const source = (value as Record<string, unknown>).source;
+  return source === "generated" || source === "fallback" ? source : "fallback";
+}
+
 function formatSpeakerLabel(speaker: TranscriptTurn["speaker"] | string): string {
   if (speaker === "trainee") return "You";
   if (speaker === "system") return "AI clinician";
@@ -139,6 +214,58 @@ function formatSpeakerLabel(speaker: TranscriptTurn["speaker"] | string): string
 function quoteTurn(turn: TranscriptTurn | null) {
   if (!turn?.content) return null;
   return turn.content.trim();
+}
+
+function buildMomentEvidenceSignals(moment: ScoreEvidence): string[] {
+  const signals: string[] = [];
+
+  if (moment.dimension) {
+    signals.push(`Scoring dimension: ${humanizeIdentifier(moment.dimension)}`);
+  }
+
+  if (moment.evidenceType) {
+    signals.push(`Evidence type: ${humanizeIdentifier(moment.evidenceType)}`);
+  }
+
+  const markers = Array.isArray(moment.evidenceData.markers)
+    ? (moment.evidenceData.markers as string[])
+      .map((marker) => humanizeIdentifier(marker))
+      .filter(Boolean)
+    : [];
+  if (markers.length > 0) {
+    signals.push(`Markers noticed: ${formatList(markers)}`);
+  }
+
+  const technique = typeof moment.evidenceData.technique === "string"
+    ? humanizeIdentifier(moment.evidenceData.technique)
+    : typeof moment.evidenceData.de_escalation_technique === "string"
+      ? humanizeIdentifier(moment.evidenceData.de_escalation_technique)
+      : null;
+  if (technique) {
+    signals.push(`Technique label: ${technique}`);
+  }
+
+  if (typeof moment.evidenceData.description === "string" && moment.evidenceData.description.trim()) {
+    signals.push(`Clinical objective involved: ${stripTrailingPeriod(moment.evidenceData.description)}`);
+  }
+
+  if (typeof moment.evidenceData.effective === "boolean") {
+    signals.push(`Technique judged ${moment.evidenceData.effective ? "effective" : "not fully effective"}`);
+  }
+
+  if (typeof moment.evidenceData.appropriate === "boolean") {
+    signals.push(`Support timing judged ${moment.evidenceData.appropriate ? "appropriate" : "early"}`);
+  }
+
+  if (typeof moment.evidenceData.levelBefore === "number") {
+    signals.push(`Escalation before the turn: ${ESCALATION_LABELS[moment.evidenceData.levelBefore] ?? `level ${moment.evidenceData.levelBefore}`}`);
+  }
+
+  if (typeof moment.evidenceData.summary === "string" && moment.evidenceData.summary.trim()) {
+    signals.push(`Delivery summary: ${stripTrailingPeriod(moment.evidenceData.summary)}`);
+  }
+
+  return signals.slice(0, 8);
 }
 
 function getSortedTurns(turns: TranscriptTurn[]) {
@@ -427,12 +554,46 @@ function describeOutcomeShift(
   return `The next patient/relative reply was: "${nextTurnQuote}".`;
 }
 
-function getTryInsteadText(moment: ScoreEvidence): string | null {
+function inferConcernPhrase(...turns: Array<TranscriptTurn | null>) {
+  const text = turns
+    .flatMap((turn) => turn?.content ? [turn.content.toLowerCase()] : [])
+    .join(" ");
+
+  if (!text) return null;
+  if (text.includes("discharge")) return "the discharge plan";
+  if (text.includes("go home") || text.includes("home")) return "going home";
+  if (text.includes("delay") || text.includes("wait") || text.includes("waiting")) return "the delay";
+  if (text.includes("safe") || text.includes("unsafe") || text.includes("risk")) return "the safety concern";
+  if (text.includes("pain")) return "the pain concern";
+  if (text.includes("why")) return "the reason for the problem";
+  if (text.includes("when")) return "what happens next";
+  if (text.includes("question") || text.includes("?")) return "the direct question";
+  return "the main concern";
+}
+
+function getTryInsteadText(
+  moment: ScoreEvidence,
+  context: ReviewTurnContext
+): string | null {
+  const concernPhrase = inferConcernPhrase(context.previousTurn, context.focusTurn, context.nextTurn);
+  const concernObject = concernPhrase ? ` ${concernPhrase}` : " the main concern";
+  const markers = Array.isArray(moment.evidenceData.markers)
+    ? new Set((moment.evidenceData.markers as string[]).map((marker) => humanizeIdentifier(marker)))
+    : new Set<string>();
+
   switch (moment.evidenceType) {
     case "de_escalation_harm":
+      return `Start with the emotion behind${concernObject}, then explain the barrier and next step in one contained reply.`;
     case "composure_marker":
+      if (markers.has("defensive tone") || markers.has("defensive language")) {
+        return `Lower the defensiveness first: acknowledge${concernObject}, then give one clear explanation or next step.`;
+      }
+      if (markers.has("tense hurried") || markers.has("anxious unsteady")) {
+        return `Slow the opening and acknowledge${concernObject} before you move into explanation.`;
+      }
+      return `Acknowledge${concernObject} first, then give the barrier and next step in concrete terms.`;
     case "low_substance_response":
-      return "Lead with the emotion, then name the immediate barrier and the next step in concrete terms.";
+      return `Answer${concernObject} directly, then explain the barrier and next step in concrete terms.`;
     case "support_not_requested":
     case "critical_no_support":
       return "State the safety concern clearly and bring a colleague in straight away.";
@@ -458,21 +619,24 @@ function getReasoningOrFallback(
   return sentenceCase(stripTrailingPeriod(reasoning)) + ".";
 }
 
-function getComposureNarrative(turn: TranscriptTurn | null, moment: ScoreEvidence) {
+function getComposureNarrative(context: ReviewTurnContext, moment: ScoreEvidence) {
   const markers = Array.isArray(moment.evidenceData.markers)
     ? (moment.evidenceData.markers as string[]).map(humanizeIdentifier)
     : [];
   const markerText = markers.length > 0
     ? markers.join(", ")
     : "defensive or dismissive";
+  const concernPhrase = inferConcernPhrase(context.previousTurn, context.focusTurn, context.nextTurn);
 
   return {
     headline: "This may have landed as defensive.",
     likelyImpact: getReasoningOrFallback(
-      turn,
+      context.focusTurn,
       `Parts of this response may have come across as ${markerText}, which can make it harder for the other person to feel heard.`
     ),
-    whyItMattered: "In a distressed exchange, people usually need acknowledgement before they can take in explanation or boundaries.",
+    whyItMattered: concernPhrase
+      ? `Because the other person was still looking for clarity about ${concernPhrase}, a response that sounded ${markerText} made it harder for the explanation to land.`
+      : `Because the other person was still distressed, a response that sounded ${markerText} made it harder for acknowledgement or explanation to land.`,
   };
 }
 
@@ -501,20 +665,23 @@ function getDeliveryNarrative(turn: TranscriptTurn | null, moment: ScoreEvidence
   };
 }
 
-function getDeEscalationNarrative(turn: TranscriptTurn | null, moment: ScoreEvidence) {
+function getDeEscalationNarrative(context: ReviewTurnContext, moment: ScoreEvidence) {
   const effective = moment.evidenceData.effective === true;
   const technique = typeof moment.evidenceData.technique === "string"
     ? humanizeIdentifier(moment.evidenceData.technique)
     : "de-escalation";
+  const concernPhrase = inferConcernPhrase(context.previousTurn, context.focusTurn, context.nextTurn);
 
   if (moment.evidenceType === "de_escalation_harm") {
     return {
       headline: "This likely raised tension.",
       likelyImpact: getReasoningOrFallback(
-        turn,
+        context.focusTurn,
         `This response appeared to raise tension rather than settle it, even if it was trying to move the conversation forward.`
       ),
-      whyItMattered: "When the person is highly distressed, a move that is technically reasonable can still escalate things if it comes before acknowledgement.",
+      whyItMattered: concernPhrase
+        ? `The other person was still activated around ${concernPhrase}, so moving to problem-solving before acknowledgement was unlikely to settle the exchange.`
+        : "When someone is highly distressed, a technically reasonable move can still escalate things if it comes before acknowledgement.",
     };
   }
 
@@ -522,20 +689,24 @@ function getDeEscalationNarrative(turn: TranscriptTurn | null, moment: ScoreEvid
     return {
       headline: `This ${technique} move seemed to help.`,
       likelyImpact: getReasoningOrFallback(
-        turn,
+        context.focusTurn,
         `This sounded like a constructive ${technique} move and likely helped the person feel more contained.`
       ),
-      whyItMattered: "Once the other person feels understood, it becomes easier to keep the conversation workable.",
+      whyItMattered: concernPhrase
+        ? `Once the other person felt more understood about ${concernPhrase}, it became easier for the conversation to stay workable.`
+        : "Once the other person feels understood, it becomes easier to keep the conversation workable.",
     };
   }
 
   return {
     headline: `This ${technique} move was a reasonable attempt, but it did not fully land.`,
     likelyImpact: getReasoningOrFallback(
-      turn,
+      context.focusTurn,
       `The intention here was helpful, but it does not seem to have been enough to shift the conversation.`
     ),
-    whyItMattered: "A partial repair still matters, but if the distress stays high you often need clearer acknowledgement or a more concrete next step.",
+    whyItMattered: concernPhrase
+      ? `A partial repair still matters, but while the person was still stuck on ${concernPhrase}, the acknowledgement or next step needed to be clearer.`
+      : "A partial repair still matters, but if distress stays high you often need clearer acknowledgement or a more concrete next step.",
   };
 }
 
@@ -588,7 +759,8 @@ export function buildReviewMomentNarrative(
   turns: TranscriptTurn[],
   sessionStartedAt: string | null | undefined
 ): ReviewMomentNarrative {
-  const { focusTurn } = getMomentTurnContext(turns, moment.turnIndex);
+  const context = getMomentTurnContext(turns, moment.turnIndex);
+  const { focusTurn } = context;
   const positive =
     moment.scoreImpact > 0 ||
     moment.evidenceType === "milestone_completed" ||
@@ -603,14 +775,14 @@ export function buildReviewMomentNarrative(
   switch (moment.evidenceType) {
     case "composure_marker":
     case "low_substance_response":
-      narrative = getComposureNarrative(focusTurn, moment);
+      narrative = getComposureNarrative(context, moment);
       break;
     case "delivery_marker":
       narrative = getDeliveryNarrative(focusTurn, moment);
       break;
     case "de_escalation_attempt":
     case "de_escalation_harm":
-      narrative = getDeEscalationNarrative(focusTurn, moment);
+      narrative = getDeEscalationNarrative(context, moment);
       break;
     case "support_invoked":
     case "support_not_requested":
@@ -640,7 +812,7 @@ export function buildReviewMomentNarrative(
     likelyImpact: narrative.likelyImpact,
     whatHappenedNext: describeOutcomeShift(turns, moment),
     whyItMattered: narrative.whyItMattered,
-    tryInstead: getTryInsteadText(moment),
+    tryInstead: getTryInsteadText(moment, context),
     positive,
     turnIndex: moment.turnIndex,
   };
@@ -802,13 +974,25 @@ function summarizePositiveMoment(moment: ReviewMomentNarrative | null) {
   return sentenceCase(stripTrailingPeriod(moment.likelyImpact)) + ".";
 }
 
+function summarizeOverviewFromNarrative(
+  moment: ReviewMomentNarrative | null,
+  prefix: string
+) {
+  if (!moment) return null;
+  return `${prefix} ${stripTrailingPeriod(moment.likelyImpact).toLowerCase()}.`;
+}
+
 function summarizeCoachingFocus(args: {
   challengingMoment: ReviewMomentNarrative | null;
   objectiveFocus: string | null;
   personFocus: string | null;
 }) {
   const { challengingMoment, objectiveFocus, personFocus } = args;
-  return challengingMoment?.whyItMattered ?? objectiveFocus ?? personFocus;
+  if (challengingMoment?.tryInstead) {
+    return sentenceCase(stripTrailingPeriod(challengingMoment.tryInstead)) + ".";
+  }
+
+  return challengingMoment?.likelyImpact ?? objectiveFocus ?? personFocus;
 }
 
 export function buildFallbackReviewSummary(
@@ -827,6 +1011,8 @@ export function buildFallbackReviewSummary(
 ): ReviewSummaryData {
   if (!score.sessionValid) {
     return {
+      version: REVIEW_SUMMARY_VERSION,
+      source: "fallback",
       overview: "This session ended before there was enough trainee speech to build a full coaching summary. The transcript and reflection are still available below.",
       overallDelivery: null,
       positiveMoment: null,
@@ -848,15 +1034,19 @@ export function buildFallbackReviewSummary(
   const overviewParts: string[] = [];
 
   if (positiveMoment) {
-    overviewParts.push(
-      `You found a steadier moment around ${positiveMoment.timecode}, where ${stripTrailingPeriod(positiveMoment.likelyImpact).toLowerCase()}.`
-    );
+    overviewParts.push(summarizeOverviewFromNarrative(
+      positiveMoment,
+      "There was a steadier phase where"
+    )!);
   }
 
   if (challengingMoment) {
-    overviewParts.push(
-      `The key turning point came around ${challengingMoment.timecode}, where ${stripTrailingPeriod(challengingMoment.likelyImpact).toLowerCase()}.`
-    );
+    overviewParts.push(summarizeOverviewFromNarrative(
+      challengingMoment,
+      positiveMoment
+        ? "The main difficulty was that"
+        : "The main difficulty in this conversation was that"
+    )!);
   }
 
   overviewParts.push(getEndingPhrase(session.final_escalation_level, session.exit_type));
@@ -875,6 +1065,8 @@ export function buildFallbackReviewSummary(
   });
 
   return {
+    version: REVIEW_SUMMARY_VERSION,
+    source: "fallback",
     overview: overviewParts.join(" "),
     overallDelivery,
     positiveMoment: summarizePositiveMoment(positiveMoment),
@@ -902,6 +1094,9 @@ export function buildReviewSummaryMomentInput(
   return {
     turnIndex: moment.turnIndex,
     timecode: narrative.timecode,
+    dimension: humanizeIdentifier(moment.dimension),
+    evidenceType: humanizeIdentifier(moment.evidenceType),
+    evidenceSignals: buildMomentEvidenceSignals(moment),
     positive: narrative.positive,
     whatTraineeSaid: quoteTurn(context.focusTurn),
     previousTurn: context.previousTurn

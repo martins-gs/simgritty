@@ -132,7 +132,7 @@ function ScorePlaceholderCard({
           </p>
           <p className="mt-1 text-3xl font-bold tracking-tight text-slate-900">{turnCount}</p>
           <p className="mt-2 text-[12px] leading-5 text-slate-500">
-            Complete at least 3 trainee turns to unlock scoring. Reflection and the full transcript are still available below.
+            Complete at least 3 trainee turns to unlock scoring. Reflection, the timeline, and the full transcript are still available on this page.
           </p>
         </div>
 
@@ -167,6 +167,7 @@ export default function ReviewPage() {
   const [activePanel, setActivePanel] = useState<ReviewPanel>("transcript");
   const [recordingUrl, setRecordingUrl] = useState<string | null>(null);
   const [recordingStartedAt, setRecordingStartedAt] = useState<string | null>(null);
+  const [sessionMissing, setSessionMissing] = useState(false);
   const audioFetchedRef = useRef(false);
 
   useEffect(() => {
@@ -196,6 +197,18 @@ export default function ReviewPage() {
         ? await readJsonSafely(notesRes, parseEducatorNotes, [], "notes")
         : [];
       if (cancelled) return;
+
+      if (sessionRes?.status === 404) {
+        setSessionMissing(true);
+        setSession(null);
+        setTurns([]);
+        setEvents([]);
+        setNotes([]);
+        setLoading(false);
+        return;
+      }
+
+      setSessionMissing(false);
 
       const mergedTurns = mergeTraineeAudioDeliveryFromEvents(nextTurns, nextEvents);
 
@@ -259,11 +272,28 @@ export default function ReviewPage() {
     };
   }, [sessionId]);
 
-  if (loading || !session) {
+  if (loading) {
     return (
       <AppShell>
         <div className="flex items-center justify-center py-20 text-muted-foreground">
           Loading review...
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (sessionMissing || !session) {
+    return (
+      <AppShell>
+        <div className="space-y-4 py-20 text-center">
+          <p className="text-sm text-muted-foreground">
+            This review session could not be found.
+          </p>
+          <div>
+            <Button variant="outline" onClick={() => router.push("/dashboard")}>
+              Back to dashboard
+            </Button>
+          </div>
         </div>
       </AppShell>
     );
@@ -421,8 +451,8 @@ export default function ReviewPage() {
         <div className="space-y-4">
           <ReflectionPrompt sessionId={sessionId} />
 
-          <div className="space-y-4">
-            {score.sessionValid ? (
+          {score.sessionValid && (
+            <div className="space-y-4">
               <ReviewSummaryCard
                 sessionId={sessionId}
                 session={session}
@@ -436,16 +466,8 @@ export default function ReviewPage() {
                 emotionalDriver={scenarioEmotionalDriver}
                 traits={scenarioTraits}
               />
-            ) : (
-              <ScorePlaceholderCard
-                turnCount={score.turnCount}
-                onBack={() => router.back()}
-                onRestart={handleRestartFromSelectedTurn}
-                canRestart={canRestartFromSelectedTurn}
-                restarting={restarting}
-              />
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         <Card>
@@ -455,6 +477,7 @@ export default function ReviewPage() {
           <CardContent>
             {session.started_at ? (
               <EscalationTimeline
+                sessionId={sessionId}
                 events={events}
                 turns={turns}
                 keyMoments={timelineKeyMoments}
@@ -494,11 +517,6 @@ export default function ReviewPage() {
             </Button>
           </div>
 
-          {score.sessionValid && (
-            <div className="pt-2 sm:pt-4">
-              <ScoreCard score={score} preliminary={preliminary} />
-            </div>
-          )}
         </div>
 
         <div className="space-y-4 pt-10 sm:pt-14">
@@ -619,6 +637,20 @@ export default function ReviewPage() {
                 />
               </CardContent>
             </Card>
+          )}
+        </div>
+
+        <div className="pt-2 sm:pt-4">
+          {score.sessionValid ? (
+            <ScoreCard score={score} preliminary={preliminary} />
+          ) : (
+            <ScorePlaceholderCard
+              turnCount={score.turnCount}
+              onBack={() => router.back()}
+              onRestart={handleRestartFromSelectedTurn}
+              canRestart={canRestartFromSelectedTurn}
+              restarting={restarting}
+            />
           )}
         </div>
 
