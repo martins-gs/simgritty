@@ -16,6 +16,8 @@ import {
   parseTranscriptTurns,
 } from "@/lib/validation/schemas";
 
+const timelineFeedbackRequestCache = new Map<string, Promise<ReturnType<typeof reviewTimelineResponseSchema.parse>>>();
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -103,38 +105,47 @@ export async function GET(
     };
   });
 
-  try {
-    const generated = await generateTimelineNarratives({
-      scenarioTitle: session.scenario_templates?.title ?? snapshot.title ?? "Simulation",
-      scenarioSetting: session.scenario_templates?.setting ?? snapshot.setting ?? null,
-      traineeRole: session.scenario_templates?.trainee_role ?? snapshot.trainee_role ?? null,
-      aiRole: session.scenario_templates?.ai_role ?? snapshot.ai_role ?? null,
-      learningObjectives: snapshot.learning_objectives,
-      backstory: snapshot.backstory,
-      emotionalDriver: snapshot.emotional_driver,
-      traits: snapshot.scenario_traits[0] ?? null,
-      milestones: snapshot.scenario_milestones,
-      finalEscalationLevel: session.final_escalation_level ?? null,
-      exitType: session.exit_type ?? null,
-      moments: keyMoments.map((moment) => buildReviewSummaryMomentInput(moment, turns, session.started_at)),
+  const requestKey = `${user.id}:${id}:${REVIEW_SUMMARY_VERSION}:${keyMoments.map((moment) => moment.turnIndex).join(",")}`;
+  let requestPromise = timelineFeedbackRequestCache.get(requestKey);
+
+  if (!requestPromise) {
+    requestPromise = (async () => {
+      try {
+        const generated = await generateTimelineNarratives({
+          scenarioTitle: session.scenario_templates?.title ?? snapshot.title ?? "Simulation",
+          scenarioSetting: session.scenario_templates?.setting ?? snapshot.setting ?? null,
+          traineeRole: session.scenario_templates?.trainee_role ?? snapshot.trainee_role ?? null,
+          aiRole: session.scenario_templates?.ai_role ?? snapshot.ai_role ?? null,
+          learningObjectives: snapshot.learning_objectives,
+          backstory: snapshot.backstory,
+          emotionalDriver: snapshot.emotional_driver,
+          traits: snapshot.scenario_traits[0] ?? null,
+          milestones: snapshot.scenario_milestones,
+          finalEscalationLevel: session.final_escalation_level ?? null,
+          exitType: session.exit_type ?? null,
+          moments: keyMoments.map((moment) => buildReviewSummaryMomentInput(moment, turns, session.started_at)),
+        });
+
+        return generated ?? reviewTimelineResponseSchema.parse({
+          version: REVIEW_SUMMARY_VERSION,
+          narratives: fallbackNarratives,
+        });
+      } catch (error) {
+        console.error("[Timeline Feedback] Falling back to local narratives", error);
+
+        return reviewTimelineResponseSchema.parse({
+          version: REVIEW_SUMMARY_VERSION,
+          narratives: fallbackNarratives,
+        });
+      }
+    })().finally(() => {
+      timelineFeedbackRequestCache.delete(requestKey);
     });
 
-    return NextResponse.json(
-      generated ?? reviewTimelineResponseSchema.parse({
-        version: REVIEW_SUMMARY_VERSION,
-        narratives: fallbackNarratives,
-      }),
-      { headers: { "Cache-Control": "no-store" } }
-    );
-  } catch (error) {
-    console.error("[Timeline Feedback] Falling back to local narratives", error);
-
-    return NextResponse.json(
-      reviewTimelineResponseSchema.parse({
-        version: REVIEW_SUMMARY_VERSION,
-        narratives: fallbackNarratives,
-      }),
-      { headers: { "Cache-Control": "no-store" } }
-    );
+    timelineFeedbackRequestCache.set(requestKey, requestPromise);
   }
+
+  const responsePayload = await requestPromise;
+
+  return NextResponse.json(responsePayload, { headers: { "Cache-Control": "no-store" } });
 }

@@ -89,12 +89,8 @@ export function ReviewSummaryCard({
     ) {
       return null;
     }
-    return {
-      ...rawStoredSummary,
-      overallDelivery: rawStoredSummary.overallDelivery ?? fallbackSummary.overallDelivery,
-    };
+    return rawStoredSummary;
   }, [
-    fallbackSummary.overallDelivery,
     rawStoredSummary,
     storedSummarySource,
     storedSummaryVersion,
@@ -154,31 +150,11 @@ export function ReviewSummaryCard({
     data: ReviewSummaryData;
   } | null>(null);
   const currentSummaryState = summaryState?.requestKey === requestKey ? summaryState : null;
-  const generatedSummary = currentSummaryState
-    ? {
-        ...currentSummaryState.data,
-        overallDelivery: currentSummaryState.data.overallDelivery ?? fallbackSummary.overallDelivery,
-      }
-    : null;
+  const generatedSummary = currentSummaryState?.data ?? null;
   const summary = storedSummary
     ?? generatedSummary
     ?? (!shouldRequestGeneratedSummary ? fallbackSummary : null);
   const loadingGeneratedSummary = shouldRequestGeneratedSummary && !currentSummaryState;
-  const coachingFocus = useMemo(() => {
-    if (!summary) return null;
-
-    const parts = [
-      summary.coachingFocus?.trim() || null,
-      summary.objectiveFocus?.trim() || null,
-      summary.personFocus?.trim() || null,
-    ].filter((part): part is string => Boolean(part));
-
-    if (parts.length === 0) return null;
-
-    return parts.filter((part, index) => (
-      !parts.slice(0, index).some((existing) => existing.includes(part) || part.includes(existing))
-    )).join(" ");
-  }, [summary]);
   const objectiveItems = useMemo(() => (
     (learningObjectives ?? "")
       .split("\n")
@@ -330,7 +306,7 @@ export function ReviewSummaryCard({
             Why It Mattered
           </p>
           <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
-            {coachingFocus ?? "Look for the moment below where the interaction changed direction."}
+            {summary.whyItMattered ?? "Look for the moment below where the interaction changed direction."}
           </p>
         </div>
 

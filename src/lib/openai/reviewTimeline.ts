@@ -1,6 +1,6 @@
 import { zodTextFormat } from "openai/helpers/zod";
 import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
-import { parseStructuredOutputText } from "@/lib/openai/structuredOutput";
+import { describeStructuredOutputFailure, parseStructuredOutputText } from "@/lib/openai/structuredOutput";
 import {
   REVIEW_SUMMARY_VERSION,
   reviewTimelineResponseSchema,
@@ -206,7 +206,9 @@ Output rules:
 
   const parsed = parseStructuredOutputText(response, reviewTimelineResponseSchema);
   if (!parsed || !validateTimelineNarratives(parsed, moments)) {
-    throw new SyntaxError("Unable to parse structured timeline JSON");
+    throw new SyntaxError(
+      `Unable to parse structured timeline JSON (${describeStructuredOutputFailure(response)})`
+    );
   }
 
   ensureDistinctNarrativeWording(parsed.narratives);

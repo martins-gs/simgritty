@@ -33,6 +33,7 @@ export interface ReviewSummaryData {
   overview: string;
   overallDelivery: string | null;
   positiveMoment: string | null;
+  whyItMattered: string | null;
   coachingFocus: string | null;
   whatToSayInstead: string | null;
   objectiveFocus: string | null;
@@ -41,7 +42,7 @@ export interface ReviewSummaryData {
   outstandingObjectives: string[];
 }
 
-export const REVIEW_SUMMARY_VERSION = 3;
+export const REVIEW_SUMMARY_VERSION = 4;
 
 const reviewScenarioTraitsSchema = z.object({
   hostility: z.number().min(0).max(10),
@@ -93,13 +94,14 @@ const reviewSummaryMomentSchema = z.object({
 export const reviewSummaryResponseSchema = z.object({
   version: z.number().int().default(REVIEW_SUMMARY_VERSION),
   source: z.enum(["generated", "fallback"]).default("generated"),
-  overview: z.string(),
-  overallDelivery: z.string().nullable().default(null),
-  positiveMoment: z.string().nullable().default(null),
-  coachingFocus: z.string().nullable().default(null),
-  whatToSayInstead: z.string().nullable().default(null),
-  objectiveFocus: z.string().nullable().default(null),
-  personFocus: z.string().nullable().default(null),
+  overview: z.string().describe("One or two short sentences summarising the overall arc of the conversation."),
+  overallDelivery: z.string().nullable().default(null).describe("Optional conversation-level summary of how the trainee sounded overall."),
+  positiveMoment: z.string().nullable().default(null).describe("Specific helpful move from this case worth repeating."),
+  whyItMattered: z.string().nullable().default(null).describe("Why the main difficulty mattered in this exact interaction, as an explanation rather than an instruction."),
+  coachingFocus: z.string().nullable().default(null).describe("The main coaching takeaway from this case, phrased as one specific learning point."),
+  whatToSayInstead: z.string().nullable().default(null).describe("A short behavioural prompt or tightly case-specific model line for the next attempt."),
+  objectiveFocus: z.string().nullable().default(null).describe("Optional concise scenario-objective point that matters for this case."),
+  personFocus: z.string().nullable().default(null).describe("Optional concise person-specific adaptation point that matters for this case."),
   achievedObjectives: z.array(z.string()).max(6).default([]),
   outstandingObjectives: z.array(z.string()).max(6).default([]),
 });
@@ -1016,6 +1018,7 @@ export function buildFallbackReviewSummary(
       overview: "This session ended before there was enough trainee speech to build a full coaching summary. The transcript and reflection are still available below.",
       overallDelivery: null,
       positiveMoment: null,
+      whyItMattered: null,
       coachingFocus: null,
       whatToSayInstead: null,
       objectiveFocus: null,
@@ -1070,6 +1073,7 @@ export function buildFallbackReviewSummary(
     overview: overviewParts.join(" "),
     overallDelivery,
     positiveMoment: summarizePositiveMoment(positiveMoment),
+    whyItMattered: challengingMoment?.whyItMattered ?? objectiveCoverage.objectiveFocus ?? personFocus,
     coachingFocus: summarizeCoachingFocus({
       challengingMoment,
       objectiveFocus: objectiveCoverage.objectiveFocus,

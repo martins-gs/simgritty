@@ -146,10 +146,7 @@ export async function GET(
     const reviewSummary = storedSummary.success
       && storedVersion >= REVIEW_SUMMARY_VERSION
       && storedSource === "generated"
-      ? {
-          ...storedSummary.data,
-          overallDelivery: storedSummary.data.overallDelivery ?? fallbackSummary.overallDelivery,
-        }
+      ? storedSummary.data
       : fallbackSummary;
 
     return {

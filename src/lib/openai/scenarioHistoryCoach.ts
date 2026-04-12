@@ -1,5 +1,6 @@
 import { zodTextFormat } from "openai/helpers/zod";
 import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
+import { describeStructuredOutputFailure, parseStructuredOutputText } from "@/lib/openai/structuredOutput";
 import {
   scenarioHistoryCoachResponseSchema,
   type ScenarioHistoryCoachResponse,
@@ -69,7 +70,7 @@ async function requestParsedHistorySummary(
     return null;
   }
 
-  const response = await client.responses.parse({
+  const response = await client.responses.create({
     model: SCENARIO_HISTORY_MODEL,
     instructions: `You are writing the "Review your progress" panel for repeated runs of one clinical communication scenario.
 
@@ -112,7 +113,14 @@ Illustrative style examples only — do not reuse wording:
     },
   });
 
-  return response.output_parsed ?? null;
+  const parsed = parseStructuredOutputText(response, scenarioHistoryCoachResponseSchema);
+  if (!parsed) {
+    throw new SyntaxError(
+      `Unable to parse structured scenario history JSON (${describeStructuredOutputFailure(response)})`
+    );
+  }
+
+  return parsed;
 }
 
 export async function generateScenarioHistoryCoachSummary(
@@ -146,6 +154,7 @@ export async function generateScenarioHistoryCoachSummary(
 - Overview: ${session.reviewSummary.overview}
 - Overall delivery: ${session.reviewSummary.overallDelivery ?? "None"}
 - Positive moment: ${session.reviewSummary.positiveMoment ?? "None"}
+- Why it mattered: ${session.reviewSummary.whyItMattered ?? "None"}
 - Coaching focus: ${session.reviewSummary.coachingFocus ?? "None"}
 - Objective focus: ${session.reviewSummary.objectiveFocus ?? "None"}
 - Person focus: ${session.reviewSummary.personFocus ?? "None"}

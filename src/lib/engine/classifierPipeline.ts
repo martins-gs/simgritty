@@ -3,6 +3,7 @@ import type { StructuredVoiceProfile } from "@/types/voice";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
+import { describeStructuredOutputFailure, parseStructuredOutputText } from "@/lib/openai/structuredOutput";
 
 export interface MilestoneContext {
   id: string;
@@ -191,6 +192,7 @@ async function requestClassification(
 ): Promise<ClassifierResult> {
   const client = getOpenAIClient();
   if (!client || !apiKey) {
+    console.error(`[Classifier] schema=${options?.schemaName ?? "utterance_classifier"} structured output failure`, new Error("OPENAI_API_KEY not configured"));
     if (shouldFailLoudOnOpenAIError()) {
       throw new Error("OPENAI_API_KEY not configured");
     }
@@ -209,7 +211,7 @@ async function requestClassification(
   const maxTokens = options?.maxTokens ?? 220;
 
   try {
-    const response = await client.responses.parse({
+    const response = await client.responses.create({
       model: CLASSIFIER_MODEL,
       instructions: systemPrompt,
       input: userPrompt,
@@ -222,9 +224,11 @@ async function requestClassification(
       },
     });
 
-    const raw = response.output_parsed;
+    const raw = parseStructuredOutputText(response, schema);
     if (!raw) {
-      throw new Error("No parsed classifier output returned");
+      throw new SyntaxError(
+        `[Classifier] schema=${schemaName} unable to parse structured JSON (${describeStructuredOutputFailure(response)})`
+      );
     }
 
     // Cast to Record for dynamic field access — the Zod schema guarantees shape
@@ -252,6 +256,7 @@ async function requestClassification(
 
     return base;
   } catch (error) {
+    console.error(`[Classifier] schema=${schemaName} structured output failure`, error);
     if (shouldFailLoudOnOpenAIError()) {
       throw error;
     }

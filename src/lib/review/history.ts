@@ -169,6 +169,7 @@ function normalizeCoachingTexts(session: ScenarioHistorySessionInput | undefined
   if (!session?.reviewSummary) return [];
 
   return [
+    session.reviewSummary.whyItMattered,
     session.reviewSummary.coachingFocus,
     session.reviewSummary.objectiveFocus,
     session.reviewSummary.personFocus,

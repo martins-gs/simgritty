@@ -1,11 +1,35 @@
 import { zodTextFormat } from "openai/helpers/zod";
-import { traineeDeliveryAnalysisSchema } from "@/lib/validation/schemas";
+import { z } from "zod";
+import { parseStructuredOutputText, describeStructuredOutputFailure } from "@/lib/openai/structuredOutput";
+import { structuredVoiceProfileSchema, traineeDeliveryAnalysisSchema } from "@/lib/validation/schemas";
 import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
 import type { TraineeDeliveryAnalysis } from "@/types/simulation";
 
 const AUDIO_ANALYSIS_MODEL = process.env.OPENAI_TRAINEE_AUDIO_ANALYSIS_MODEL || "gpt-audio";
 const AUDIO_ANALYSIS_STRUCTURER_MODEL =
   process.env.OPENAI_TRAINEE_AUDIO_STRUCTURER_MODEL || "gpt-5.4-mini";
+
+const traineeDeliveryMarkerSchema = z.enum([
+  "calm_measured",
+  "warm_empathic",
+  "tense_hurried",
+  "flat_detached",
+  "defensive_tone",
+  "sarcastic_tone",
+  "irritated_tone",
+  "hostile_tone",
+  "anxious_unsteady",
+]);
+
+const traineeDeliveryStructuringSchema = z.object({
+  source: z.literal("audio").default("audio"),
+  confidence: z.number().min(0).max(1).describe("Confidence that the delivery markers are supported by the audio."),
+  summary: z.string().describe("One short sentence on how the trainee came across vocally."),
+  markers: z.array(traineeDeliveryMarkerSchema).max(4).default([]).describe("Only the delivery markers clearly supported by the audio."),
+  acousticEvidence: z.array(z.string()).max(6).default([]).describe("Concrete phrases about pace, tone, tension, warmth, or vocal shape heard in the clip."),
+  duration_ms: z.number().nullable().default(null).describe("Clip duration in milliseconds if known, otherwise null."),
+  voiceProfile: structuredVoiceProfileSchema.describe("Short structured description of the heard accent, affect, tone, pacing, emotion, delivery, and variety."),
+});
 
 interface TraineeDeliveryAnalysisInput {
   utterance: string;
@@ -241,14 +265,15 @@ async function structureAnalysisText(
   }
 
   try {
-    const response = await client.responses.parse({
+    const response = await client.responses.create({
       model: AUDIO_ANALYSIS_STRUCTURER_MODEL,
       instructions: `You convert a free-form audio-analysis result into a strict schema.
 
 Do not invent evidence that is not present in the supplied analysis.
 Preserve the fact that the source is audio-derived.
 If the audio analysis is vague or uncertain, keep confidence low.
-Return only the schema.`,
+Return valid JSON only.
+Keep the output concise and faithful to the supplied analysis.`,
       input: `Scenario: ${input.scenarioContext}
 Current escalation level: ${input.currentEscalation}/10
 Clip duration: ${input.durationMs ?? "unknown"} ms
@@ -265,12 +290,21 @@ ${rawAnalysis}`,
       reasoning: { effort: "low" },
       max_output_tokens: 500,
       text: {
-        format: zodTextFormat(traineeDeliveryAnalysisSchema, "trainee_delivery_analysis"),
+        format: zodTextFormat(traineeDeliveryStructuringSchema, "trainee_delivery_analysis"),
         verbosity: "low",
       },
     });
 
-    return (response.output_parsed as TraineeDeliveryAnalysis | null) ?? null;
+    const parsed = parseStructuredOutputText(response, traineeDeliveryStructuringSchema);
+    if (!parsed) {
+      throw new SyntaxError(
+        `Unable to parse trainee delivery JSON (${describeStructuredOutputFailure(response)})`
+      );
+    }
+
+    const normalized = normalizeAnalysisCandidate(parsed);
+    const finalResult = traineeDeliveryAnalysisSchema.safeParse(normalized);
+    return finalResult.success ? finalResult.data : null;
   } catch (error) {
     console.error("Trainee delivery structuring error:", error);
     if (shouldFailLoudOnOpenAIError()) {

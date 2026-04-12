@@ -10,6 +10,11 @@ import {
   reviewSummaryResponseSchema,
 } from "@/lib/review/feedback";
 
+const reviewSummaryRequestCache = new Map<string, Promise<{
+  summaryToPersist: ReturnType<typeof reviewSummaryResponseSchema.parse>;
+  shouldPersistGeneratedSummary: boolean;
+}>>();
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -54,20 +59,38 @@ export async function POST(
   const parsed = await parseRequestJson(request, reviewSummaryRequestSchema);
   if (!parsed.success) return parsed.response;
 
-  let summaryToPersist = parsed.data.fallback;
-  let shouldPersistGeneratedSummary = false;
+  const requestKey = `${user.id}:${id}:${REVIEW_SUMMARY_VERSION}`;
+  let requestPromise = reviewSummaryRequestCache.get(requestKey);
 
-  try {
-    const generated = await generateReviewSummary(parsed.data);
-    if (generated) {
-      summaryToPersist = generated;
-      shouldPersistGeneratedSummary = true;
-    } else {
-      console.warn("[Review Summary] No structured summary returned; using local fallback for this response");
-    }
-  } catch (error) {
-    console.error("[Review Summary] Falling back to local summary", error);
+  if (!requestPromise) {
+    requestPromise = (async () => {
+      let summaryToPersist = parsed.data.fallback;
+      let shouldPersistGeneratedSummary = false;
+
+      try {
+        const generated = await generateReviewSummary(parsed.data);
+        if (generated) {
+          summaryToPersist = generated;
+          shouldPersistGeneratedSummary = true;
+        } else {
+          console.warn("[Review Summary] No structured summary returned; using local fallback for this response");
+        }
+      } catch (error) {
+        console.error("[Review Summary] Falling back to local summary", error);
+      }
+
+      return {
+        summaryToPersist,
+        shouldPersistGeneratedSummary,
+      };
+    })().finally(() => {
+      reviewSummaryRequestCache.delete(requestKey);
+    });
+
+    reviewSummaryRequestCache.set(requestKey, requestPromise);
   }
+
+  const { summaryToPersist, shouldPersistGeneratedSummary } = await requestPromise;
 
   if (shouldPersistGeneratedSummary) {
     const persistSupabase = createAdminClientIfAvailable() ?? authSupabase;

@@ -1,6 +1,42 @@
 import type { Response } from "openai/resources/responses/responses";
 import type { ZodType } from "zod";
 
+function collectResponseOutputTextSegments(response: Response) {
+  const segments: string[] = [];
+
+  if (typeof response.output_text === "string" && response.output_text.trim()) {
+    segments.push(response.output_text.trim());
+  }
+
+  for (const item of response.output) {
+    if (item.type !== "message") continue;
+
+    for (const content of item.content) {
+      if (content.type === "output_text" && content.text.trim()) {
+        segments.push(content.text.trim());
+      }
+    }
+  }
+
+  return [...new Set(segments)].filter(Boolean);
+}
+
+function collectResponseRefusalSegments(response: Response) {
+  const segments: string[] = [];
+
+  for (const item of response.output) {
+    if (item.type !== "message") continue;
+
+    for (const content of item.content) {
+      if (content.type === "refusal" && content.refusal.trim()) {
+        segments.push(content.refusal.trim());
+      }
+    }
+  }
+
+  return segments;
+}
+
 function stripCodeFences(value: string) {
   const trimmed = value.trim();
   if (!trimmed.startsWith("```")) {
@@ -30,21 +66,34 @@ function buildJsonCandidates(value: string) {
 }
 
 export function getResponseOutputText(response: Response) {
-  if (typeof response.output_text === "string" && response.output_text.trim()) {
-    return response.output_text.trim();
+  return collectResponseOutputTextSegments(response).join("\n").trim();
+}
+
+export function describeStructuredOutputFailure(response: Response | null | undefined) {
+  if (!response) {
+    return "no response returned";
   }
 
-  for (const item of response.output) {
-    if (item.type !== "message") continue;
-
-    for (const content of item.content) {
-      if (content.type === "output_text" && content.text.trim()) {
-        return content.text.trim();
-      }
-    }
+  if (response.status === "incomplete") {
+    const reason = response.incomplete_details?.reason ?? "unknown reason";
+    return `response incomplete (${reason})`;
   }
 
-  return "";
+  if (response.error?.message) {
+    return `response failed (${response.error.message})`;
+  }
+
+  const refusal = collectResponseRefusalSegments(response).join(" ").trim();
+  if (refusal) {
+    return `model refusal (${refusal})`;
+  }
+
+  const text = getResponseOutputText(response);
+  if (!text) {
+    return `no output text available (status=${response.status})`;
+  }
+
+  return `unparseable output (status=${response.status})`;
 }
 
 export function parseStructuredOutputText<T>(

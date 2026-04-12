@@ -1,6 +1,6 @@
 import { zodTextFormat } from "openai/helpers/zod";
 import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
-import { parseStructuredOutputText } from "@/lib/openai/structuredOutput";
+import { describeStructuredOutputFailure, parseStructuredOutputText } from "@/lib/openai/structuredOutput";
 import {
   type ReviewSummaryMomentInput,
   type ReviewSummaryRequest,
@@ -75,11 +75,28 @@ function containsForbiddenTimePhrases(value: string | null | undefined) {
   return /\b\d+:\d{2}\b|\b(early on|later|by the end|at the turning point|around)\b/i.test(value);
 }
 
+function looksInstructional(value: string | null | undefined) {
+  if (!value) return false;
+
+  return /^(start|name|lead|answer|lower|slow|keep|use|say|pause|state|acknowledge|bring|decide|practise|practice)\b/i.test(
+    value.trim()
+  );
+}
+
+function containsOverGenericCoaching(value: string | null | undefined) {
+  if (!value) return false;
+
+  return /\b(useful behaviour to carry into similar conversations|carry into similar conversations|show more empathy|be calmer next time)\b/i.test(
+    value
+  );
+}
+
 function reusesFallbackWording(summary: ReviewSummaryResponse, input: ReviewSummaryRequest) {
   const comparisons: Array<[string | null | undefined, string | null | undefined]> = [
     [summary.overview, input.fallback.overview],
     [summary.overallDelivery, input.fallback.overallDelivery],
     [summary.positiveMoment, input.fallback.positiveMoment],
+    [summary.whyItMattered, input.fallback.whyItMattered],
     [summary.coachingFocus, input.fallback.coachingFocus],
     [summary.whatToSayInstead, input.fallback.whatToSayInstead],
     [summary.objectiveFocus, input.fallback.objectiveFocus],
@@ -101,7 +118,20 @@ function isReviewSummaryUsable(summary: ReviewSummaryResponse, input: ReviewSumm
     containsForbiddenTimePhrases(summary.overview) ||
     containsForbiddenTimePhrases(summary.overallDelivery) ||
     containsForbiddenTimePhrases(summary.positiveMoment) ||
+    containsForbiddenTimePhrases(summary.whyItMattered) ||
     containsForbiddenTimePhrases(summary.coachingFocus)
+  ) {
+    return false;
+  }
+
+  if (looksInstructional(summary.whyItMattered)) {
+    return false;
+  }
+
+  if (
+    containsOverGenericCoaching(summary.positiveMoment) ||
+    containsOverGenericCoaching(summary.coachingFocus) ||
+    containsOverGenericCoaching(summary.whatToSayInstead)
   ) {
     return false;
   }
@@ -187,13 +217,6 @@ function buildReviewSummaryPrompt(
     input.outstandingObjectives.length > 0
       ? `Objectives still missing or unclear:\n- ${input.outstandingObjectives.map((item) => truncatePromptText(item, 140)).join("\n- ")}`
       : null,
-    "",
-    "Internal evidence hypotheses only — do not reuse wording from this block:",
-    `- Overall delivery pattern hypothesis: ${truncatePromptText(input.fallback.overallDelivery ?? "Not notable", 180)}`,
-    `- Positive move hypothesis: ${truncatePromptText(input.fallback.positiveMoment ?? "None identified", 180)}`,
-    `- Main coaching hypothesis: ${truncatePromptText(input.fallback.coachingFocus ?? "None identified", 180)}`,
-    `- Objective pressure hypothesis: ${truncatePromptText(input.fallback.objectiveFocus ?? "None identified", 180)}`,
-    `- Person-specific adaptation hypothesis: ${truncatePromptText(input.fallback.personFocus ?? "None identified", 180)}`,
     options?.retryNote ? `Retry note: ${options.retryNote}` : null,
     "",
     "Key moments:",
@@ -205,7 +228,10 @@ async function requestParsedReviewSummary(
   client: NonNullable<ReturnType<typeof getOpenAIClient>>,
   input: ReviewSummaryRequest,
   prompt: string,
-  maxOutputTokens: number
+  maxOutputTokens: number,
+  options?: {
+    jsonMode?: boolean;
+  }
 ): Promise<ReviewSummaryResponse | null> {
   const response = await client.responses.create({
     model: REVIEW_SUMMARY_MODEL,
@@ -254,20 +280,24 @@ Output rules:
 - Describe the conversation-level pattern, not the order of cards on the page.
 - Do not quote the transcript, restate surrounding turns in detail, or repeat the timeline card wording.
 - Highlight at least one positive moment if the evidence supports it.
-- positiveMoment must name a reusable behaviour worth repeating, not just that the trainee was calmer.
+- positiveMoment must name the specific move that helped in this case and what it helped with, not a generic professional-quality statement.
 - overallDelivery should usually be null. Only populate it if delivery showed a noticeable overall pattern or a clear shift under pressure supported by more than one moment.
 - overallDelivery should summarise how the trainee sounded overall, not describe one isolated turn.
+- whyItMattered must explain why the difficult moment mattered in this case.
+- whyItMattered must be explanatory, not instructional. Do not use an imperative sentence there.
 - coachingFocus must contain one main teaching point only, explained as the key interaction lesson from this case.
 - objectiveFocus should usually be null. Only populate it if one concise scenario-goal point is essential and not already clear in coachingFocus.
 - personFocus should usually be null. Only populate it if one concise person-specific adaptation is essential and not already clear in coachingFocus.
-- whatToSayInstead may be either a short behavioural move or a brief model line.
-- Only give a full replacement line when the original turn genuinely missed the core move; otherwise prefer a short behavioural prompt.
+- whatToSayInstead should usually be a short behavioural move rather than a full script.
+- Only give a full replacement line when the original turn genuinely missed the core move and the line is tightly tied to the exact concern in this case.
+- Avoid generic phrases such as "useful behaviour to carry into similar conversations".
 - Keep overview to at most two short sentences.
 - Keep every other populated string to one short sentence.
 - Target word counts:
   - overview: 18 to 40 words total.
   - overallDelivery: 10 to 24 words, or null.
   - positiveMoment: 10 to 22 words.
+  - whyItMattered: 10 to 24 words.
   - coachingFocus: 12 to 28 words.
   - whatToSayInstead: 8 to 24 words.
   - objectiveFocus: 8 to 20 words, or null.
@@ -278,14 +308,18 @@ Output rules:
     reasoning: { effort: "medium" },
     max_output_tokens: maxOutputTokens,
     text: {
-      format: zodTextFormat(reviewSummaryResponseSchema, "review_summary"),
+      format: options?.jsonMode
+        ? { type: "json_object" }
+        : zodTextFormat(reviewSummaryResponseSchema, "review_summary"),
       verbosity: "low",
     },
   });
 
   const parsed = parseStructuredOutputText(response, reviewSummaryResponseSchema);
   if (!parsed) {
-    throw new SyntaxError("Unable to parse structured review summary JSON");
+    throw new SyntaxError(
+      `Unable to parse structured review summary JSON (${describeStructuredOutputFailure(response)})`
+    );
   }
 
   const generated: ReviewSummaryResponse = {
@@ -340,13 +374,30 @@ export async function generateReviewSummary(
     }
   }
 
+  try {
+    return await requestParsedReviewSummary(
+      client,
+      input,
+      buildReviewSummaryPrompt(input, {
+        compact: true,
+        retryNote: "Use the hypotheses only as background, keep the summary synthesis-first, and write fresh case-specific coaching in strict JSON.",
+      }),
+      REVIEW_SUMMARY_COMPACT_MAX_OUTPUT_TOKENS
+    );
+  } catch (error) {
+    if (!isStructuredOutputParseError(error)) {
+      throw error;
+    }
+  }
+
   return requestParsedReviewSummary(
     client,
     input,
     buildReviewSummaryPrompt(input, {
       compact: true,
-      retryNote: "Use the hypotheses only as background, keep the summary synthesis-first, and write fresh case-specific coaching in strict JSON.",
+      retryNote: "Structured schema retries failed. Return valid JSON only, keep the keys exact, and write fresh case-specific coaching rather than repeating prompt language.",
     }),
-    REVIEW_SUMMARY_COMPACT_MAX_OUTPUT_TOKENS
+    REVIEW_SUMMARY_COMPACT_MAX_OUTPUT_TOKENS,
+    { jsonMode: true }
   );
 }

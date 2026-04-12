@@ -4,6 +4,7 @@ import type { StructuredClinicianTurn, StructuredVoiceProfile } from "@/types/vo
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
+import { describeStructuredOutputFailure, parseStructuredOutputText } from "@/lib/openai/structuredOutput";
 import { formatBiasCategories, hasConfiguredBias } from "@/lib/engine/biasBehaviour";
 import { renderVoiceProfileForPrompt } from "@/lib/voice/renderVoiceProfile";
 
@@ -71,7 +72,7 @@ async function requestStructuredOutput<T>({
   const client = getOpenAIClient();
   if (!client) {
     const error = new Error("OPENAI_API_KEY not configured");
-    console.error("Structured voice output error:", error);
+    console.error(`[Structured Voice] schema=${schemaName} output error:`, error);
     if (shouldFailLoudOnOpenAIError()) {
       throw error;
     }
@@ -79,7 +80,7 @@ async function requestStructuredOutput<T>({
   }
 
   try {
-    const response = await client.responses.parse({
+    const response = await client.responses.create({
       model: VOICE_PROFILE_MODEL,
       instructions: systemPrompt,
       input: userPrompt,
@@ -92,9 +93,16 @@ async function requestStructuredOutput<T>({
       },
     });
 
-    return (response.output_parsed as T | null) ?? null;
+    const parsed = parseStructuredOutputText(response, schema);
+    if (!parsed) {
+      throw new SyntaxError(
+        `[Structured Voice] schema=${schemaName} unable to parse structured JSON (${describeStructuredOutputFailure(response)})`
+      );
+    }
+
+    return parsed as T;
   } catch (error) {
-    console.error("Structured voice output error:", error);
+    console.error(`[Structured Voice] schema=${schemaName} output error:`, error);
     if (shouldFailLoudOnOpenAIError()) {
       throw error;
     }
