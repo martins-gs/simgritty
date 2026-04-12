@@ -12,6 +12,9 @@ interface ReflectionPromptProps {
   sessionId: string;
 }
 
+const reflectionResultCache = new Map<string, SessionReflection | null>();
+const reflectionRequestCache = new Map<string, Promise<SessionReflection | null>>();
+
 const TAGS = [
   { value: "frustrated", label: "Frustrated" },
   { value: "anxious", label: "Anxious" },
@@ -36,28 +39,50 @@ export function ReflectionPrompt({ sessionId }: ReflectionPromptProps) {
       setLoadingSavedReflection(true);
       setErrorMessage(null);
 
-      try {
-        const res = await fetch(`/api/sessions/${sessionId}/reflection`);
-        const payload = await res.json().catch(() => null);
-        if (cancelled) return;
+      const cachedResult = reflectionResultCache.get(sessionId);
+      if (cachedResult !== undefined) {
+        setSavedReflection(cachedResult);
+        setSelectedTags(cachedResult?.tags ?? []);
+        setFreeText(cachedResult?.free_text ?? "");
+        setLoadingSavedReflection(false);
+        return;
+      }
 
-        if (!res.ok) {
-          setErrorMessage(
-            typeof payload?.error === "string"
-              ? payload.error
-              : "Unable to load saved reflection for this session."
-          );
-          setSavedReflection(null);
-          return;
+      try {
+        let requestPromise = reflectionRequestCache.get(sessionId);
+        if (!requestPromise) {
+          requestPromise = (async () => {
+            const res = await fetch(`/api/sessions/${sessionId}/reflection`);
+            const payload = await res.json().catch(() => null);
+
+            if (!res.ok) {
+              throw new Error(
+                typeof payload?.error === "string"
+                  ? payload.error
+                  : "Unable to load saved reflection for this session."
+              );
+            }
+
+            return parseSessionReflection(payload);
+          })().finally(() => {
+            reflectionRequestCache.delete(sessionId);
+          });
+          reflectionRequestCache.set(sessionId, requestPromise);
         }
 
-        const reflection = parseSessionReflection(payload);
+        const reflection = await requestPromise;
+        reflectionResultCache.set(sessionId, reflection);
+        if (cancelled) return;
         setSavedReflection(reflection);
         setSelectedTags(reflection?.tags ?? []);
         setFreeText(reflection?.free_text ?? "");
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          setErrorMessage("Unable to load saved reflection for this session.");
+          setErrorMessage(
+            error instanceof Error && error.message
+              ? error.message
+              : "Unable to load saved reflection for this session."
+          );
           setSavedReflection(null);
         }
       } finally {
@@ -103,6 +128,7 @@ export function ReflectionPrompt({ sessionId }: ReflectionPromptProps) {
       if (res.ok) {
         const reflection = parseSessionReflection(payload);
         if (reflection) {
+          reflectionResultCache.set(sessionId, reflection);
           setSavedReflection(reflection);
           setSelectedTags(reflection.tags);
           setFreeText(reflection.free_text ?? "");

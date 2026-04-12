@@ -14,6 +14,7 @@ import type {
   ClassifierResult,
   ClinicianAudioPayload,
   EducatorNote,
+  SessionDeliveryAnalysis,
   SessionReflection,
   SimulationSession,
   SimulationStateEvent,
@@ -116,6 +117,17 @@ export const traineeDeliveryAnalysisSchema: z.ZodType<TraineeDeliveryAnalysis> =
   voiceProfile: structuredVoiceProfileSchema,
 });
 
+export const sessionDeliveryAnalysisSchema: z.ZodType<SessionDeliveryAnalysis> = z.object({
+  source: z.literal("session_audio"),
+  confidence: z.number().min(0).max(1),
+  supported: z.boolean(),
+  summary: z.string().nullable(),
+  markers: z.array(traineeDeliveryMarkerSchema),
+  evidenceTurnIndexes: z.array(z.number().int().nonnegative()),
+  trend: z.enum(["improving", "worsening", "steady", "mixed"]).nullable(),
+  acousticEvidence: z.array(z.string()),
+});
+
 export const classifierResultSchema = z.object({
   technique: z.string(),
   effectiveness: z.number(),
@@ -127,6 +139,163 @@ export const classifierResultSchema = z.object({
   de_escalation_technique: deEscalationTechniqueSchema.nullable().optional(),
   clinical_milestone_completed: scenarioMilestoneIdSchema.nullable().optional(),
   trainee_delivery_analysis: traineeDeliveryAnalysisSchema.nullable().optional(),
+});
+
+const renderFailureClassSchema = z.enum([
+  "parse",
+  "schema",
+  "semantic",
+  "duplication",
+  "provenance",
+]);
+
+const fieldProvenanceSchema = z.object({
+  source: z.enum([
+    "deterministic_evidence",
+    "summary_plan",
+    "timeline_plan",
+    "llm_render",
+    "audio_aggregate",
+    "fallback",
+  ]),
+  evidenceIds: z.array(z.string()).default([]),
+  note: z.string().nullable().default(null),
+});
+
+const renderSurfaceMetaSchema = z.object({
+  prompt_version: z.string(),
+  schema_version: z.string(),
+  model: z.string(),
+  reasoning_effort: z.enum(["none", "low", "medium", "high", "xhigh"]),
+  retry_count: z.number().int().min(0).default(0),
+  fallback_used: z.boolean().default(false),
+  failure_class: renderFailureClassSchema.nullable().default(null),
+  validator_failures: z.array(z.string()).default([]),
+  field_provenance: z.record(z.string(), fieldProvenanceSchema).default({}),
+});
+
+const reviewMomentSnippetSchema = z.object({
+  speaker: z.string(),
+  content: z.string(),
+});
+
+const reviewOutcomeStateSchema = z.object({
+  session_valid: z.boolean(),
+  turn_count: z.number().int().min(0),
+  final_escalation_level: z.number().int().nullable().default(null),
+  exit_type: z.string().nullable().default(null),
+  overall_score: z.number().nullable().default(null),
+  qualitative_label: z.string().nullable().default(null),
+});
+
+const reviewScenarioDemandSummarySchema = z.object({
+  primary_need: z.string().nullable().default(null),
+  common_pitfall: z.string().nullable().default(null),
+  success_pattern: z.string().nullable().default(null),
+  adaptation_note: z.string().nullable().default(null),
+});
+
+const reviewObjectiveLedgerSchema = z.object({
+  objective_focus: z.string().nullable().default(null),
+  achieved_objectives: z.array(z.string()).default([]),
+  outstanding_objectives: z.array(z.string()).default([]),
+});
+
+const reviewDeliveryAggregateSchema = z.object({
+  supported: z.boolean().default(false),
+  summary: z.string().nullable().default(null),
+  markers: z.array(z.string()).default([]),
+  evidence_turn_indexes: z.array(z.number().int()).default([]),
+  trend: z.enum(["improving", "worsening", "steady", "mixed"]).nullable().default(null),
+});
+
+const scenarioPatternLedgerSchema = z.object({
+  main_missed_move_codes: z.array(z.string()).default([]),
+  positive_move_codes: z.array(z.string()).default([]),
+  objective_gaps: z.array(z.string()).default([]),
+  repeated_question_answered_promptly: z.boolean().nullable().default(null),
+  specificity_before_reassurance: z.boolean().nullable().default(null),
+  support_timing: z.enum(["not_needed", "appropriate", "late", "early", "missed"]).nullable().default(null),
+  delivery_pattern_supported_by_audio: z.boolean().default(false),
+  session_outcome: z.enum(["settled", "partly_settled", "tense", "highly_strained", "ended_early", "unclear"]),
+});
+
+const reviewEvidenceLedgerMomentSchema = z.object({
+  id: z.string(),
+  turn_index: z.number().int().min(0),
+  positive: z.boolean(),
+  dimension: z.string(),
+  evidence_type: z.string(),
+  headline_hint: z.string(),
+  active_need_or_barrier: z.string().nullable().default(null),
+  what_partly_landed: z.string().nullable().default(null),
+  what_was_missing: z.string().nullable().default(null),
+  why_it_mattered_reason: z.string(),
+  likely_impact: z.string(),
+  observed_consequence: z.string(),
+  next_best_move: z.string().nullable().default(null),
+  evidence_signals: z.array(z.string()).default([]),
+  transcript_anchor: z.string().nullable().default(null),
+  previous_turn: reviewMomentSnippetSchema.nullable().default(null),
+  focus_turn: reviewMomentSnippetSchema.nullable().default(null),
+  next_turn: reviewMomentSnippetSchema.nullable().default(null),
+});
+
+const reviewEvidenceLedgerSchema = z.object({
+  session_id: z.string(),
+  scenario_title: z.string(),
+  scenario_setting: z.string().nullable().default(null),
+  trainee_role: z.string().nullable().default(null),
+  ai_role: z.string().nullable().default(null),
+  person_adaptation_note: z.string().nullable().default(null),
+  scenario_demand_summary: reviewScenarioDemandSummarySchema,
+  objective_ledger: reviewObjectiveLedgerSchema,
+  delivery_aggregate: reviewDeliveryAggregateSchema,
+  outcome_state: reviewOutcomeStateSchema,
+  moments: z.array(reviewEvidenceLedgerMomentSchema).default([]),
+  pattern_ledger: scenarioPatternLedgerSchema,
+});
+
+const summaryPlanSchema = z.object({
+  focus_moment_id: z.string().nullable().default(null),
+  positive_moment_id: z.string().nullable().default(null),
+  main_case_need: z.string().nullable().default(null),
+  what_partly_landed: z.string().nullable().default(null),
+  what_was_missing: z.string().nullable().default(null),
+  why_it_mattered_reason: z.string().nullable().default(null),
+  next_best_move: z.string().nullable().default(null),
+  delivery_pattern: z.string().nullable().default(null),
+  objective_gap: z.string().nullable().default(null),
+  person_adaptation: z.string().nullable().default(null),
+  show_overall_delivery: z.boolean().default(false),
+});
+
+const timelinePlanSchema = z.object({
+  moment_id: z.string(),
+  active_need_or_barrier: z.string().nullable().default(null),
+  what_partly_landed: z.string().nullable().default(null),
+  what_was_missing: z.string().nullable().default(null),
+  why_it_mattered_reason: z.string(),
+  observed_consequence: z.string(),
+  next_best_move: z.string().nullable().default(null),
+  banned_phrases: z.array(z.string()).default([]),
+  positive: z.boolean(),
+});
+
+export const reviewArtifactsSchema = z.object({
+  version: z.number().int().min(1),
+  evidence_hash: z.string(),
+  meta: z.object({
+    built_at: z.string(),
+    moment_selection: renderSurfaceMetaSchema.nullable().default(null),
+    summary: renderSurfaceMetaSchema.nullable().default(null),
+    timeline: renderSurfaceMetaSchema.nullable().default(null),
+  }),
+  ledger: reviewEvidenceLedgerSchema,
+  summary_plan: summaryPlanSchema,
+  timeline_plans: z.array(timelinePlanSchema).default([]),
+  summary: looseObjectSchema.nullable().default(null),
+  timeline: looseObjectSchema.nullable().default(null),
 });
 
 export const scenarioTraitsSchema = z.object({
@@ -257,6 +426,7 @@ export const patientVoiceProfileRequestBodySchema = z.object({
   currentState: escalationStateSchema,
   recentTurns: z.array(recentTurnSchema).default([]),
   latestClinicianVoiceProfile: structuredVoiceProfileSchema.nullable().optional(),
+  latestTraineeVoiceProfile: structuredVoiceProfileSchema.nullable().optional(),
 });
 
 export const traineeVoiceProfileRequestBodySchema = z.object({
@@ -406,6 +576,7 @@ export const simulationSessionSchema: z.ZodType<SimulationSession> = z.object({
   recording_path: nullableStringSchema,
   recording_started_at: nullableStringSchema.optional(),
   review_summary: looseObjectSchema.nullish().transform((value) => value ?? null).catch(null),
+  review_artifacts: reviewArtifactsSchema.nullish().transform((value) => value ?? null).catch(null),
   created_at: z.string(),
   scenario_templates: scenarioTemplatesSummarySchema.nullable().optional(),
 });
@@ -556,6 +727,11 @@ export function parseClassifierResult(data: unknown): ClassifierResult | null {
 
 export function parseTraineeDeliveryAnalysis(data: unknown): TraineeDeliveryAnalysis | null {
   const parsed = traineeDeliveryAnalysisSchema.safeParse(data);
+  return parsed.success ? parsed.data : null;
+}
+
+export function parseSessionDeliveryAnalysis(data: unknown): SessionDeliveryAnalysis | null {
+  const parsed = sessionDeliveryAnalysisSchema.safeParse(data);
   return parsed.success ? parsed.data : null;
 }
 

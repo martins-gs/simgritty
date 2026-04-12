@@ -95,6 +95,9 @@ export function useRealtimeSession() {
   const lastTraineeTextRef = useRef("");
   const lastTraineeTimeRef = useRef(0);
   const lastTraineeItemIdRef = useRef("");
+  const lastAiTranscriptResponseIdRef = useRef("");
+  const lastAiTranscriptTextRef = useRef("");
+  const lastAiTranscriptTimeRef = useRef(0);
   const traineeSpeechBoundariesRef = useRef(new Map<string, {
     audioStartMs: number | null;
     audioEndMs: number | null;
@@ -201,6 +204,10 @@ export function useRealtimeSession() {
     audioStartMs: number | null,
     config: RealtimeSessionConfig
   ) => {
+    if (!config.onTraineeAudioSegment) {
+      return;
+    }
+
     const stream = localStreamRef.current;
     const mimeType = getSupportedSegmentMimeType();
     if (!stream || typeof MediaRecorder === "undefined" || !mimeType) {
@@ -375,8 +382,30 @@ export function useRealtimeSession() {
       case "response.output_audio_transcript.done": {
         const responseId = msg.response_id as string | undefined;
         if (responseId && responseId !== activeResponseIdRef.current) break;
-        activeResponseTranscriptDoneRef.current = true;
         const transcript = (msg.transcript as string)?.trim();
+        if (!transcript) {
+          activeResponseTranscriptDoneRef.current = true;
+          break;
+        }
+
+        const now = Date.now();
+        if (responseId && responseId === lastAiTranscriptResponseIdRef.current) {
+          activeResponseTranscriptDoneRef.current = true;
+          break;
+        }
+        if (
+          !responseId &&
+          transcript === lastAiTranscriptTextRef.current &&
+          now - lastAiTranscriptTimeRef.current < 3000
+        ) {
+          activeResponseTranscriptDoneRef.current = true;
+          break;
+        }
+
+        activeResponseTranscriptDoneRef.current = true;
+        lastAiTranscriptResponseIdRef.current = responseId ?? "";
+        lastAiTranscriptTextRef.current = transcript;
+        lastAiTranscriptTimeRef.current = now;
         if (transcript) config.onAiTranscript(transcript);
         break;
       }
@@ -513,6 +542,9 @@ export function useRealtimeSession() {
     activeResponseIdRef.current = null;
     activeResponseTranscriptDoneRef.current = false;
     consecutivePlaybackSafetyTimeoutsRef.current = 0;
+    lastAiTranscriptResponseIdRef.current = "";
+    lastAiTranscriptTextRef.current = "";
+    lastAiTranscriptTimeRef.current = 0;
     turnPauseAllowanceMsRef.current = clampTurnPauseAllowanceMs(config.turnPauseAllowanceMs);
     setConnectionStatus("connecting");
 
@@ -931,6 +963,9 @@ export function useRealtimeSession() {
     consecutivePlaybackSafetyTimeoutsRef.current = 0;
     micGatedRef.current = false;
     micForcedOffRef.current = false;
+    lastAiTranscriptResponseIdRef.current = "";
+    lastAiTranscriptTextRef.current = "";
+    lastAiTranscriptTimeRef.current = 0;
     lastTraineeTextRef.current = "";
     lastTraineeTimeRef.current = 0;
     lastTraineeItemIdRef.current = "";

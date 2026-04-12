@@ -48,7 +48,8 @@ interface PatientVoiceProfileInput {
   voiceConfig: ScenarioVoiceConfig;
   currentState: EscalationState;
   recentTurns: { speaker: string; content: string }[];
-  latestClinicianVoiceProfile?: StructuredVoiceProfile | null;
+  latestSpeakerVoiceProfile?: StructuredVoiceProfile | null;
+  latestSpeakerRole?: "trainee" | "clinician" | null;
 }
 
 interface ClinicianTurnInput {
@@ -128,9 +129,17 @@ function formatPatientVoiceProfile(profile?: StructuredVoiceProfile | null): str
   return renderVoiceProfileForPrompt(profile);
 }
 
-function formatLatestClinicianVoiceProfile(profile?: StructuredVoiceProfile | null): string {
-  if (!profile) return "No structured clinician voice profile available for the most recent clinician turn.";
-  return renderVoiceProfileForPrompt(profile);
+function formatLatestSpeakerVoiceProfile(
+  profile?: StructuredVoiceProfile | null,
+  role?: "trainee" | "clinician" | null
+): string {
+  if (!profile) return "No structured delivery profile available for the most recent speaker turn.";
+  const roleLabel = role === "trainee"
+    ? "the trainee clinician"
+    : role === "clinician"
+      ? "the AI clinician"
+      : "the most recent speaker";
+  return `Profile for ${roleLabel}:\n${renderVoiceProfileForPrompt(profile)}`;
 }
 
 export async function generatePatientVoiceProfile(
@@ -151,7 +160,9 @@ The profile must reflect:
 Use concrete wording that can be dropped directly into a speech model prompt.
 Use British English.
 Keep any discriminatory colouring within the authored bias categories only.
-Do not clean a highly escalated delivery up into polite neutrality.`;
+Do not clean a highly escalated delivery up into polite neutrality.
+Do not rely on angry wording alone. Make the vocal behaviour itself audible through volume, attack, pacing, breath, strain, clippedness, contempt, or emotional leakage when the state justifies it.
+If escalation, anger, or frustration rises, the next-turn profile must sound noticeably different from a calmer turn.`;
 
   const userPrompt = `Scenario title: ${input.title}
 Role: ${input.aiRole}
@@ -193,15 +204,15 @@ Base voice config:
 Recent turns:
 ${formatRecentTurns(input.recentTurns)}
 
-Latest clinician delivery profile, if the last turn came from the AI clinician:
-${formatLatestClinicianVoiceProfile(input.latestClinicianVoiceProfile)}
+Latest delivery profile for the most recent speaker turn:
+${formatLatestSpeakerVoiceProfile(input.latestSpeakerVoiceProfile, input.latestSpeakerRole)}
 
 Create a voice profile for the patient's next spoken turn only.
 
 Use all available inputs together:
 - the patient's current numeric state
 - the recent dialogue
-- the latest clinician delivery profile, if provided, because the patient may react differently to the same words when they are delivered more softly, more firmly, or more urgently.
+- the latest speaker delivery profile, if provided, because the patient may react differently to the same words when they are delivered more softly, more firmly, more sarcastically, or more urgently.
 
 Additional delivery guidance:
 - ${input.currentState.discrimination_active
@@ -213,7 +224,13 @@ Additional delivery guidance:
     ? "At this state the next turn should sound openly abusive, profane, or intimidating, not merely irritated."
     : input.currentState.level >= 6
       ? "At this state the next turn should sound heated and hostile, with real edge in the delivery."
-      : "Keep the delivery aligned with the current state without overshooting into abuse."}`;
+      : "Keep the delivery aligned with the current state without overshooting into abuse."}
+- ${input.currentState.level >= 6 || input.currentState.anger >= 6 || input.currentState.frustration >= 7
+    ? "Make the escalation audible. The voice should not sound like the same calm speaker using harsher wording. Use sharper attacks, tighter pacing, reduced warmth, more bite, and more emotional leakage."
+    : input.currentState.level >= 4 || input.currentState.anger >= 4 || input.currentState.frustration >= 5
+      ? "Let irritation or strain be clearly audible in the voice itself through clipped delivery, firmer stress, shorter patience, or audible exasperation."
+      : "Keep the voice grounded and believable without forcing extra heat into it."}
+- If the most recent delivery profile suggests the trainee sounded dismissive, sarcastic, cold, or defensive, allow that to harden the next-turn voice profile even if the patient's wording stays brief.`;
 
   return requestStructuredOutput<StructuredVoiceProfile>({
     systemPrompt,

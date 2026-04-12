@@ -53,6 +53,7 @@ export interface SimulationSession {
   recording_path: string | null;
   recording_started_at?: string | null;
   review_summary?: Record<string, unknown> | null;
+  review_artifacts?: Record<string, unknown> | null;
   created_at: string;
   scenario_templates?: {
     title?: string;
@@ -129,6 +130,19 @@ export interface TraineeDeliveryAnalysis {
   acousticEvidence: string[];
   duration_ms: number | null;
   voiceProfile: StructuredVoiceProfile;
+}
+
+export type SessionDeliveryTrend = "improving" | "worsening" | "steady" | "mixed";
+
+export interface SessionDeliveryAnalysis {
+  source: "session_audio";
+  confidence: number;
+  supported: boolean;
+  summary: string | null;
+  markers: TraineeDeliveryMarker[];
+  evidenceTurnIndexes: number[];
+  trend: SessionDeliveryTrend | null;
+  acousticEvidence: string[];
 }
 
 export interface ClassifierResult {

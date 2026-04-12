@@ -20,7 +20,6 @@ flowchart LR
   Sim --> Classify["/api/classify\nResponses API + structured output\nmodel: gpt-5.4-mini"]
   Sim --> VoiceProfile["/api/voice-profile/patient\nResponses API + structured output\nmodel: gpt-5.4-mini"]
   Sim --> Deescalate["/api/deescalate\nResponses API + structured output\nmodel: gpt-5.4-mini"]
-  Sim --> TraineeAudio["/api/analysis/trainee-delivery\nbackground audio analysis\nmodel: gpt-audio (+ gpt-5.4-mini structurer fallback)"]
   Sim --> TTS["/api/tts\nAudio Speech API fallback\nmodel: gpt-4o-mini-tts"]
 
   Sim --> Domain["promptBuilder\nescalationEngine\nclassifierPipeline\nstructuredVoice\nclinicianVoiceBuilder"]
@@ -32,6 +31,9 @@ flowchart LR
 
   Recorder --> AudioAPI["/api/sessions/:id/audio\nupload + signed URL"]
   AudioAPI --> Storage["Supabase Storage\nsimulation-audio bucket"]
+  AudioAPI --> SessionDelivery["/api/sessions/:id/session-delivery\nfull-session delivery analysis\nmodels: gpt-audio + gpt-5.4"]
+  SessionDelivery --> ReviewPrecompute["/api/sessions/:id/review-precompute\npersist summary + timeline review_artifacts"]
+  ReviewPrecompute --> Supabase
 ```
 
 ## 1. Core Runtime
@@ -87,7 +89,9 @@ The classifier pipeline has **three modes**:
 
 Patient and clinician modes use the base schema (`CLASSIFIER_OUTPUT_SCHEMA`). The trainee mode uses a higher token limit (400 vs 220) to accommodate the additional fields.
 
-Classification also takes the latest structured delivery profile as context, so it is based on both the words spoken and how the utterance was delivered.
+Classification also takes the latest inferred structured delivery profile as context, so it is based on both the words spoken and how the utterance was likely delivered.
+
+On the human-trainee path, patient voice-profile generation now consumes the latest inferred trainee voice profile as well. That means the patient can react to how the trainee seemed to sound, not just to the transcript text. The important limitation is that this live trainee profile is still text/context-derived rather than direct live audio, so prosody-only cues such as subtle sarcasm can still be missed in the live loop.
 
 Patient voice-profile generation returns a seven-field structured profile:
 
@@ -107,23 +111,23 @@ Clinician turn generation returns:
 - a technique label
 - a structured clinician voice profile
 
-## 4. Trainee Audio Delivery Analysis
+## 4. Session-Level Delivery Analysis
 
-Phase 1 trainee audio delivery is implemented as an asynchronous, post-utterance pipeline. It is intended for review and scoring, not for changing the patient's next live reply.
+The primary trainee delivery path is now session-level rather than per-utterance. It runs after the mixed session recording has been uploaded and is intended for review, not for changing the next live patient reply.
 
 Current flow:
 
-1. `useRealtimeSession` captures trainee-only mic segments from the Realtime speech-boundary events.
-2. The simulation page matches each segment to the corresponding Realtime transcript `itemId`.
-3. `/api/analysis/trainee-delivery` sends the audio clip, transcript, scenario context, escalation level, and recent turns to the audio-analysis pipeline.
-4. The audio model returns a structured `TraineeDeliveryAnalysis` object when it can, or a raw text analysis that is then re-structured through `gpt-5.4-mini`.
-5. The simulation page tries to persist the result directly onto `transcript_turns.trainee_delivery_analysis`.
-6. It also writes a fallback `classification_result` event with `__event_kind: "trainee_audio_delivery"` into `simulation_state_events`.
-7. If the direct transcript write cannot be confirmed immediately, the transcript patch route accepts the matching fallback event as a valid confirmation source.
-8. `GET /api/sessions/[id]/transcript` now backfills missing trainee audio delivery from those fallback events before returning rows.
-9. The review page still performs the same merge defensively before rendering and scoring.
+1. `useSessionRecorder` records one mixed file containing the trainee mic plus the remote patient audio.
+2. `POST /api/sessions/:id/audio` uploads that file to Supabase Storage.
+3. `POST /api/sessions/:id/session-delivery` loads the session transcript, scenario snapshot, and existing events.
+4. If a cached session-level delivery event is already present, the route reuses it. If there are fewer than two trainee turns, it returns `null`.
+5. Otherwise `src/lib/openai/sessionDeliveryAnalysis.ts` sends the mixed recording plus transcript anchors to `gpt-audio`.
+6. If the audio model does not return clean structured data, a second structuring pass uses `gpt-5.4`.
+7. Supported output is persisted as a `classification_result` event with `__event_kind: "session_audio_delivery"`.
+8. `POST /api/sessions/:id/review-precompute` then builds the summary and timeline artifacts, which can include this session-level delivery aggregate.
+9. `GET /api/sessions/:id/transcript` logs both legacy turn-level delivery coverage and the session-level delivery status so it is obvious which path supplied the evidence.
 
-The payload supports multiple markers per utterance. Allowed markers are:
+The session-level payload uses the same marker family as the older turn-level route:
 
 - `calm_measured`
 - `warm_empathic`
@@ -135,13 +139,14 @@ The payload supports multiple markers per utterance. Allowed markers are:
 - `hostile_tone`
 - `anxious_unsteady`
 
-`confidence` is confidence in the system's reading of the audio, not a measure of how confident the trainee sounded.
+Important current rules from the code:
 
-Per-utterance analysis is the intended behaviour, but it is not guaranteed on every turn. Missing analyses can still happen when:
+- `supported=true` requires a recurrent pattern across at least two trainee turns, not a one-off moment.
+- The confidence threshold is currently `0.55`.
+- `trend` is constrained to `improving`, `worsening`, `steady`, `mixed`, or `null`.
+- If the evidence is weak, isolated, or mixed, the route still returns a parsed object when it can, but it suppresses learner-facing summary text.
 
-- the browser fails to produce a clean trainee-only segment
-- the audio model returns no usable structured result
-- neither direct transcript persistence nor the fallback event path succeeds
+The legacy `/api/analysis/trainee-delivery` clip-analysis route still exists in the repo and its fallback events can still be merged into transcript rows. It is no longer the primary top-half review path.
 
 ## 5. Escalation Engine
 
@@ -237,7 +242,7 @@ Free-text `learning_objectives` do **not** directly change the numeric score. Th
 
 **Session validity gate**: sessions under 3 trainee turns show no score. Sessions of 3–6 trainee turns display scores with a "preliminary" caveat, and their dimension scores are moderated toward the midpoint so sparse evidence does not produce hard zero or hundred scores too easily.
 
-**Evidence tracking**: every scoring event (marker detected, attempt made, milestone completed, support invoked) is recorded with its turn index and score impact. The review page shows the 2–3 highest-impact moments and a technique suggestion based on the weakest dimension when the session is long enough to score.
+**Evidence tracking**: every scoring event (marker detected, attempt made, milestone completed, support invoked) is recorded with its turn index and score impact. That scoring evidence still powers the bottom-of-page score block and feeds the persisted review evidence ledger, but the top-half review surfaces no longer render directly from score-ranked canned moments. GPT-5.4 now selects and writes the learner-facing review moments from the ledger plus transcript context.
 
 The current review flow computes score and evidence on demand from transcript turns, events, and scenario snapshot data. `session_scores` and `session_score_evidence` may exist in the schema as legacy or future-use tables, but the current app flow does not write them.
 
@@ -266,10 +271,10 @@ Each preset bundles scenario defaults, a full trait profile, voice configuration
 Supabase stores:
 
 - authored scenarios (`scenario_templates`, `scenario_traits`, `scenario_voice_config`, `escalation_rules`, `scenario_milestones`)
-- live and completed sessions (`simulation_sessions` with frozen `scenario_snapshot`, `recording_path`, `recording_started_at`, `review_summary`)
+- live and completed sessions (`simulation_sessions` with frozen `scenario_snapshot`, `recording_path`, `recording_started_at`, legacy `review_summary`, and persisted `review_artifacts`)
 - session audio recordings (Supabase Storage bucket `simulation-audio`, private, one `.webm` file per session)
 - transcript turns (`transcript_turns` with per-turn snapshots: `classifier_result`, `trainee_delivery_analysis`, `trigger_type`, `state_after`, `patient_voice_profile_after`, `patient_prompt_after`)
-- simulation state events (`simulation_state_events` — event types: `session_started`, `session_ended`, `escalation_change`, `de_escalation_change`, `ceiling_reached`, `trainee_exit`, `classification_result`, `clinician_audio`, `prompt_update`, `error`; trainee audio delivery fallback events are stored as `classification_result` with `__event_kind: "trainee_audio_delivery"`)
+- simulation state events (`simulation_state_events` — event types: `session_started`, `session_ended`, `escalation_change`, `de_escalation_change`, `ceiling_reached`, `trainee_exit`, `classification_result`, `clinician_audio`, `prompt_update`, `error`; both trainee clip-delivery fallback events and session-level delivery events are stored as `classification_result` with `__event_kind: "trainee_audio_delivery"` or `__event_kind: "session_audio_delivery"`)
 - optional legacy scoring tables (`session_scores`, `session_score_evidence`) that are not used by the current review flow
 - trainee reflections (`session_reflections`)
 - educator notes
@@ -278,15 +283,17 @@ The session APIs persist transcript turns and state events during the live run, 
 
 ### Review Page
 
-The review page (`src/app/review/[sessionId]/page.tsx`) loads session, transcript, events, and educator notes in parallel. It includes a retry mechanism (up to 8 attempts at 750 ms intervals) that re-fetches if the session data appears incomplete — specifically if `exit_type`, `peak_escalation_level`, or `ended_at` are missing, if clinician turns are present but no `clinician_audio` events have arrived yet, or if trainee turns exist but audio-delivery results have not arrived yet. This handles the race between the simulation page's final persistence flush and the review page load.
+The review page (`src/app/review/[sessionId]/page.tsx`) loads session, transcript, events, and educator notes in parallel. It still includes a retry mechanism to handle the race between the simulation page's final persistence flush and the review page load, but it now also treats failed or stale stored review metadata as incomplete so the client can refetch rather than treating an old failure as final.
 
 The schema supports `exit_type` values `normal`, `instant_exit`, `educator_ended`, `timeout`, `auto_ceiling`, and `max_duration`. The current UI/runtime paths actively emit `normal`, `instant_exit`, `auto_ceiling`, and `max_duration`.
 
-`POST /api/sessions/[id]/review-summary` now behaves as a populate-if-missing route rather than a pure regeneration endpoint. It verifies session ownership, returns the saved `simulation_sessions.review_summary` when present, and otherwise generates one educator-style summary, persists the JSON, and reuses that stored version on later visits. Only successfully generated summaries are persisted; fallback summaries are returned to the client for that request only. The stored/generator summary schema now includes a version field and an optional `overallDelivery` field, used only when the trainee's delivery shows a noticeable conversation-level pattern or a clear shift under pressure. Version checks let the app invalidate older generated summaries when the post-session schema or prompt contract changes.
+`POST /api/sessions/[id]/review-precompute` is the main end-of-session review pipeline. It loads transcript, events, scenario snapshot, score, and session-level delivery evidence; builds a persisted review evidence ledger; runs GPT-5.4 review-moment selection; and then generates summary and timeline artifacts in parallel. The simulation page warns that this portal review generation can take 1-2 minutes because this route is allowed to spend real wall-clock time after `End scenario`.
 
-`GET /api/sessions/[id]/timeline-feedback` is the post-session key-moment narrative route for the Conversation Timeline. It loads the session, recomputes score and key moments from persisted transcript/events, and then asks the Responses API to write tailored card copy for those already-selected moments. The key-moment ranking remains deterministic; only the learner-facing prose is model-generated. If structured generation fails, the route falls back to local narrative builders.
+`POST /api/sessions/[id]/review-summary` is now a wrapper around the persisted `review_artifacts.summary`. It verifies ownership, ensures summary artifacts exist, and returns `{ summary, debug }`. If summary generation fails, the route returns `summary: null` plus explicit debug metadata such as `failureClass` and validator codes. Learner-facing deterministic fallback prose is no longer used here.
 
-`GET /api/sessions/[id]/scenario-history` is now a post-session scenario-history synthesis route for the `Review your progress` card. It loads the current user's non-deleted sessions for the same scenario, recomputes score from persisted transcript/events, reuses stored generated review summaries when present, falls back to local summary generation when they are missing, and then asks the Responses API to produce a coach-style progress block. If structured generation fails, the card falls back to the local deterministic history summary. The current response shape includes a progress headline, one primary coaching target, up to two secondary patterns, and one practice target. Delivery is only allowed into those secondary patterns when it is recurrent and well-supported across runs.
+`GET /api/sessions/[id]/timeline-feedback` is a wrapper around `review_artifacts.timeline`. It ensures timeline artifacts exist, then returns `{ timeline, debug }`. The timeline is now produced in two LLM stages: GPT-5.4 selects the review moments from the evidence ledger, then GPT-5.4 renders one card per selected moment. If either stage fails, the route returns debug metadata instead of silently swapping in canned timeline prose.
+
+`GET /api/sessions/[id]/scenario-history` remains an on-demand route for the `Review your progress` panel. It loads the current user's non-deleted sessions for the same scenario, reuses stored review artifacts when available, builds transcript excerpts and objective coverage, and then asks GPT-5.4 to synthesise one progress panel. It returns `{ summary, debug }` and intentionally does not fall back to learner-facing deterministic coaching prose.
 
 ### Responsive Layout
 
@@ -294,16 +301,16 @@ Both the simulation page and the review page are designed to work on mobile phon
 
 - **AppShell**: the sidebar nav (`w-56`) is hidden below the `md` breakpoint. The TopBar renders compact icon-based navigation links and a sign-out button on mobile instead.
 - **Simulation page**: uses a tab bar (Simulation / Transcript / Scenario) below `lg`, switching to the three-panel layout on larger screens.
-- **Review page**: the reflection check-in always appears first. If the session is score-valid, the Session Summary sits directly beneath it; otherwise there is no top-of-page score placeholder. The Conversation Timeline comes next, followed by `Review your progress`, the `Ready to try again?` retry CTA, the transcript/event-log/notes section switcher, and finally the score breakdown or the short-session placeholder at the very bottom. The escalation timeline chart height reduces from `h-72` to `h-56` on mobile. Transcript/Event Log/Notes use `60vh` height on mobile instead of a fixed 500px. The Transcript / Event Log / Educator Notes section switcher is rendered as an explicit three-button segmented control, and mobile places the "Restart From Turn" action in its own full-width action area below the transcript list.
+- **Review page**: the reflection check-in always appears first, followed by the Session Summary slot, then the Conversation Timeline, `Review your progress`, the `Ready to try again?` retry CTA, the transcript/event-log/notes section switcher, and finally the score breakdown or the short-session placeholder at the very bottom. The escalation timeline chart height reduces from `h-72` to `h-56` on mobile. Transcript/Event Log/Notes use `60vh` height on mobile instead of a fixed 500px. The Transcript / Event Log / Educator Notes section switcher is rendered as an explicit three-button segmented control, and mobile places the "Restart From Turn" action in its own full-width action area below the transcript list.
 
 The review page displays:
 
-- **Top review section**: the `ReflectionPrompt` appears first and is always full width. The persisted/generated `ReviewSummaryCard` only appears when the session is long enough to score. Short sessions do not show a summary card in that slot.
+- **Top review section**: the `ReflectionPrompt` appears first and is always full width. The `ReviewSummaryCard` is always mounted in the top slot; if generation fails it shows an explicit unavailable/debug state rather than disappearing or swapping in canned prose.
 - **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data and kept at the top of the review page even for short sessions. The prompt text now asks, "How do you think that conversation went?" If saved reflection data cannot be loaded, the component stays visible and shows an inline error state rather than disappearing.
-- **Session summary**: one overview block plus `What Helped`, `Why It Mattered`, and `Try This Move`, with an optional `Overall Delivery` note when the audio-derived delivery pattern is noticeable enough to mention at conversation level. The summary also contains the scenario's learning objectives so the broader goals sit alongside the coach summary rather than in a separate panel. Authored scenario milestones feed the clinical-task score and objective guidance directly; free-text learning objectives are narrative inputs rather than direct score inputs. The summary is generated post-session with structured output, but once a generated version is persisted it is reused rather than regenerated on each visit. Fallback summaries are not persisted. Coaching now emphasises response function, timing, and structure over stock exemplar phrases, and the post-session prompt explicitly avoids timecoded recap language and direct reuse of fallback wording.
+- **Session summary**: one overview block plus `What Helped`, `Why It Mattered`, and `Next Best Move`, with an optional `Overall Delivery` note when the session-level delivery aggregate is strong enough to mention at conversation level. The summary is generated from the persisted review evidence ledger, transcript context, and objective coverage. Successful output is cached in `review_artifacts`; failed output surfaces debug metadata rather than learner-facing fallback coaching.
 - **Conversation timeline**: always visible on the main screen (no longer in a tab), showing the conversation-intensity path with event markers, optional session-audio playback, a hover/playback cursor, and a persistent detail panel for the selected key moment.
-- **Timeline coaching cards**: up to 8 ranked scoring moments rendered as numbered tabs beneath the chart. The active card shows the headline, likely impact, one-turn-before/one-turn-after transcript context, what happened next, why it mattered here, and a suggested communication move when relevant. The card ranking is deterministic from scoring evidence; the learner-facing copy is generated post-session through `/api/sessions/[id]/timeline-feedback`, with local narrative builders as fallback.
-- **Review your progress**: a coach-style scenario-history panel built from the current user's non-deleted sessions in the same scenario. Its count is session-based, not utterance-based. It now presents one primary target, up to two secondary patterns, and one practice target instead of collapsing everything into a single development line. The preferred path is post-session AI synthesis over the historical sessions; deterministic history logic remains as the fallback.
+- **Timeline coaching cards**: up to 4 model-selected teachable moments rendered as numbered tabs beneath the chart. The active card shows the headline, likely impact, one-turn-before/one-turn-after transcript context, what happened next, why it mattered here, and a next-best move when relevant. Selection and rendering are both LLM-driven from the evidence ledger; failed generation surfaces debug metadata rather than local narrative fallback.
+- **Review your progress**: a coach-style scenario-history panel built from the current user's non-deleted sessions in the same scenario. Its count is session-based, not utterance-based. It presents one primary target, up to two secondary patterns, and one practice target. It is intentionally generated on demand and can be slower than summary/timeline.
 - **Ready to try again?**: a scenario-level retry CTA that creates a fresh session from the same scenario so the learner can immediately practise the coached move again.
 - **ScoreCard**: qualitative label badge (Strong / Developing / Needs practice), an overall score badge, and four dimension bars (0–100) with weight percentages. Sessions under 3 trainee turns show the short-session placeholder instead of the score card, and that placeholder now appears at the very bottom of the review page where the full score would normally sit.
 - **Section switcher**: Transcript, Event Log, and Educator Notes are shown one panel at a time using a segmented control rather than the previous tabs primitive.
@@ -389,7 +396,7 @@ Runtime enforcement is mixed:
 The dashboard (`src/app/dashboard/page.tsx`) currently has a welcome header plus two main content sections:
 
 - **Scenarios available to you**: a tinted panel (`bg-muted/40`) containing compact fixed-width cards (220px) for published scenarios, each linking directly to the briefing page. Cards show difficulty, title, and setting.
-- **Recent sessions**: the 6 most recent sessions across all users, showing scenario title, trainee identity, session date/time (preferring `started_at`, then `ended_at`, then `created_at`), peak escalation level, exit status, and an owner-only delete button.
+- **Recent sessions**: the most recent sessions across all users, loaded from `/api/sessions/recent?limit=20` with offset pagination and a `Load older sessions` CTA. Rows show scenario title, trainee identity, session date/time (preferring `started_at`, then `ended_at`, then `created_at`), peak escalation level, exit status, and an owner-only delete button.
 
 ## 12. Landing Page
 

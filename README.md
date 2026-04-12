@@ -9,13 +9,14 @@ PROLOG is a Next.js 16 App Router application for NHS clinical communication tra
 - Real-time voice simulation using the OpenAI Realtime API over WebRTC
 - Scenario authoring with 14 numeric trait dials, a separate bias-category selector, voice settings, escalation rules, milestones, and scoring weights
 - AI clinician takeover with its own clinician voice path and HTTP TTS fallback
-- Review workflow with a saved reflection check-in, persisted educator-style session summaries, optional overall-delivery synthesis, AI-generated key-moment coaching, per-scenario progress review with one primary target plus up to two secondary patterns, retry CTA, a bottom-of-page score block or short-session placeholder, audio playback, and session forking
-- Supabase-backed auth, session persistence, transcript/event storage, event-backed transcript recovery for trainee audio delivery, and mixed session-audio uploads
+- LLM-first review workflow with a saved reflection check-in, persisted `review_artifacts`, GPT-5.4 summary and timeline generation, session-level delivery synthesis from the mixed recording, per-scenario progress review, explicit debug states when review generation fails, retry CTA, a bottom-of-page score block or short-session placeholder, audio playback, and session forking
+- Supabase-backed auth, session persistence, transcript/event storage, paginated recent sessions, event-backed transcript recovery for legacy trainee audio delivery, session-level delivery events, and mixed session-audio uploads
 
 ## Documentation Map
 
 - `README.md` — current-state overview and setup caveats
 - `docs/architecture-overview.md` — detailed implementation reference, verified against the codebase
+- `docs/prompt-bundle-for-chatgpt-pro.md` — extracted prompt and model map for external LLM review
 - `docs/elevenlabs-plan.md` — design proposal only; not implemented in this repo
 
 ## Stack
@@ -63,6 +64,12 @@ Optional overrides:
 | --- | --- |
 | `OPENAI_CLASSIFIER_MODEL` | `gpt-5.4-mini` |
 | `OPENAI_VOICE_PROFILE_MODEL` | `gpt-5.4-mini` |
+| `OPENAI_REVIEW_MOMENT_SELECTION_MODEL` | `gpt-5.4` |
+| `OPENAI_REVIEW_SUMMARY_MODEL` | `gpt-5.4` |
+| `OPENAI_REVIEW_TIMELINE_MODEL` | `gpt-5.4` |
+| `OPENAI_SCENARIO_HISTORY_MODEL` | `gpt-5.4` |
+| `OPENAI_SESSION_AUDIO_ANALYSIS_MODEL` | `gpt-audio` |
+| `OPENAI_SESSION_AUDIO_STRUCTURER_MODEL` | `gpt-5.4` |
 | `OPENAI_TRAINEE_AUDIO_ANALYSIS_MODEL` | `gpt-audio` |
 | `OPENAI_TRAINEE_AUDIO_STRUCTURER_MODEL` | `gpt-5.4-mini` |
 | `OPENAI_REALTIME_MODEL` | `gpt-realtime-1.5` |
@@ -103,7 +110,7 @@ Without that base schema, the repo is not enough on its own to stand up a blank 
 | --- | --- |
 | `/` | Marketing and product overview |
 | `/auth/login` | Magic-link sign-in for `@nhs.scot` addresses |
-| `/dashboard` | Published scenarios and recent sessions |
+| `/dashboard` | Published scenarios and paginated recent sessions |
 | `/scenarios` | Scenario list, duplication, archive, edit entry points |
 | `/scenarios/new` | New scenario creation |
 | `/scenarios/[id]` | Scenario editor |
@@ -116,27 +123,34 @@ Without that base schema, the repo is not enough on its own to stand up a blank 
 
 - Realtime and voice: `/api/realtime/session`, `/api/classify`, `/api/deescalate`, `/api/voice-profile/patient`, `/api/voice-profile/trainee`, `/api/analysis/trainee-delivery`, `/api/tts`
 - Scenarios: `/api/scenarios`, `/api/scenarios/[id]`, `/api/scenarios/[id]/publish`
-- Sessions: `/api/sessions`, `/api/sessions/recent`, `/api/sessions/[id]`, `/api/sessions/[id]/start`, `/api/sessions/[id]/end`, `/api/sessions/[id]/delete`, `/api/sessions/[id]/fork`, `/api/sessions/[id]/transcript`, `/api/sessions/[id]/events`, `/api/sessions/[id]/educator-notes`, `/api/sessions/[id]/reflection`, `/api/sessions/[id]/review-summary`, `/api/sessions/[id]/timeline-feedback`, `/api/sessions/[id]/scenario-history`, `/api/sessions/[id]/audio`
+- Sessions: `/api/sessions`, `/api/sessions/recent`, `/api/sessions/[id]`, `/api/sessions/[id]/start`, `/api/sessions/[id]/end`, `/api/sessions/[id]/delete`, `/api/sessions/[id]/fork`, `/api/sessions/[id]/transcript`, `/api/sessions/[id]/events`, `/api/sessions/[id]/educator-notes`, `/api/sessions/[id]/reflection`, `/api/sessions/[id]/review-summary`, `/api/sessions/[id]/timeline-feedback`, `/api/sessions/[id]/scenario-history`, `/api/sessions/[id]/session-delivery`, `/api/sessions/[id]/review-precompute`, `/api/sessions/[id]/audio`
 - Identity and governance: `/api/profile`, `/api/org-settings`
 
 Notes:
 
 - `POST /api/voice-profile/trainee` and `PATCH /api/sessions/[id]/transcript` are internal app endpoints used by the live simulation flow.
+- `GET /api/sessions/recent` supports `limit` and `offset`, and the dashboard now loads recent sessions 20 at a time with a `Load older sessions` CTA.
+- `POST /api/sessions/[id]/session-delivery` is the current full-session delivery-analysis route used after upload of the mixed recording.
+- `POST /api/sessions/[id]/review-precompute` prebuilds summary and timeline artifacts immediately after session end.
 - `GET /api/sessions/[id]/transcript` now backfills missing `trainee_delivery_analysis` from saved `classification_result` fallback events before returning transcript rows.
-- Middleware runs on app routes and API routes so Supabase auth is refreshed before long-lived simulations hit protected handlers.
+- `src/proxy.ts` runs on app routes and API routes so Supabase auth is refreshed before long-lived simulations hit protected handlers.
 
 ## Current Implementation Notes
 
 - The live simulation currently uses two realtime voice paths: the primary patient conversation path and a separate clinician renderer path.
 - Session audio is recorded as one mixed file and uploaded to the `simulation-audio` Supabase Storage bucket at session end.
-- The review page stores only successfully generated Session Summary JSON on `simulation_sessions.review_summary`, versioned inside the JSON payload itself, so newer prompt/schema changes can invalidate older summaries and regenerate them.
-- Review coaching now prefers communication moves and response structure over stock scripts, so summaries and key moments describe what to do differently rather than insisting on one canonical phrase.
-- The Session Summary can now add an `Overall Delivery` note when the trainee's delivery shows a noticeable conversation-level pattern or a clear shift under pressure.
-- Timeline cards are generated post-session through a dedicated `/api/sessions/[id]/timeline-feedback` route, while deterministic local narratives remain as the fallback if structured generation fails.
-- The review page also builds an AI-generated `Review your progress` panel from the current user's non-deleted sessions in the same scenario, with deterministic local fallback. It prioritises one main target plus up to two secondary patterns instead of collapsing all coaching into a single line, and its session count reflects historical sessions rather than utterances.
+- After the recording upload, `/api/sessions/[id]/session-delivery` analyses the full mixed session audio and persists supported session-level delivery evidence as a `classification_result` event with `__event_kind: "session_audio_delivery"`.
+- The live classifier still consumes an inferred trainee voice profile derived from text and context, not direct live audio. The audio-aware delivery path is currently the post-session session-level analysis rather than the live turn loop.
+- Patient voice-profile generation now consumes the latest inferred speaker delivery profile, so live patient tone can react to how the trainee or clinician seemed to sound, not just to the words themselves.
+- `POST /api/sessions/[id]/review-precompute` builds the top-half review surfaces into `simulation_sessions.review_artifacts`. On the portal this can legitimately take 1-2 minutes after `End scenario`.
+- The Session Summary and Conversation Timeline are now LLM-first surfaces over a persisted review evidence ledger plus explicit debug metadata. Learner-facing deterministic fallback prose has been removed.
+- The Session Summary can add an `Overall Delivery` note when the session-level delivery aggregate shows a noticeable overall pattern or shift under pressure.
+- Timeline cards are generated through GPT-5.4 moment selection plus GPT-5.4 timeline rendering over the stored evidence ledger, not directly from score-ranked canned review moments.
+- `Review your progress` is still generated on demand from the user's prior sessions in the same scenario. It is intentionally allowed to be slower than summary/timeline and now surfaces debug metadata instead of learner-facing deterministic fallback prose.
+- Scoring still powers the bottom-of-page score block and evidence ledger, but the top-half review surfaces are no longer organised around direct score-picked coaching text.
 - Scenario milestones directly affect clinical-task scoring and review coaching. Free-text learning objectives do not change the numeric score directly, but they are still fed into the review summary as narrative objective guidance.
 - Sessions of 3-6 trainee turns still score as preliminary sessions, but extreme dimension scores are now softened to avoid hard zeros or hundreds from sparse evidence.
-- Sessions with fewer than 3 trainee turns do not show the Session Summary. They still show reflection, timeline, transcript, and coaching context, and the short-session score placeholder now sits at the very bottom of the page where the full score would normally appear.
+- Sessions with fewer than 3 trainee turns still suppress the numeric score, but the top-half review surfaces can still render if there is enough evidence. The short-session score placeholder remains at the very bottom of the page where the full score would normally appear.
 - `max_escalation_ceiling` and `max_session_duration_minutes` are actively enforced at runtime.
 - `allow_discriminatory_content` and `require_consent_gate` are stored in `org_settings`, but they are not yet used to disable discriminatory scenarios or bypass the consent gate. The briefing flow currently always shows the consent gate.
 - Access is limited to `@nhs.scot` email addresses through Supabase magic-link auth.

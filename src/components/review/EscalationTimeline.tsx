@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { z } from "zod";
 import {
   Area,
   AreaChart,
@@ -13,12 +14,10 @@ import {
 } from "recharts";
 import { Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DIMENSION_LABELS } from "@/components/review/KeyMoments";
 import { MomentTranscriptContext } from "@/components/review/MomentTranscriptContext";
-import type { ScoreEvidence } from "@/lib/engine/scoring";
 import {
-  buildReviewMomentNarrative,
-  generatedTimelineNarrativeSchema,
+  reviewDebugSchema,
+  reviewTimelineApiResponseSchema,
   getMomentTurnContext,
   type GeneratedTimelineNarrative,
 } from "@/lib/review/feedback";
@@ -29,7 +28,6 @@ interface EscalationTimelineProps {
   sessionId: string;
   events: SimulationStateEvent[];
   turns: TranscriptTurn[];
-  keyMoments: ScoreEvidence[];
   maxCeiling: number;
   sessionStartedAt: string;
   recordingUrl?: string | null;
@@ -44,17 +42,17 @@ interface ChartPoint {
 
 interface KeyMomentEntry {
   index: number;
-  moment: ScoreEvidence;
+  narrative: GeneratedTimelineNarrative;
   time: number;
 }
 
 const timelineNarrativeResultCache = new Map<string, {
-  status: "ready" | "fallback";
   narratives: GeneratedTimelineNarrative[];
+  debug: z.infer<typeof reviewDebugSchema>;
 }>();
 const timelineNarrativeRequestCache = new Map<string, Promise<{
-  status: "ready" | "fallback";
   narratives: GeneratedTimelineNarrative[];
+  debug: z.infer<typeof reviewDebugSchema>;
 }>>();
 
 const CHART_MARGIN = { top: 8, right: 24, bottom: 6, left: 0 };
@@ -138,31 +136,30 @@ function CustomDot(props: {
 function TimelineMomentCard({
   entry,
   turns,
-  narrative,
   showNow,
 }: {
   entry: KeyMomentEntry;
   turns: TranscriptTurn[];
-  narrative: GeneratedTimelineNarrative;
   showNow: boolean;
 }) {
-  const context = getMomentTurnContext(turns, entry.moment.turnIndex);
+  const context = getMomentTurnContext(turns, entry.narrative.turnIndex);
+  const lens = entry.narrative.lens?.trim() || (entry.narrative.positive ? "Helpful moment" : "Moment to revisit");
 
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-lg backdrop-blur-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-          {narrative.timecode} • {DIMENSION_LABELS[entry.moment.dimension] ?? entry.moment.dimension}
+          {entry.narrative.timecode} • {lens}
         </span>
         <span
           className={cn(
             "rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em]",
-            narrative.positive
+            entry.narrative.positive
               ? "bg-emerald-100 text-emerald-700"
               : "bg-amber-100 text-amber-800"
           )}
         >
-          {narrative.positive ? "Helpful moment" : "Moment to revisit"}
+          {entry.narrative.positive ? "Helpful moment" : "Moment to revisit"}
         </span>
         {showNow && (
           <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white">
@@ -172,10 +169,10 @@ function TimelineMomentCard({
       </div>
 
       <h3 className="mt-3 text-base font-semibold text-slate-900">
-        {narrative.headline}
+        {entry.narrative.headline}
       </h3>
       <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
-        {narrative.likelyImpact}
+        {entry.narrative.likelyImpact}
       </p>
 
       <div className="mt-4">
@@ -192,7 +189,7 @@ function TimelineMomentCard({
             What happened next
           </p>
           <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
-            {narrative.whatHappenedNext}
+            {entry.narrative.whatHappenedNext}
           </p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
@@ -200,18 +197,18 @@ function TimelineMomentCard({
             Why it mattered here
           </p>
           <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
-            {narrative.whyItMattered}
+            {entry.narrative.whyItMattered}
           </p>
         </div>
       </div>
 
-      {narrative.tryInstead && (
+      {entry.narrative.tryInstead && (
         <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/80 p-3">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-700">
-            Try this move
+            Next Best Move
           </p>
           <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
-            {narrative.tryInstead}
+            {entry.narrative.tryInstead}
           </p>
         </div>
       )}
@@ -223,7 +220,6 @@ export function EscalationTimeline({
   sessionId,
   events,
   turns,
-  keyMoments,
   maxCeiling,
   sessionStartedAt,
   recordingUrl,
@@ -245,18 +241,20 @@ export function EscalationTimeline({
   const [selectedMomentIndex, setSelectedMomentIndex] = useState<number | null>(null);
   const [narrativeState, setNarrativeState] = useState<{
     requestKey: string;
-    status: "ready" | "fallback";
     narratives: GeneratedTimelineNarrative[];
+    debug: z.infer<typeof reviewDebugSchema>;
   } | null>(null);
 
   const startTime = new Date(sessionStartedAt).getTime();
+  const lastTurnIndex = turns[turns.length - 1]?.turn_index ?? null;
   const requestKey = useMemo(
     () => JSON.stringify({
       sessionId,
-      turnIndexes: keyMoments.map((moment) => moment.turnIndex),
       startedAt: sessionStartedAt,
+      turnCount: turns.length,
+      lastTurnIndex,
     }),
-    [keyMoments, sessionId, sessionStartedAt]
+    [lastTurnIndex, sessionId, sessionStartedAt, turns.length]
   );
 
   const syncPlaybackOverlayMomentIndex = useEffectEvent((index: number | null) => {
@@ -397,47 +395,7 @@ export function EscalationTimeline({
     }
   }
 
-  const turnPositionByTurnIndex = new Map(turns.map((turn, index) => [turn.turn_index, index]));
-  const fallbackNarratives = useMemo(
-    () => keyMoments.map((moment) => {
-      const narrative = buildReviewMomentNarrative(moment, turns, sessionStartedAt);
-      return {
-        turnIndex: narrative.turnIndex,
-        timecode: narrative.timecode,
-        headline: narrative.headline,
-        likelyImpact: narrative.likelyImpact,
-        whatHappenedNext: narrative.whatHappenedNext,
-        whyItMattered: narrative.whyItMattered,
-        tryInstead: narrative.tryInstead,
-        positive: narrative.positive,
-      };
-    }),
-    [keyMoments, sessionStartedAt, turns]
-  );
-  const keyMomentEntries: KeyMomentEntry[] = keyMoments
-    .map((moment, index) => {
-      const turnPosition = turnPositionByTurnIndex.get(moment.turnIndex);
-      if (turnPosition === undefined) return null;
-
-      const turn = turns[turnPosition];
-      return {
-        index,
-        moment,
-        time: getTurnCueTime(turn, startTime),
-      };
-    })
-    .filter((entry): entry is KeyMomentEntry => entry !== null)
-    .sort((a, b) => a.time - b.time || a.index - b.index);
-
   useEffect(() => {
-    keyMomentEntriesRef.current = keyMomentEntries;
-  }, [keyMomentEntries]);
-
-  useEffect(() => {
-    if (keyMoments.length === 0) {
-      return;
-    }
-
     let cancelled = false;
 
     async function loadNarratives() {
@@ -458,30 +416,43 @@ export function EscalationTimeline({
               cache: "no-store",
             });
             const payload = await res.json().catch(() => null);
+            const parsed = reviewTimelineApiResponseSchema.safeParse(payload);
 
-            const parsedNarratives = Array.isArray((payload as { narratives?: unknown } | null)?.narratives)
-              ? (payload as { narratives: unknown[] }).narratives
-                .flatMap((item) => {
-                  const parsed = generatedTimelineNarrativeSchema.safeParse(item);
-                  return parsed.success ? [parsed.data] : [];
-                })
-              : [];
-
-            if (parsedNarratives.length > 0) {
+            if (parsed.success) {
               return {
-                status: "ready" as const,
-                narratives: parsedNarratives,
+                narratives: parsed.data.timeline?.narratives ?? [],
+                debug: parsed.data.debug,
               };
             }
 
             return {
-              status: "fallback" as const,
-              narratives: fallbackNarratives,
+              narratives: [],
+              debug: {
+                ok: false,
+                message: "Timeline analysis unavailable. The API returned an unexpected payload.",
+                promptVersion: null,
+                schemaVersion: null,
+                model: null,
+                reasoningEffort: null,
+                fallbackUsed: false,
+                failureClass: "schema" as const,
+                validatorFailures: ["invalid_api_payload"],
+              },
             };
           } catch {
             return {
-              status: "fallback" as const,
-              narratives: fallbackNarratives,
+              narratives: [],
+              debug: {
+                ok: false,
+                message: "Timeline analysis unavailable. The request failed before a valid response was returned.",
+                promptVersion: null,
+                schemaVersion: null,
+                model: null,
+                reasoningEffort: null,
+                fallbackUsed: false,
+                failureClass: "schema" as const,
+                validatorFailures: ["request_failed"],
+              },
             };
           }
         })().finally(() => {
@@ -491,9 +462,10 @@ export function EscalationTimeline({
       }
 
       const result = await requestPromise;
+      if (result.debug.ok || result.narratives.length > 0) {
+        timelineNarrativeResultCache.set(requestKey, result);
+      }
       if (cancelled) return;
-
-      timelineNarrativeResultCache.set(requestKey, result);
       setNarrativeState({
         requestKey,
         ...result,
@@ -505,13 +477,35 @@ export function EscalationTimeline({
     return () => {
       cancelled = true;
     };
-  }, [fallbackNarratives, keyMoments.length, requestKey, sessionId]);
+  }, [requestKey, sessionId]);
 
   const lastTurn = turns[turns.length - 1];
   const lastTurnTime = lastTurn ? getRelativeTime(lastTurn.started_at, startTime) : 0;
   const resolvedPlaybackTime = recordingUrl ? playbackTime : 0;
   const resolvedAudioDuration = recordingUrl ? audioDuration : 0;
   const playbackActive = recordingUrl ? isPlaying : false;
+  const resolvedNarrativeState = narrativeState?.requestKey === requestKey ? narrativeState : null;
+  const resolvedNarratives = useMemo(
+    () => resolvedNarrativeState?.narratives ?? [],
+    [resolvedNarrativeState]
+  );
+  const resolvedDebug = resolvedNarrativeState?.debug ?? null;
+  const loadingNarratives = turns.some((turn) => turn.speaker === "trainee") && !resolvedNarrativeState;
+  const turnPositionByTurnIndex = new Map(turns.map((turn, index) => [turn.turn_index, index]));
+  const keyMomentEntries: KeyMomentEntry[] = resolvedNarratives
+    .map((narrative, index) => {
+      const turnPosition = turnPositionByTurnIndex.get(narrative.turnIndex);
+      if (turnPosition === undefined) return null;
+
+      const turn = turns[turnPosition];
+      return {
+        index,
+        narrative,
+        time: getTurnCueTime(turn, startTime),
+      };
+    })
+    .filter((entry): entry is KeyMomentEntry => entry !== null)
+    .sort((a, b) => a.time - b.time || a.index - b.index);
 
   const timelineMaxTime = Math.max(
     data[data.length - 1]?.time ?? 0,
@@ -539,21 +533,10 @@ export function EscalationTimeline({
   const displayedKeyMomentEntry = displayedKeyMomentIndex !== null
     ? keyMomentEntries.find((entry) => entry.index === displayedKeyMomentIndex) ?? null
     : null;
-  const resolvedNarrativeState = narrativeState?.requestKey === requestKey ? narrativeState : null;
-  const resolvedNarratives = useMemo(
-    () => resolvedNarrativeState?.narratives ?? [],
-    [resolvedNarrativeState]
-  );
-  const loadingNarratives = keyMoments.length > 0 && !resolvedNarrativeState;
-  const narrativeByTurnIndex = useMemo(
-    () => new Map(resolvedNarratives.map((narrative) => [narrative.turnIndex, narrative])),
-    [resolvedNarratives]
-  );
-  const displayedNarrative = displayedKeyMomentEntry
-    ? narrativeByTurnIndex.get(displayedKeyMomentEntry.moment.turnIndex)
-      ?? fallbackNarratives.find((narrative) => narrative.turnIndex === displayedKeyMomentEntry.moment.turnIndex)
-      ?? null
-    : null;
+
+  useEffect(() => {
+    keyMomentEntriesRef.current = keyMomentEntries;
+  }, [keyMomentEntries]);
 
   useEffect(() => {
     onActiveKeyMomentChange?.(displayedKeyMomentIndex);
@@ -783,36 +766,38 @@ export function EscalationTimeline({
         )}
       </div>
 
-      {keyMomentEntries.length > 0 && (
+      {(keyMomentEntries.length > 0 || (!loadingNarratives && resolvedDebug && !resolvedDebug.ok)) && (
         <div className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            {keyMomentEntries.map((entry, tabIndex) => {
-              const isSelected = entry.index === resolvedSelectedMomentIndex;
-              const isPreviewed = entry.index === displayedKeyMomentIndex && !isSelected;
+          {keyMomentEntries.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {keyMomentEntries.map((entry, tabIndex) => {
+                const isSelected = entry.index === resolvedSelectedMomentIndex;
+                const isPreviewed = entry.index === displayedKeyMomentIndex && !isSelected;
 
-              return (
-                <button
-                  key={`${entry.index}-${entry.time}`}
-                  type="button"
-                  onClick={() => setSelectedMomentIndex(entry.index)}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-left text-[11px] transition-colors",
-                    isSelected
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : isPreviewed
-                        ? "border-blue-300 bg-blue-50 text-blue-700"
-                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
-                  )}
-                >
-                  <span className="font-semibold">{tabIndex + 1}.</span>{" "}
-                  {formatTime(entry.time)} • {DIMENSION_LABELS[entry.moment.dimension] ?? entry.moment.dimension}
-                </button>
-              );
-            })}
-          </div>
+                return (
+                  <button
+                    key={`${entry.index}-${entry.time}`}
+                    type="button"
+                    onClick={() => setSelectedMomentIndex(entry.index)}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-left text-[11px] transition-colors",
+                      isSelected
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : isPreviewed
+                          ? "border-blue-300 bg-blue-50 text-blue-700"
+                          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+                    )}
+                  >
+                    <span className="font-semibold">{tabIndex + 1}.</span>{" "}
+                    {formatTime(entry.time)} • {(entry.narrative.lens?.trim() || (entry.narrative.positive ? "Helpful moment" : "Moment to revisit"))}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           <div className="min-h-[30rem]">
-            {loadingNarratives && !displayedNarrative ? (
+            {loadingNarratives && !displayedKeyMomentEntry ? (
               <div className="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-lg">
                 <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
                   Tailored coaching
@@ -827,11 +812,33 @@ export function EscalationTimeline({
                   <div className="h-24 w-full animate-pulse rounded-xl bg-slate-100" />
                 </div>
               </div>
-            ) : displayedKeyMomentEntry && displayedNarrative ? (
+            ) : !loadingNarratives && resolvedDebug && !resolvedDebug.ok ? (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 shadow-lg">
+                <div className="inline-flex rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-rose-700">
+                  Timeline analysis unavailable
+                </div>
+                <p className="mt-3 text-[13px] leading-relaxed text-slate-700">
+                  {resolvedDebug.message ?? "The timeline could not be generated for this session."}
+                </p>
+                {resolvedDebug.failureClass && (
+                  <p className="mt-3 text-[12px] text-slate-700">
+                    <span className="font-semibold text-slate-900">Failure class:</span> {resolvedDebug.failureClass}
+                  </p>
+                )}
+                {resolvedDebug.validatorFailures.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {resolvedDebug.validatorFailures.map((issue) => (
+                      <span key={issue} className="rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] text-rose-700">
+                        {issue}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : displayedKeyMomentEntry ? (
               <TimelineMomentCard
                 entry={displayedKeyMomentEntry}
                 turns={turns}
-                narrative={displayedNarrative}
                 showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
               />
             ) : (

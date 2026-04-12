@@ -1,159 +1,93 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ScoreBreakdown, ScoreEvidence } from "@/lib/engine/scoring";
+import { z } from "zod";
 import {
-  buildFallbackReviewSummary,
-  buildReviewSummaryMomentInput,
-  getStoredReviewSummarySource,
-  getStoredReviewSummaryVersion,
-  REVIEW_SUMMARY_VERSION,
-  reviewSummaryResponseSchema,
+  reviewDebugSchema,
+  reviewSummaryApiResponseSchema,
   type ReviewSummaryData,
 } from "@/lib/review/feedback";
-import type { ScenarioMilestone, ScenarioTraits } from "@/types/scenario";
+import {
+  parseStoredReviewArtifacts,
+} from "@/lib/review/artifacts";
 import type { SimulationSession, TranscriptTurn } from "@/types/simulation";
 
 const reviewSummaryResultCache = new Map<string, {
-  status: "ready" | "fallback";
-  data: ReviewSummaryData;
+  summary: ReviewSummaryData | null;
+  debug: z.infer<typeof reviewDebugSchema>;
 }>();
 const reviewSummaryRequestCache = new Map<string, Promise<{
-  status: "ready" | "fallback";
-  data: ReviewSummaryData;
+  summary: ReviewSummaryData | null;
+  debug: z.infer<typeof reviewDebugSchema>;
 }>>();
 
 interface ReviewSummaryCardProps {
   sessionId: string;
   session: SimulationSession;
-  score: ScoreBreakdown;
   turns: TranscriptTurn[];
-  keyMoments: ScoreEvidence[];
   learningObjectives?: string | null;
-  milestones?: ScenarioMilestone[];
-  aiRole?: string | null;
-  backstory?: string | null;
-  emotionalDriver?: string | null;
-  traits?: ScenarioTraits | null;
 }
 
 export function ReviewSummaryCard({
   sessionId,
   session,
-  score,
   turns,
-  keyMoments,
   learningObjectives,
-  milestones = [],
-  aiRole,
-  backstory,
-  emotionalDriver,
-  traits,
 }: ReviewSummaryCardProps) {
-  const storedSummaryVersion = useMemo(
-    () => getStoredReviewSummaryVersion(session.review_summary),
-    [session.review_summary]
+  const storedArtifacts = useMemo(
+    () => parseStoredReviewArtifacts(session.review_artifacts),
+    [session.review_artifacts]
   );
-  const storedSummarySource = useMemo(
-    () => getStoredReviewSummarySource(session.review_summary),
-    [session.review_summary]
-  );
-  const rawStoredSummary = useMemo(() => {
-    const parsed = reviewSummaryResponseSchema.safeParse(session.review_summary);
-    return parsed.success ? parsed.data : null;
-  }, [session.review_summary]);
-  const fallbackSummary = useMemo(() => buildFallbackReviewSummary(session, score, turns, keyMoments, {
-    milestones,
-    learningObjectives,
-    aiRole,
-    backstory,
-    emotionalDriver,
-    traits,
-  }), [
-    aiRole,
-    backstory,
-    emotionalDriver,
-    keyMoments,
-    learningObjectives,
-    milestones,
-    score,
-    session,
-    traits,
-    turns,
-  ]);
   const storedSummary = useMemo(() => {
-    if (
-      !rawStoredSummary ||
-      storedSummaryVersion < REVIEW_SUMMARY_VERSION ||
-      storedSummarySource !== "generated"
-    ) {
+    return storedArtifacts?.summary ?? null;
+  }, [storedArtifacts]);
+  const storedDebug = useMemo(() => {
+    if (!storedArtifacts?.summary && !storedArtifacts?.meta.summary) {
       return null;
     }
-    return rawStoredSummary;
-  }, [
-    rawStoredSummary,
-    storedSummarySource,
-    storedSummaryVersion,
-  ]);
-  const shouldRequestGeneratedSummary = !storedSummary && score.sessionValid && keyMoments.length > 0;
-  const reviewSummaryRequest = useMemo(() => ({
-    scenarioTitle: session.scenario_templates?.title || "Simulation",
-    scenarioSetting: session.scenario_templates?.setting ?? null,
-    traineeRole: session.scenario_templates?.trainee_role ?? null,
-    aiRole: aiRole ?? null,
-    learningObjectives: learningObjectives ?? null,
-    backstory: backstory ?? null,
-    emotionalDriver: emotionalDriver ?? null,
-    traits: traits ?? null,
-    milestones: milestones.map((milestone) => ({
-      id: milestone.id,
-      order: milestone.order,
-      description: milestone.description,
-      classifier_hint: milestone.classifier_hint,
-    })),
-    personSummary: fallbackSummary.personFocus,
-    finalEscalationLevel: session.final_escalation_level ?? null,
-    exitType: session.exit_type ?? null,
-    fallback: fallbackSummary,
-    achievedObjectives: fallbackSummary.achievedObjectives,
-    outstandingObjectives: fallbackSummary.outstandingObjectives,
-    moments: keyMoments
-      .slice(0, 3)
-      .map((moment) => buildReviewSummaryMomentInput(moment, turns, session.started_at)),
-  }), [
-    aiRole,
-    backstory,
-    emotionalDriver,
-    fallbackSummary,
-    keyMoments,
-    learningObjectives,
-    milestones,
-    session.exit_type,
-    session.final_escalation_level,
-    session.scenario_templates?.setting,
-    session.scenario_templates?.trainee_role,
-    session.scenario_templates?.title,
-    session.started_at,
-    traits,
-    turns,
-  ]);
+
+    const parsed = reviewDebugSchema.safeParse({
+      ok: Boolean(storedArtifacts?.summary),
+      message: storedArtifacts?.summary
+        ? null
+        : storedArtifacts?.meta.summary
+          ? "Session summary unavailable. Review the debug codes below to see why generation failed."
+          : null,
+      promptVersion: storedArtifacts?.meta.summary?.prompt_version ?? null,
+      schemaVersion: storedArtifacts?.meta.summary?.schema_version ?? null,
+      model: storedArtifacts?.meta.summary?.model ?? null,
+      reasoningEffort: storedArtifacts?.meta.summary?.reasoning_effort ?? null,
+      fallbackUsed: storedArtifacts?.meta.summary?.fallback_used ?? false,
+      failureClass: storedArtifacts?.meta.summary?.failure_class ?? null,
+      validatorFailures: storedArtifacts?.meta.summary?.validator_failures ?? [],
+    });
+    return parsed.success ? parsed.data : null;
+  }, [storedArtifacts]);
+  const shouldRequestGeneratedSummary = !storedSummary && turns.some((turn) => turn.speaker === "trainee");
+  const lastTurnIndex = turns[turns.length - 1]?.turn_index ?? null;
   const requestKey = useMemo(() => JSON.stringify({
     sessionId,
-    request: reviewSummaryRequest,
+    evidenceHash: storedArtifacts?.evidence_hash ?? null,
+    turnCount: turns.length,
+    lastTurnIndex,
   }), [
-    reviewSummaryRequest,
     sessionId,
+    storedArtifacts?.evidence_hash,
+    turns.length,
+    lastTurnIndex,
   ]);
   const [summaryState, setSummaryState] = useState<{
     requestKey: string;
-    status: "ready" | "fallback";
-    data: ReviewSummaryData;
+    summary: ReviewSummaryData | null;
+    debug: z.infer<typeof reviewDebugSchema>;
   } | null>(null);
   const currentSummaryState = summaryState?.requestKey === requestKey ? summaryState : null;
-  const generatedSummary = currentSummaryState?.data ?? null;
+  const generatedSummary = currentSummaryState?.summary ?? null;
+  const runtimeDebug = currentSummaryState?.debug ?? null;
   const summary = storedSummary
     ?? generatedSummary
-    ?? (!shouldRequestGeneratedSummary ? fallbackSummary : null);
+    ?? null;
+  const debug = storedDebug ?? runtimeDebug;
   const loadingGeneratedSummary = shouldRequestGeneratedSummary && !currentSummaryState;
   const objectiveItems = useMemo(() => (
     (learningObjectives ?? "")
@@ -185,27 +119,43 @@ export function ReviewSummaryCard({
           try {
             const res = await fetch(`/api/sessions/${sessionId}/review-summary`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(reviewSummaryRequest),
+              cache: "no-store",
             });
             const payload = await res.json().catch(() => null);
-            const parsed = reviewSummaryResponseSchema.safeParse(payload);
+            const parsed = reviewSummaryApiResponseSchema.safeParse(payload);
 
             if (parsed.success) {
-              return {
-                status: "ready" as const,
-                data: parsed.data,
-              };
+              return parsed.data;
             }
 
             return {
-              status: "fallback" as const,
-              data: fallbackSummary,
+              summary: null,
+              debug: {
+                ok: false,
+                message: "Session summary unavailable. The API returned an unexpected payload.",
+                promptVersion: null,
+                schemaVersion: null,
+                model: null,
+                reasoningEffort: null,
+                fallbackUsed: false,
+                failureClass: "schema" as const,
+                validatorFailures: ["invalid_api_payload"],
+              },
             };
           } catch {
             return {
-              status: "fallback" as const,
-              data: fallbackSummary,
+              summary: null,
+              debug: {
+                ok: false,
+                message: "Session summary unavailable. The request failed before a valid response was returned.",
+                promptVersion: null,
+                schemaVersion: null,
+                model: null,
+                reasoningEffort: null,
+                fallbackUsed: false,
+                failureClass: "schema" as const,
+                validatorFailures: ["request_failed"],
+              },
             };
           }
         })().finally(() => {
@@ -215,9 +165,10 @@ export function ReviewSummaryCard({
       }
 
       const result = await requestPromise;
+      if (result.debug.ok || result.summary) {
+        reviewSummaryResultCache.set(requestKey, result);
+      }
       if (cancelled) return;
-
-      reviewSummaryResultCache.set(requestKey, result);
       setSummaryState({
         requestKey,
         ...result,
@@ -230,14 +181,59 @@ export function ReviewSummaryCard({
       cancelled = true;
     };
   }, [
-    fallbackSummary,
     requestKey,
     shouldRequestGeneratedSummary,
-    reviewSummaryRequest,
     sessionId,
   ]);
 
   if (loadingGeneratedSummary || !summary) {
+    if (!loadingGeneratedSummary && debug && !debug.ok) {
+      return (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50/70 shadow-sm">
+          <div className="border-b border-rose-200/80 px-5 py-4">
+            <div className="inline-flex rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">
+              Session summary unavailable
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-slate-700">
+              {debug.message ?? "The summary could not be generated for this session."}
+            </p>
+          </div>
+          <div className="space-y-3 px-5 py-4 text-[12px] text-slate-700">
+            {debug.failureClass && (
+              <p><span className="font-semibold text-slate-900">Failure class:</span> {debug.failureClass}</p>
+            )}
+            {debug.validatorFailures.length > 0 && (
+              <div>
+                <p className="font-semibold text-slate-900">Validator codes</p>
+                <ul className="mt-2 flex flex-wrap gap-2">
+                  {debug.validatorFailures.map((issue) => (
+                    <li key={issue} className="rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] text-rose-700">
+                      {issue}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (!loadingGeneratedSummary && !summary) {
+      return (
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-5 py-4">
+            <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+              Session summary unavailable
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-slate-600">
+              There was not enough usable review output to show a summary for this session.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-4">
@@ -297,7 +293,7 @@ export function ReviewSummaryCard({
             What Helped
           </p>
           <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
-            {summary.positiveMoment ?? "A steadier moment will be highlighted below if one is visible in this session."}
+            {summary.positiveMoment ?? "No single positive move stood out strongly enough to highlight on its own."}
           </p>
         </div>
 
@@ -306,18 +302,18 @@ export function ReviewSummaryCard({
             Why It Mattered
           </p>
           <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
-            {summary.whyItMattered ?? "Look for the moment below where the interaction changed direction."}
+            {summary.whyItMattered ?? "See the timeline below for the moment that most shaped the conversation and why it mattered here."}
           </p>
         </div>
 
         <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
-            Try This Move
+            Next Best Move
           </p>
           <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
             {summary.whatToSayInstead
               ? summary.whatToSayInstead
-              : "A suggested communication move will appear here when the review identifies a clear coaching opportunity."}
+              : "A next best move will appear here when the review identifies one clear coaching opportunity."}
           </p>
         </div>
       </div>

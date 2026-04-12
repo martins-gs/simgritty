@@ -1,17 +1,94 @@
 import { zodTextFormat } from "openai/helpers/zod";
+import { z } from "zod";
 import { getOpenAIClient, shouldFailLoudOnOpenAIError } from "@/lib/openai/client";
-import { describeStructuredOutputFailure, parseStructuredOutputText } from "@/lib/openai/structuredOutput";
 import {
-  type ReviewSummaryMomentInput,
-  type ReviewSummaryRequest,
-  type ReviewSummaryResponse,
-  reviewSummaryResponseSchema,
+  describeStructuredOutputFailure,
+  getResponseOutputText,
+  parseStructuredOutputText,
+} from "@/lib/openai/structuredOutput";
+import type {
+  ReviewEvidenceLedger,
+  ReviewSurfaceMeta,
+} from "@/lib/review/artifacts";
+import {
+  REVIEW_SUMMARY_PROMPT_VERSION,
+  REVIEW_SUMMARY_SCHEMA_VERSION,
+} from "@/lib/review/artifacts";
+import {
+  REVIEW_SUMMARY_VERSION,
+  type ReviewSummaryData,
 } from "@/lib/review/feedback";
+import type { TranscriptTurn } from "@/types/simulation";
 
 const REVIEW_SUMMARY_MODEL = process.env.OPENAI_REVIEW_SUMMARY_MODEL || "gpt-5.4";
-const REVIEW_SUMMARY_MAX_OUTPUT_TOKENS = 900;
-const REVIEW_SUMMARY_RETRY_MAX_OUTPUT_TOKENS = 1300;
-const REVIEW_SUMMARY_COMPACT_MAX_OUTPUT_TOKENS = 900;
+const REVIEW_SUMMARY_MAX_OUTPUT_TOKENS = 2200;
+const REVIEW_SUMMARY_REPAIR_MAX_OUTPUT_TOKENS = 1000;
+
+const summaryRenderSchema = z.object({
+  overview: z.string(),
+  overallDelivery: z.string().nullable().default(null),
+  positiveMoment: z.string().nullable().default(null),
+  whyItMattered: z.string().nullable().default(null),
+  coachingFocus: z.string().nullable().default(null),
+  nextBestMove: z.string().nullable().default(null),
+  objectiveFocus: z.string().nullable().default(null),
+  personFocus: z.string().nullable().default(null),
+});
+
+const summaryRepairSchema = summaryRenderSchema.partial();
+
+const CASE_ANCHOR_STOPWORDS = new Set([
+  "about",
+  "answer",
+  "concrete",
+  "clear",
+  "clearly",
+  "concern",
+  "current",
+  "direct",
+  "explanation",
+  "main",
+  "person",
+  "practical",
+  "question",
+  "reason",
+  "reply",
+  "still",
+  "their",
+  "there",
+  "they",
+  "what",
+]);
+
+interface ReviewSummaryRenderInput {
+  ledger: ReviewEvidenceLedger;
+  turns: TranscriptTurn[];
+}
+
+type RenderFailureClass = NonNullable<ReviewSurfaceMeta["failure_class"]>;
+
+function trimToNull(value: string | null | undefined) {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function trimRequired(value: string) {
+  return value.trim();
+}
+
+function sanitizeSummaryRender(render: z.infer<typeof summaryRenderSchema>) {
+  return {
+    overview: trimRequired(render.overview),
+    overallDelivery: trimToNull(render.overallDelivery),
+    positiveMoment: trimToNull(render.positiveMoment),
+    whyItMattered: trimToNull(render.whyItMattered),
+    coachingFocus: trimToNull(render.coachingFocus),
+    nextBestMove: trimToNull(render.nextBestMove),
+    objectiveFocus: trimToNull(render.objectiveFocus),
+    personFocus: trimToNull(render.personFocus),
+  };
+}
 
 function truncatePromptText(value: string | null | undefined, maxLength = 260) {
   if (!value) return null;
@@ -22,51 +99,6 @@ function truncatePromptText(value: string | null | undefined, maxLength = 260) {
   }
 
   return `${compact.slice(0, maxLength - 1).trimEnd()}…`;
-}
-
-function normaliseText(value: string | null | undefined) {
-  return (value ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function formatScenarioTraits(input: ReviewSummaryRequest) {
-  if (!input.traits) return null;
-
-  const traits = input.traits;
-  return [
-    `- Trust: ${traits.trust}/10`,
-    `- Frustration: ${traits.frustration}/10`,
-    `- Hostility: ${traits.hostility}/10`,
-    `- Impatience: ${traits.impatience}/10`,
-    `- Boundary respect: ${traits.boundary_respect}/10`,
-    `- Repetition: ${traits.repetition}/10`,
-    `- Entitlement: ${traits.entitlement}/10`,
-    `- Interruption likelihood: ${traits.interruption_likelihood}/10`,
-    `- Bias intensity: ${traits.bias_intensity}/10`,
-    `- Bias category: ${traits.bias_category}`,
-  ].join("\n");
-}
-
-function formatMilestones(input: ReviewSummaryRequest) {
-  if (input.milestones.length === 0) return null;
-
-  return input.milestones
-    .sort((a, b) => a.order - b.order)
-    .map((milestone) => (
-      `- ${truncatePromptText(milestone.description, 140)}${milestone.classifier_hint ? ` | hint: ${truncatePromptText(milestone.classifier_hint, 180)}` : ""}`
-    ))
-    .join("\n");
-}
-
-function isStructuredOutputParseError(error: unknown) {
-  if (error instanceof SyntaxError) {
-    return true;
-  }
-
-  const message = error instanceof Error ? error.message : String(error);
-  return /unterminated string in json|unexpected end of json|json|structured output/i.test(message);
 }
 
 function containsForbiddenTimePhrases(value: string | null | undefined) {
@@ -91,250 +123,130 @@ function containsOverGenericCoaching(value: string | null | undefined) {
   );
 }
 
-function reusesFallbackWording(summary: ReviewSummaryResponse, input: ReviewSummaryRequest) {
-  const comparisons: Array<[string | null | undefined, string | null | undefined]> = [
-    [summary.overview, input.fallback.overview],
-    [summary.overallDelivery, input.fallback.overallDelivery],
-    [summary.positiveMoment, input.fallback.positiveMoment],
-    [summary.whyItMattered, input.fallback.whyItMattered],
-    [summary.coachingFocus, input.fallback.coachingFocus],
-    [summary.whatToSayInstead, input.fallback.whatToSayInstead],
-    [summary.objectiveFocus, input.fallback.objectiveFocus],
-    [summary.personFocus, input.fallback.personFocus],
-  ];
+function containsEducatorJargon(value: string | null | undefined) {
+  if (!value) return false;
 
-  let exactMatches = 0;
-  for (const [generated, fallback] of comparisons) {
-    if (generated && fallback && normaliseText(generated) === normaliseText(fallback)) {
-      exactMatches += 1;
-    }
-  }
-
-  return exactMatches >= 2 || normaliseText(summary.overview) === normaliseText(input.fallback.overview);
+  return /\bpractical blocker\b|\bcontained reply\b|\bclinical task visible\b|\bland more\b|\blanding\b|\blanded\b/i.test(
+    value
+  );
 }
 
-function isReviewSummaryUsable(summary: ReviewSummaryResponse, input: ReviewSummaryRequest) {
-  if (
-    containsForbiddenTimePhrases(summary.overview) ||
-    containsForbiddenTimePhrases(summary.overallDelivery) ||
-    containsForbiddenTimePhrases(summary.positiveMoment) ||
-    containsForbiddenTimePhrases(summary.whyItMattered) ||
-    containsForbiddenTimePhrases(summary.coachingFocus)
-  ) {
-    return false;
-  }
-
-  if (looksInstructional(summary.whyItMattered)) {
-    return false;
-  }
-
-  if (
-    containsOverGenericCoaching(summary.positiveMoment) ||
-    containsOverGenericCoaching(summary.coachingFocus) ||
-    containsOverGenericCoaching(summary.whatToSayInstead)
-  ) {
-    return false;
-  }
-
-  if (reusesFallbackWording(summary, input)) {
-    return false;
-  }
-
-  return true;
+function normaliseText(value: string | null | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
-function buildMomentPrompt(moment: ReviewSummaryMomentInput, index: number) {
+function getCaseAnchorTokens(value: string | null | undefined) {
+  return normaliseText(value)
+    .split(" ")
+    .filter((token) => token.length >= 4 && !CASE_ANCHOR_STOPWORDS.has(token));
+}
+
+function hasCaseAnchor(value: string | null | undefined, anchors: string[]) {
+  if (anchors.length === 0) return true;
+  const words = new Set(normaliseText(value).split(" ").filter(Boolean));
+  return anchors.some((anchor) => words.has(anchor));
+}
+
+function formatTranscriptForPrompt(turns: TranscriptTurn[]) {
+  return turns
+    .filter((turn) => turn.content?.trim())
+    .slice(0, 24)
+    .map((turn) => `${turn.turn_index}. ${turn.speaker === "trainee" ? "You" : turn.speaker === "ai" ? "Patient/relative" : "Clinician"}: ${truncatePromptText(turn.content, 260)}`)
+    .join("\n");
+}
+
+function buildPrompt(input: ReviewSummaryRenderInput) {
+  const candidateMoments = input.ledger.moments
+    .slice(0, 6)
+    .map((moment) => [
+      `Moment ${moment.id} (turn ${moment.turn_index}, ${moment.positive ? "more helpful" : "more difficult"})`,
+      `- Evidence label: ${truncatePromptText(moment.evidence_type, 100)}`,
+      `- Conversation need: ${truncatePromptText(moment.active_need_or_barrier, 180)}`,
+      moment.previous_turn?.content ? `- Before: ${truncatePromptText(moment.previous_turn.content, 180)}` : null,
+      moment.focus_turn?.content ? `- You said: ${truncatePromptText(moment.focus_turn.content, 220)}` : null,
+      moment.next_turn?.content ? `- After: ${truncatePromptText(moment.next_turn.content, 180)}` : null,
+    ].filter(Boolean).join("\n"))
+    .join("\n\n");
+
   return [
-    `${index + 1}. Internal moment reference ${moment.turnIndex}`,
-    `Dimension: ${moment.dimension}`,
-    `Evidence type: ${moment.evidenceType}`,
-    `Positive moment: ${moment.positive ? "yes" : "no"}`,
-    moment.evidenceSignals.length > 0
-      ? `Evidence signals:\n- ${moment.evidenceSignals.map((signal) => truncatePromptText(signal, 140)).join("\n- ")}`
+    `Scenario: ${truncatePromptText(input.ledger.scenario_title, 140)}`,
+    input.ledger.scenario_setting ? `Setting: ${truncatePromptText(input.ledger.scenario_setting, 140)}` : null,
+    input.ledger.ai_role ? `Other person role: ${truncatePromptText(input.ledger.ai_role, 120)}` : null,
+    `Scenario demand summary:`,
+    `- Primary need: ${truncatePromptText(input.ledger.scenario_demand_summary.primary_need, 200)}`,
+    `- Common pitfall: ${truncatePromptText(input.ledger.scenario_demand_summary.common_pitfall, 200)}`,
+    `- Success pattern: ${truncatePromptText(input.ledger.scenario_demand_summary.success_pattern, 200)}`,
+    input.ledger.scenario_demand_summary.adaptation_note
+      ? `- Adaptation note: ${truncatePromptText(input.ledger.scenario_demand_summary.adaptation_note, 200)}`
       : null,
-    moment.previousTurn
-      ? `Turn before (${moment.previousTurn.speaker}): ${truncatePromptText(moment.previousTurn.content, 220)}`
+    `Outcome state:`,
+    `- Session valid: ${input.ledger.outcome_state.session_valid ? "yes" : "no"}`,
+    input.ledger.outcome_state.final_escalation_level != null
+      ? `- Final escalation level: ${input.ledger.outcome_state.final_escalation_level}`
       : null,
-    moment.whatTraineeSaid
-      ? `Highlighted trainee turn: ${truncatePromptText(moment.whatTraineeSaid, 220)}`
-      : "Highlighted trainee turn: unavailable",
-    moment.nextTurn
-      ? `Turn after (${moment.nextTurn.speaker}): ${truncatePromptText(moment.nextTurn.content, 220)}`
+    input.ledger.outcome_state.exit_type ? `- Exit type: ${input.ledger.outcome_state.exit_type}` : null,
+    input.ledger.objective_ledger.outstanding_objectives.length > 0
+      ? `Outstanding objectives:\n- ${input.ledger.objective_ledger.outstanding_objectives.map((item) => truncatePromptText(item, 180)).join("\n- ")}`
       : null,
-    `Likely impact: ${truncatePromptText(moment.likelyImpact, 200)}`,
-    `What happened next: ${truncatePromptText(moment.whatHappenedNext, 200)}`,
+    input.ledger.objective_ledger.achieved_objectives.length > 0
+      ? `Achieved objectives:\n- ${input.ledger.objective_ledger.achieved_objectives.map((item) => truncatePromptText(item, 180)).join("\n- ")}`
+      : null,
+    input.ledger.person_adaptation_note ? `Person adaptation: ${truncatePromptText(input.ledger.person_adaptation_note, 180)}` : null,
+    input.ledger.delivery_aggregate.supported && input.ledger.delivery_aggregate.summary
+      ? `Session-level delivery evidence: ${truncatePromptText(input.ledger.delivery_aggregate.summary, 220)}`
+      : `Session-level delivery evidence: none strong enough to mention.`,
+    candidateMoments ? `Candidate moments:\n${candidateMoments}` : null,
+    `Full transcript:\n${formatTranscriptForPrompt(input.turns)}`,
   ].filter(Boolean).join("\n");
 }
 
-function buildReviewSummaryPrompt(
-  input: ReviewSummaryRequest,
-  options?: {
-    compact?: boolean;
-    retryNote?: string | null;
-  }
-) {
-  const compact = options?.compact ?? false;
-  const selectedMoments = compact
-    ? input.moments.slice(0, 2)
-    : input.moments.slice(0, 3);
-
-  const authoredContext = compact
-    ? [
-        input.aiRole ? `Other person role: ${input.aiRole}` : null,
-        input.personSummary ? `Person-specific context hypothesis: ${truncatePromptText(input.personSummary, 240)}` : null,
-      ].filter(Boolean).join("\n")
-    : [
-        input.scenarioSetting ? `Setting: ${truncatePromptText(input.scenarioSetting, 140)}` : null,
-        input.traineeRole ? `Trainee role: ${truncatePromptText(input.traineeRole, 120)}` : null,
-        input.aiRole ? `Other person role: ${truncatePromptText(input.aiRole, 120)}` : null,
-        input.learningObjectives
-          ? `Learning objectives:\n${truncatePromptText(input.learningObjectives, 360)}`
-          : null,
-        input.backstory
-          ? `Authored background for interpretation only — do not quote or paraphrase this back to the learner:\n${truncatePromptText(input.backstory, 420)}`
-          : null,
-        input.emotionalDriver
-          ? `Authored emotional driver for interpretation only: ${truncatePromptText(input.emotionalDriver, 220)}`
-          : null,
-        formatScenarioTraits(input)
-          ? `Authored scenario traits:\n${formatScenarioTraits(input)}`
-          : null,
-        formatMilestones(input)
-          ? `Authored clinical milestones:\n${formatMilestones(input)}`
-          : null,
-      ].filter(Boolean).join("\n");
-
-  return [
-    `Scenario: ${truncatePromptText(input.scenarioTitle, 140)}`,
-    authoredContext || null,
-    input.finalEscalationLevel != null
-      ? `Final escalation level: ${input.finalEscalationLevel}`
-      : null,
-    input.exitType ? `Exit type: ${input.exitType}` : null,
-    input.achievedObjectives.length > 0
-      ? `Objectives clearly seen:\n- ${input.achievedObjectives.map((item) => truncatePromptText(item, 140)).join("\n- ")}`
-      : "Objectives clearly seen:\n- None clearly evidenced",
-    input.outstandingObjectives.length > 0
-      ? `Objectives still missing or unclear:\n- ${input.outstandingObjectives.map((item) => truncatePromptText(item, 140)).join("\n- ")}`
-      : null,
-    options?.retryNote ? `Retry note: ${options.retryNote}` : null,
-    "",
-    "Key moments:",
-    ...selectedMoments.map((moment, index) => buildMomentPrompt(moment, index)),
-  ].filter(Boolean).join("\n");
-}
-
-async function requestParsedReviewSummary(
+async function rescueSummaryParse(
   client: NonNullable<ReturnType<typeof getOpenAIClient>>,
-  input: ReviewSummaryRequest,
-  prompt: string,
-  maxOutputTokens: number,
-  options?: {
-    jsonMode?: boolean;
-  }
-): Promise<ReviewSummaryResponse | null> {
-  const response = await client.responses.create({
+  input: ReviewSummaryRenderInput,
+  rawDraft: string,
+  maxOutputTokens: number
+) {
+  const response = await client.responses.parse({
     model: REVIEW_SUMMARY_MODEL,
-    instructions: `You are writing the post-session coaching summary for a clinical communication simulation review screen.
+    instructions: `You are converting a draft coaching summary into a strict structured output for a clinical communication review.
 
-Your job is to sound like a skilled educator or debrief coach: specific, fair, behaviour-focused, and tailored to this exact case.
+Return only the schema content.
 
-This panel sits above a separate timeline that already gives moment-by-moment detail. Use this panel for synthesis, pattern recognition, and one high-value next step.
-
-Best-practice coaching approach:
+Rules:
 - Use British English.
-- Write in plain language that is psychologically safe and non-shaming.
-- Describe observable communication patterns, not personality traits.
-- Start from the trainee's apparent intention and whether any part of the move landed.
-- Reinforce a useful move when the evidence supports it.
-- When something did not land, coach the timing, order, specificity, or containment of the move.
-- Give the smallest high-value adjustment most likely to improve the next attempt.
-- Tie coaching to the actual concern, barrier, next step, safety issue, or relationship dynamic in this case.
-- If the trainee was partly effective, say what they did achieve before coaching what was still missing.
-- Prefer natural communication guidance over stock scripts.
-- If you give a model line, adapt it to the specific case. Do not default to generic empathy wording.
-
-Tailoring rules:
-- Ground every point in the supplied turns, outcomes, objectives, and authored scenario context.
-- Use authored scenario context only to interpret what the person likely needed; do not restate the scenario brief, backstory, or emotional-driver wording as feedback.
-- Do not invent dialogue, timings, motives, or clinical facts that are not supported by the prompt.
-- Treat any fallback or draft text as rough hypotheses only.
-- Do not copy wording from the fallback or from the examples below. Write fresh sentences for this case.
-- Use concrete case language when available. Name the actual concern or barrier rather than speaking abstractly.
-- Judge the function of the trainee's response, not whether it matched a stock phrase.
-- Do not treat explicit emotion-labelling as mandatory if the trainee acknowledged the concern naturally in another way.
-- If a helpful move arrived late or got buried in a longer reply, describe that precisely instead of calling it absent.
-
-Illustrative style examples only — do not reuse wording:
-- Weak coaching: "The trainee needed to show more empathy."
-- Better coaching: "You recognised the frustration, but you moved to reassurance before explaining the delay, so the main worry still felt unanswered."
-- Weak replacement: "I can hear how upsetting this is."
-- Better replacement: "Start with the frustration about the wait, then explain what is holding things up and what update you can give today."
-
-Output rules:
-- Return valid JSON only.
-- Prefer language like "likely", "seemed to", "appeared to", and "may have".
-- Do not mention percentages, confidence scores, numerical effectiveness values, hidden model states, or score labels.
-- The overview must read like the overall arc of the conversation, not a verdict or a play-by-play.
-- Do not use timecodes or time-oriented phrasing such as "around 0:12", "early on", "later", "by the end", or "at the turning point".
-- Describe the conversation-level pattern, not the order of cards on the page.
-- Do not quote the transcript, restate surrounding turns in detail, or repeat the timeline card wording.
-- Highlight at least one positive moment if the evidence supports it.
-- positiveMoment must name the specific move that helped in this case and what it helped with, not a generic professional-quality statement.
-- overallDelivery should usually be null. Only populate it if delivery showed a noticeable overall pattern or a clear shift under pressure supported by more than one moment.
-- overallDelivery should summarise how the trainee sounded overall, not describe one isolated turn.
-- whyItMattered must explain why the difficult moment mattered in this case.
-- whyItMattered must be explanatory, not instructional. Do not use an imperative sentence there.
-- coachingFocus must contain one main teaching point only, explained as the key interaction lesson from this case.
-- objectiveFocus should usually be null. Only populate it if one concise scenario-goal point is essential and not already clear in coachingFocus.
-- personFocus should usually be null. Only populate it if one concise person-specific adaptation is essential and not already clear in coachingFocus.
-- whatToSayInstead should usually be a short behavioural move rather than a full script.
-- Only give a full replacement line when the original turn genuinely missed the core move and the line is tightly tied to the exact concern in this case.
-- Avoid generic phrases such as "useful behaviour to carry into similar conversations".
-- Keep overview to at most two short sentences.
-- Keep every other populated string to one short sentence.
-- Target word counts:
-  - overview: 18 to 40 words total.
-  - overallDelivery: 10 to 24 words, or null.
-  - positiveMoment: 10 to 22 words.
-  - whyItMattered: 10 to 24 words.
-  - coachingFocus: 12 to 28 words.
-  - whatToSayInstead: 8 to 24 words.
-  - objectiveFocus: 8 to 20 words, or null.
-  - personFocus: 8 to 20 words, or null.
-- Leave achievedObjectives and outstandingObjectives as empty arrays unless there is a strong reason to populate them.`,
-    input: prompt,
+- Use plain English a trainee can understand quickly.
+- Keep every populated field brief and case-specific.
+- Do not mention timecodes.
+- Avoid educator-jargon like "practical blocker", "land", "contained reply", or "clinical task".
+- If the draft is weak or incomplete, correct it using the supplied transcript evidence and scenario context.`,
+    input: [
+      "Original evidence and task:",
+      buildPrompt(input),
+      "Draft to convert:",
+      rawDraft,
+    ].join("\n\n"),
     store: false,
     reasoning: { effort: "medium" },
     max_output_tokens: maxOutputTokens,
     text: {
-      format: options?.jsonMode
-        ? { type: "json_object" }
-        : zodTextFormat(reviewSummaryResponseSchema, "review_summary"),
+      format: zodTextFormat(summaryRenderSchema, "review_summary_render_rescue"),
       verbosity: "low",
     },
   });
 
-  const parsed = parseStructuredOutputText(response, reviewSummaryResponseSchema);
-  if (!parsed) {
-    throw new SyntaxError(
-      `Unable to parse structured review summary JSON (${describeStructuredOutputFailure(response)})`
-    );
-  }
-
-  const generated: ReviewSummaryResponse = {
-    ...parsed,
-    source: "generated",
+  const parsed = parseStructuredOutputText(response, summaryRenderSchema);
+  return {
+    parsed,
+    failure: describeStructuredOutputFailure(response),
   };
-  if (!isReviewSummaryUsable(generated, input)) {
-    throw new SyntaxError("Generated review summary failed quality checks");
-  }
-
-  return generated;
 }
 
-export async function generateReviewSummary(
-  input: ReviewSummaryRequest
+async function requestSummaryRender(
+  input: ReviewSummaryRenderInput,
+  maxOutputTokens: number
 ) {
   const client = getOpenAIClient();
   if (!client) {
@@ -344,60 +256,337 @@ export async function generateReviewSummary(
     return null;
   }
 
-  const prompt = buildReviewSummaryPrompt(input);
+  const response = await client.responses.parse({
+    model: REVIEW_SUMMARY_MODEL,
+    instructions: `You are writing the post-session coaching summary for a clinical communication simulation review screen.
 
-  try {
-    return await requestParsedReviewSummary(
-      client,
-      input,
-      prompt,
-      REVIEW_SUMMARY_MAX_OUTPUT_TOKENS
-    );
-  } catch (error) {
-    if (!isStructuredOutputParseError(error)) {
-      throw error;
-    }
+Analyse the actual dialogue and produce learner-facing coaching for this specific session.
+
+Rules:
+- Use British English.
+- Be behaviour-focused, specific, and psychologically safe.
+- Write in plain English that a trainee can understand quickly after a short scenario.
+- Base the coaching on the transcript, the scenario context, and the session-level delivery evidence if it is present.
+- Name the concrete barrier, question, or issue from this case. Avoid vague stand-ins like "the concern" or "the message" unless they sit beside the concrete case anchor.
+- Avoid educator-jargon like "practical blocker", "land", "contained reply", or "clinical task".
+- Do not mention timecodes or timing phrases like "early on", "later", or "by the end".
+- Do not invent new dialogue, motives, or clinical facts.
+- State observed content directly. Hedge only inferred impact or inferred mental state.
+- overallDelivery must stay null unless the session-level delivery evidence is clearly supported.
+- whyItMattered must be explanatory, not instructional.
+- nextBestMove should be a behavioural move for this case, not a canned script.
+- Prefer null over filler. Do not pad fields that do not add anything useful.
+- Keep overview to at most two short sentences.
+- Keep every other populated field to one short sentence.`,
+    input: buildPrompt(input),
+    store: false,
+    reasoning: { effort: "medium" },
+    max_output_tokens: maxOutputTokens,
+    text: {
+      format: zodTextFormat(summaryRenderSchema, "review_summary_render"),
+      verbosity: "low",
+    },
+  });
+
+  const parsed = parseStructuredOutputText(response, summaryRenderSchema);
+  if (parsed) {
+    return sanitizeSummaryRender(parsed);
   }
 
-  try {
-    return await requestParsedReviewSummary(
-      client,
-      input,
-      buildReviewSummaryPrompt(input, {
-        retryNote: "Previous draft either failed JSON parsing or leaned too close to draft wording. Rewrite from the evidence, keep the JSON valid, and avoid any time-oriented phrasing.",
-      }),
-      REVIEW_SUMMARY_RETRY_MAX_OUTPUT_TOKENS
-    );
-  } catch (error) {
-    if (!isStructuredOutputParseError(error)) {
-      throw error;
+  const rawDraft = getResponseOutputText(response);
+  if (rawDraft) {
+    const rescued = await rescueSummaryParse(client, input, rawDraft, maxOutputTokens);
+    if (rescued.parsed) {
+      return sanitizeSummaryRender(rescued.parsed);
     }
+
+    throw new SyntaxError(
+      `Unable to parse structured review summary JSON (${describeStructuredOutputFailure(response)}; rescue=${rescued.failure})`
+    );
   }
 
-  try {
-    return await requestParsedReviewSummary(
-      client,
-      input,
-      buildReviewSummaryPrompt(input, {
-        compact: true,
-        retryNote: "Use the hypotheses only as background, keep the summary synthesis-first, and write fresh case-specific coaching in strict JSON.",
-      }),
-      REVIEW_SUMMARY_COMPACT_MAX_OUTPUT_TOKENS
-    );
-  } catch (error) {
-    if (!isStructuredOutputParseError(error)) {
-      throw error;
-    }
-  }
-
-  return requestParsedReviewSummary(
-    client,
-    input,
-    buildReviewSummaryPrompt(input, {
-      compact: true,
-      retryNote: "Structured schema retries failed. Return valid JSON only, keep the keys exact, and write fresh case-specific coaching rather than repeating prompt language.",
-    }),
-    REVIEW_SUMMARY_COMPACT_MAX_OUTPUT_TOKENS,
-    { jsonMode: true }
+  throw new SyntaxError(
+    `Unable to parse structured review summary JSON (${describeStructuredOutputFailure(response)})`
   );
+}
+
+function validateSummaryRender(
+  render: z.infer<typeof summaryRenderSchema>,
+  input: ReviewSummaryRenderInput
+) {
+  const issues = new Set<string>();
+  const caseAnchorTokens = getCaseAnchorTokens(
+    input.ledger.scenario_demand_summary.primary_need
+  );
+
+  if (!render.overview.trim()) {
+    issues.add("blank_overview");
+  }
+
+  if (
+    containsForbiddenTimePhrases(render.overview) ||
+    containsForbiddenTimePhrases(render.overallDelivery) ||
+    containsForbiddenTimePhrases(render.positiveMoment) ||
+    containsForbiddenTimePhrases(render.whyItMattered) ||
+    containsForbiddenTimePhrases(render.coachingFocus) ||
+    containsForbiddenTimePhrases(render.nextBestMove)
+  ) {
+    issues.add("time_phrase");
+  }
+
+  if (looksInstructional(render.whyItMattered)) {
+    issues.add("instructional_why");
+  }
+
+  if (
+    containsOverGenericCoaching(render.positiveMoment) ||
+    containsOverGenericCoaching(render.coachingFocus) ||
+    containsOverGenericCoaching(render.nextBestMove)
+  ) {
+    issues.add("generic_coaching");
+  }
+
+  if (
+    containsEducatorJargon(render.overview) ||
+    containsEducatorJargon(render.positiveMoment) ||
+    containsEducatorJargon(render.whyItMattered) ||
+    containsEducatorJargon(render.coachingFocus) ||
+    containsEducatorJargon(render.nextBestMove)
+  ) {
+    issues.add("educator_jargon");
+  }
+
+  if (render.overallDelivery && !input.ledger.delivery_aggregate.supported) {
+    issues.add("unsupported_delivery");
+  }
+
+  if (
+    !hasCaseAnchor(render.overview, caseAnchorTokens) &&
+    !hasCaseAnchor(render.whyItMattered, caseAnchorTokens) &&
+    !hasCaseAnchor(render.nextBestMove, caseAnchorTokens)
+  ) {
+    issues.add("missing_case_anchor");
+  }
+
+  return [...issues];
+}
+
+async function repairSummaryFields(
+  input: ReviewSummaryRenderInput,
+  current: z.infer<typeof summaryRenderSchema>,
+  fields: Array<keyof z.infer<typeof summaryRenderSchema>>
+) {
+  const client = getOpenAIClient();
+  if (!client || fields.length === 0) {
+    return null;
+  }
+
+  const response = await client.responses.parse({
+    model: REVIEW_SUMMARY_MODEL,
+    instructions: `You are repairing specific fields in a clinical coaching summary.
+
+Only rewrite the named fields. Omit every field that does not need rewriting.
+
+Rules:
+- Use British English.
+- Keep the coaching aligned with the supplied transcript evidence and scenario context.
+- Use plain English that a trainee can understand quickly.
+- whyItMattered must explain, not instruct.
+- nextBestMove must stay case-specific and behaviour-focused.
+- Do not mention timecodes or fallback wording.
+- Avoid educator-jargon like "practical blocker", "land", "contained reply", or "clinical task".
+- Do not invent any new facts.`,
+    input: [
+      `Fields to rewrite: ${fields.join(", ")}`,
+      buildPrompt(input),
+      "Current draft:",
+      JSON.stringify(current),
+    ].join("\n\n"),
+    store: false,
+    reasoning: { effort: "low" },
+    max_output_tokens: REVIEW_SUMMARY_REPAIR_MAX_OUTPUT_TOKENS,
+    text: {
+      format: zodTextFormat(summaryRepairSchema, "review_summary_repair"),
+      verbosity: "low",
+    },
+  });
+
+  const parsed = parseStructuredOutputText(response, summaryRepairSchema);
+  if (!parsed) {
+    throw new SyntaxError(
+      `Unable to parse structured review summary repair JSON (${describeStructuredOutputFailure(response)})`
+    );
+  }
+
+  return parsed;
+}
+
+function buildFieldProvenance(summary: ReviewSummaryData | null): ReviewSurfaceMeta["field_provenance"] {
+  if (!summary) return {};
+  return {
+    overview: { source: "llm_render", evidenceIds: [], note: "Rendered from transcript evidence." },
+    overallDelivery: { source: "audio_aggregate", evidenceIds: [], note: null },
+    positiveMoment: { source: "llm_render", evidenceIds: [], note: "Generated from transcript evidence." },
+    whyItMattered: { source: "llm_render", evidenceIds: [], note: "Generated from transcript evidence." },
+    coachingFocus: { source: "llm_render", evidenceIds: [], note: "Generated from transcript evidence." },
+    nextBestMove: { source: "llm_render", evidenceIds: [], note: "Generated from transcript evidence." },
+    objectiveFocus: { source: "deterministic_evidence", evidenceIds: [], note: null },
+    personFocus: { source: "deterministic_evidence", evidenceIds: [], note: null },
+  };
+}
+
+function toPublicSummary(render: z.infer<typeof summaryRenderSchema>): ReviewSummaryData {
+  return {
+    version: REVIEW_SUMMARY_VERSION,
+    source: "generated",
+    overview: render.overview,
+    overallDelivery: render.overallDelivery,
+    positiveMoment: render.positiveMoment,
+    whyItMattered: render.whyItMattered,
+    coachingFocus: render.coachingFocus,
+    whatToSayInstead: render.nextBestMove,
+    objectiveFocus: render.objectiveFocus,
+    personFocus: render.personFocus,
+    achievedObjectives: [],
+    outstandingObjectives: [],
+  };
+}
+
+function buildMeta(
+  summary: ReviewSummaryData | null,
+  options: {
+    retryCount: number;
+    failureClass: RenderFailureClass | null;
+    validatorFailures: string[];
+  }
+): ReviewSurfaceMeta {
+  return {
+    prompt_version: REVIEW_SUMMARY_PROMPT_VERSION,
+    schema_version: REVIEW_SUMMARY_SCHEMA_VERSION,
+    model: REVIEW_SUMMARY_MODEL,
+    reasoning_effort: "medium",
+    retry_count: options.retryCount,
+    fallback_used: false,
+    failure_class: options.failureClass,
+    validator_failures: options.validatorFailures,
+    field_provenance: buildFieldProvenance(summary),
+  };
+}
+
+export async function generateReviewSummary(
+  input: ReviewSummaryRenderInput
+): Promise<{ summary: ReviewSummaryData | null; meta: ReviewSurfaceMeta }> {
+  let retryCount = 0;
+  let failureClass: RenderFailureClass | null = null;
+  let validatorFailures: string[] = [];
+
+  if (input.turns.filter((turn) => turn.speaker === "trainee").length === 0) {
+    return {
+      summary: null,
+      meta: buildMeta(null, {
+        retryCount,
+        failureClass: "semantic",
+        validatorFailures: ["no_trainee_turns"],
+      }),
+    };
+  }
+
+  try {
+    const initial = await requestSummaryRender(input, REVIEW_SUMMARY_MAX_OUTPUT_TOKENS);
+    if (!initial) {
+      return {
+        summary: null,
+        meta: buildMeta(null, {
+          retryCount,
+          failureClass: "schema",
+          validatorFailures: ["openai_unavailable"],
+        }),
+      };
+    }
+
+    let current = initial;
+    validatorFailures = validateSummaryRender(current, input);
+
+    if (validatorFailures.includes("unsupported_delivery")) {
+      current = { ...current, overallDelivery: null };
+      validatorFailures = validateSummaryRender(current, input);
+    }
+
+    if (validatorFailures.length > 0) {
+      retryCount += 1;
+      const repairFields = new Set<keyof z.infer<typeof summaryRenderSchema>>();
+      if (validatorFailures.includes("instructional_why")) repairFields.add("whyItMattered");
+      if (validatorFailures.includes("generic_coaching")) {
+        repairFields.add("positiveMoment");
+        repairFields.add("coachingFocus");
+        repairFields.add("nextBestMove");
+      }
+      if (validatorFailures.includes("educator_jargon")) {
+        repairFields.add("overview");
+        repairFields.add("positiveMoment");
+        repairFields.add("whyItMattered");
+        repairFields.add("coachingFocus");
+        repairFields.add("nextBestMove");
+      }
+      if (validatorFailures.includes("missing_case_anchor")) {
+        repairFields.add("overview");
+        repairFields.add("whyItMattered");
+        repairFields.add("nextBestMove");
+      }
+      if (validatorFailures.includes("time_phrase")) {
+        repairFields.add("overview");
+        repairFields.add("whyItMattered");
+        repairFields.add("coachingFocus");
+        repairFields.add("nextBestMove");
+      }
+
+      if (repairFields.size > 0) {
+        const repaired = await repairSummaryFields(input, current, [...repairFields]);
+        if (repaired) {
+          current = { ...current, ...repaired };
+          validatorFailures = validateSummaryRender(current, input);
+        }
+      }
+    }
+
+    if (validatorFailures.length > 0) {
+      failureClass = validatorFailures.some((issue) => issue.startsWith("provenance"))
+        ? "provenance"
+        : "semantic";
+      return {
+        summary: null,
+        meta: buildMeta(null, {
+          retryCount,
+          failureClass,
+          validatorFailures,
+        }),
+      };
+    }
+
+    const summary = {
+      ...toPublicSummary(current),
+      achievedObjectives: input.ledger.objective_ledger.achieved_objectives,
+      outstandingObjectives: input.ledger.objective_ledger.outstanding_objectives,
+    };
+
+    return {
+      summary,
+      meta: buildMeta(summary, {
+        retryCount,
+        failureClass: null,
+        validatorFailures: [],
+      }),
+    };
+  } catch (error) {
+    failureClass = error instanceof SyntaxError ? "parse" : "schema";
+    validatorFailures = error instanceof Error ? [error.message] : validatorFailures;
+    return {
+      summary: null,
+      meta: buildMeta(null, {
+        retryCount,
+        failureClass,
+        validatorFailures,
+      }),
+    };
+  }
 }

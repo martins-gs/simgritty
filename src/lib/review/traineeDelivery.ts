@@ -1,5 +1,13 @@
-import type { SimulationStateEvent, TranscriptTurn } from "@/types/simulation";
-import { getStoredEventKind, parseTraineeDeliveryAnalysis } from "@/lib/validation/schemas";
+import type {
+  SessionDeliveryAnalysis,
+  SimulationStateEvent,
+  TranscriptTurn,
+} from "@/types/simulation";
+import {
+  getStoredEventKind,
+  parseSessionDeliveryAnalysis,
+  parseTraineeDeliveryAnalysis,
+} from "@/lib/validation/schemas";
 
 export function mergeTraineeAudioDeliveryFromEvents(
   turns: TranscriptTurn[],
@@ -50,4 +58,31 @@ export function mergeTraineeAudioDeliveryFromEvents(
         : null,
     };
   });
+}
+
+export function getSessionAudioDeliveryFromEvents(
+  events: SimulationStateEvent[]
+): SessionDeliveryAnalysis | null {
+  const matchingEvents = [...events]
+    .filter((event) => event.event_type === "classification_result")
+    .sort((a, b) => b.event_index - a.event_index);
+
+  for (const event of matchingEvents) {
+    const payload = event.payload;
+    if (!payload || typeof payload !== "object") continue;
+
+    const record = payload as Record<string, unknown>;
+    const eventKind = getStoredEventKind(payload);
+    const source = typeof record.source === "string" ? record.source : null;
+    if (eventKind !== "session_audio_delivery" && source !== "session_audio_delivery") {
+      continue;
+    }
+
+    const deliveryAnalysis = parseSessionDeliveryAnalysis(record.delivery_analysis);
+    if (deliveryAnalysis) {
+      return deliveryAnalysis;
+    }
+  }
+
+  return null;
 }

@@ -997,38 +997,113 @@ export function isSessionPreliminary(turnCount: number): boolean {
 
 /** Pick the 2-3 highest-impact evidence items for "key moments" display. */
 export function pickKeyMoments(evidence: ScoreEvidence[], maxCount = 3): ScoreEvidence[] {
-  const ranked = [...evidence].sort((a, b) => Math.abs(b.scoreImpact) - Math.abs(a.scoreImpact));
+  function isPositiveEvidence(item: ScoreEvidence) {
+    return (
+      item.scoreImpact > 0 ||
+      item.evidenceType === "milestone_completed" ||
+      (item.evidenceType === "de_escalation_attempt" && item.evidenceData.effective === true)
+    );
+  }
+
+  function getEvidencePriority(item: ScoreEvidence) {
+    const base = Math.abs(item.scoreImpact);
+
+    switch (item.evidenceType) {
+      case "critical_no_support":
+        return base + 30;
+      case "support_not_requested":
+        return base + 24;
+      case "de_escalation_harm":
+        return base + 20;
+      case "low_substance_response":
+        return base + 18;
+      case "composure_marker":
+        return base + 16;
+      case "support_invoked":
+        return base + 12;
+      case "delivery_marker":
+        return base + 10;
+      case "milestone_completed":
+        return Math.max(base, 8);
+      case "de_escalation_attempt":
+        return Math.max(base, item.evidenceData.effective === true ? 9 : 5);
+      default:
+        return base;
+    }
+  }
+
+  function pickStrongest(items: ScoreEvidence[]) {
+    return [...items].sort((a, b) => getEvidencePriority(b) - getEvidencePriority(a))[0];
+  }
+
+  const evidenceByTurn = new Map<number, ScoreEvidence[]>();
+  for (const item of evidence) {
+    const existing = evidenceByTurn.get(item.turnIndex);
+    if (existing) {
+      existing.push(item);
+    } else {
+      evidenceByTurn.set(item.turnIndex, [item]);
+    }
+  }
+
+  const turnCandidates = [...evidenceByTurn.entries()]
+    .map(([turnIndex, items]) => {
+      const positiveItems = items.filter(isPositiveEvidence);
+      const negativeItems = items.filter((item) => item.scoreImpact < 0);
+      const netImpact = items.reduce((sum, item) => sum + item.scoreImpact, 0);
+      const positiveRepresentative = positiveItems.length > 0 ? pickStrongest(positiveItems) : null;
+      const negativeRepresentative = negativeItems.length > 0 ? pickStrongest(negativeItems) : null;
+
+      let representative = pickStrongest(items);
+      if (netImpact < 0 && negativeRepresentative) {
+        representative = negativeRepresentative;
+      } else if (netImpact > 0 && positiveRepresentative) {
+        representative = positiveRepresentative;
+      }
+
+      return {
+        turnIndex,
+        netImpact,
+        representative,
+        positiveRepresentative,
+        negativeRepresentative,
+        strength: Math.max(Math.abs(netImpact), getEvidencePriority(representative)),
+      };
+    })
+    .sort((a, b) => b.strength - a.strength || a.turnIndex - b.turnIndex);
+
   const selected: ScoreEvidence[] = [];
   const selectedTurnIndexes = new Set<number>();
 
-  function canSelect(item: ScoreEvidence) {
-    return !selectedTurnIndexes.has(item.turnIndex);
+  function canSelectTurn(turnIndex: number) {
+    return !selectedTurnIndexes.has(turnIndex);
   }
 
-  function pushIfSelectable(item: ScoreEvidence | undefined) {
-    if (!item || !canSelect(item)) return false;
+  function pushCandidate(item: ScoreEvidence | null | undefined) {
+    if (!item || !canSelectTurn(item.turnIndex)) return false;
     selected.push(item);
     selectedTurnIndexes.add(item.turnIndex);
     return true;
   }
 
-  const strongestPositive = ranked.find((item) => (
-    canSelect(item) && (
-      item.scoreImpact > 0 ||
-      item.evidenceType === "milestone_completed" ||
-      (item.evidenceType === "de_escalation_attempt" && item.evidenceData.effective === true)
-    )
+  const strongestPositive = turnCandidates.find((candidate) => (
+    canSelectTurn(candidate.turnIndex) &&
+    candidate.netImpact >= 0 &&
+    candidate.positiveRepresentative
   ));
+  pushCandidate(strongestPositive?.positiveRepresentative);
 
-  pushIfSelectable(strongestPositive);
-  const strongestNegative = ranked.find((item) => canSelect(item) && item.scoreImpact < 0);
-  pushIfSelectable(strongestNegative);
+  const strongestNegative = turnCandidates.find((candidate) => (
+    canSelectTurn(candidate.turnIndex) &&
+    candidate.netImpact < 0 &&
+    candidate.negativeRepresentative
+  ));
+  pushCandidate(strongestNegative?.negativeRepresentative);
 
-  for (const item of ranked) {
+  for (const candidate of turnCandidates) {
     if (selected.length >= maxCount) break;
-    if (!canSelect(item)) continue;
-    selected.push(item);
-    selectedTurnIndexes.add(item.turnIndex);
+    if (!canSelectTurn(candidate.turnIndex)) continue;
+    pushCandidate(candidate.representative);
   }
 
   return selected

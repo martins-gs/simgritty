@@ -11,11 +11,12 @@ import { ScoreCard } from "@/components/review/ScoreCard";
 import { ReflectionPrompt } from "@/components/review/ReflectionPrompt";
 import { ReviewSummaryCard } from "@/components/review/ReviewSummaryCard";
 import { ScenarioHistoryCoachCard } from "@/components/review/ScenarioHistoryCoachCard";
-import { computeScore, isSessionPreliminary, pickKeyMoments } from "@/lib/engine/scoring";
+import { computeScore, isSessionPreliminary } from "@/lib/engine/scoring";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { mergeTraineeAudioDeliveryFromEvents } from "@/lib/review/traineeDelivery";
+import { parseStoredReviewArtifacts } from "@/lib/review/artifacts";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type {
@@ -80,6 +81,17 @@ function needsReviewRefresh(
 ): boolean {
   if (!session) return true;
 
+  const storedArtifacts = parseStoredReviewArtifacts(session.review_artifacts);
+  const summaryAttempted =
+    Boolean(storedArtifacts?.summary) ||
+    Boolean(storedArtifacts?.meta.summary && !storedArtifacts.meta.summary.failure_class);
+  const timelineAttempted =
+    Boolean(storedArtifacts?.timeline) ||
+    Boolean(storedArtifacts?.meta.timeline && !storedArtifacts.meta.timeline.failure_class);
+  if (summaryAttempted && timelineAttempted) {
+    return false;
+  }
+
   const missingSessionSummary =
     !session.exit_type ||
     session.peak_escalation_level == null ||
@@ -87,15 +99,8 @@ function needsReviewRefresh(
   const missingClinicianAudio =
     expectsClinicianAudio(turns, events) &&
     !events.some(isClinicianAudioEvent);
-  const missingTraineeDeliveryAnalysis = turns.some(
-    (turn) =>
-      turn.speaker === "trainee" &&
-      turn.classifier_result !== null &&
-      turn.trainee_delivery_analysis == null &&
-      turn.classifier_result.trainee_delivery_analysis == null
-  );
 
-  return missingSessionSummary || missingClinicianAudio || missingTraineeDeliveryAnalysis;
+  return missingSessionSummary || missingClinicianAudio;
 }
 
 function ScorePlaceholderCard({
@@ -153,6 +158,17 @@ function ScorePlaceholderCard({
 
 type ReviewPanel = "transcript" | "events" | "notes";
 
+interface ReviewPageLoadResult {
+  session: SimulationSession | null;
+  turns: TranscriptTurn[];
+  events: SimulationStateEvent[];
+  notes: EducatorNote[];
+  sessionMissing: boolean;
+}
+
+const reviewPageLoadResultCache = new Map<string, ReviewPageLoadResult>();
+const reviewPageLoadRequestCache = new Map<string, Promise<ReviewPageLoadResult>>();
+
 export default function ReviewPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const router = useRouter();
@@ -176,29 +192,56 @@ export default function ReviewPage() {
     let attempts = 0;
 
     async function load() {
-      const [sessionRes, turnsRes, eventsRes, notesRes] = await Promise.all([
-        fetch(`/api/sessions/${sessionId}`, { cache: "no-store" }).catch(() => null),
-        fetch(`/api/sessions/${sessionId}/transcript`, { cache: "no-store" }).catch(() => null),
-        fetch(`/api/sessions/${sessionId}/events`, { cache: "no-store" }).catch(() => null),
-        fetch(`/api/sessions/${sessionId}/educator-notes`, { cache: "no-store" }).catch(() => null),
-      ]);
+      const cachedResult = attempts === 0
+        ? reviewPageLoadResultCache.get(sessionId)
+        : undefined;
+      const loaded = cachedResult
+        ? cachedResult
+        : await (() => {
+            let requestPromise = reviewPageLoadRequestCache.get(sessionId);
+            if (!requestPromise) {
+              requestPromise = (async () => {
+                const [sessionRes, turnsRes, eventsRes, notesRes] = await Promise.all([
+                  fetch(`/api/sessions/${sessionId}`, { cache: "no-store" }).catch(() => null),
+                  fetch(`/api/sessions/${sessionId}/transcript`, { cache: "no-store" }).catch(() => null),
+                  fetch(`/api/sessions/${sessionId}/events`, { cache: "no-store" }).catch(() => null),
+                  fetch(`/api/sessions/${sessionId}/educator-notes`, { cache: "no-store" }).catch(() => null),
+                ]);
+
+                const nextSession = sessionRes?.ok
+                  ? await readJsonSafely(sessionRes, parseSimulationSession, null, "session")
+                  : null;
+                const nextTurns = turnsRes?.ok
+                  ? await readJsonSafely(turnsRes, parseTranscriptTurns, [], "transcript")
+                  : [];
+                const nextEvents = eventsRes?.ok
+                  ? await readJsonSafely(eventsRes, parseSimulationEvents, [], "events")
+                  : [];
+                const nextNotes = notesRes?.ok
+                  ? await readJsonSafely(notesRes, parseEducatorNotes, [], "notes")
+                  : [];
+
+                const mergedTurns = mergeTraineeAudioDeliveryFromEvents(nextTurns, nextEvents);
+                const result: ReviewPageLoadResult = {
+                  session: nextSession,
+                  turns: mergedTurns,
+                  events: nextEvents,
+                  notes: nextNotes,
+                  sessionMissing: sessionRes?.status === 404,
+                };
+                reviewPageLoadResultCache.set(sessionId, result);
+                return result;
+              })().finally(() => {
+                reviewPageLoadRequestCache.delete(sessionId);
+              });
+              reviewPageLoadRequestCache.set(sessionId, requestPromise);
+            }
+
+            return requestPromise;
+          })();
       if (cancelled) return;
 
-      const nextSession = sessionRes?.ok
-        ? await readJsonSafely(sessionRes, parseSimulationSession, null, "session")
-        : null;
-      const nextTurns = turnsRes?.ok
-        ? await readJsonSafely(turnsRes, parseTranscriptTurns, [], "transcript")
-        : [];
-      const nextEvents = eventsRes?.ok
-        ? await readJsonSafely(eventsRes, parseSimulationEvents, [], "events")
-        : [];
-      const nextNotes = notesRes?.ok
-        ? await readJsonSafely(notesRes, parseEducatorNotes, [], "notes")
-        : [];
-      if (cancelled) return;
-
-      if (sessionRes?.status === 404) {
+      if (loaded.sessionMissing) {
         setSessionMissing(true);
         setSession(null);
         setTurns([]);
@@ -209,36 +252,24 @@ export default function ReviewPage() {
       }
 
       setSessionMissing(false);
-
-      const mergedTurns = mergeTraineeAudioDeliveryFromEvents(nextTurns, nextEvents);
-
-      setSession(nextSession);
-      setTurns(mergedTurns);
-      setEvents(nextEvents);
-      setNotes(nextNotes);
+      setSession(loaded.session);
+      setTurns(loaded.turns);
+      setEvents(loaded.events);
+      setNotes(loaded.notes);
       setLoading(false);
 
-      const directAudioDeliveryTurnIndexes = nextTurns.flatMap((turn) => (
+      const audioDeliveryTurnIndexes = loaded.turns.flatMap((turn) => (
         turn.speaker === "trainee" &&
         (turn.trainee_delivery_analysis || turn.classifier_result?.trainee_delivery_analysis)
           ? [turn.turn_index]
           : []
       ));
-      const audioDeliveryTurnIndexes = mergedTurns.flatMap((turn) => (
-        turn.speaker === "trainee" &&
-        (turn.trainee_delivery_analysis || turn.classifier_result?.trainee_delivery_analysis)
-          ? [turn.turn_index]
-          : []
-      ));
-      const fallbackAudioDeliveryTurnIndexes = audioDeliveryTurnIndexes.filter(
-        (turnIndex) => !directAudioDeliveryTurnIndexes.includes(turnIndex)
-      );
       console.info(
-        `[Review] loaded trainee audio delivery turns=${audioDeliveryTurnIndexes.join(",") || "none"} direct=${directAudioDeliveryTurnIndexes.join(",") || "none"} fallback=${fallbackAudioDeliveryTurnIndexes.join(",") || "none"}`
+        `[Review] loaded turn-level trainee audio delivery turns=${audioDeliveryTurnIndexes.join(",") || "none"}`
       );
 
       // Fetch audio recording URL if available (non-blocking, once only)
-      if (nextSession?.recording_path && !audioFetchedRef.current) {
+      if (loaded.session?.recording_path && !audioFetchedRef.current) {
         audioFetchedRef.current = true;
         fetch(`/api/sessions/${sessionId}/audio`)
           .then((r) => (r.ok ? r.json() : null))
@@ -253,7 +284,7 @@ export default function ReviewPage() {
           .catch(() => {});
       }
 
-      if (attempts >= 8 || !needsReviewRefresh(nextSession, mergedTurns, nextEvents)) {
+      if (attempts >= 8 || !needsReviewRefresh(loaded.session, loaded.turns, loaded.events)) {
         return;
       }
 
@@ -321,10 +352,6 @@ export default function ReviewPage() {
   const supportThreshold = snapshot.support_threshold;
   const criticalThreshold = snapshot.critical_threshold;
   const learningObjectives = snapshot.learning_objectives;
-  const scenarioTraits = snapshot.scenario_traits[0] ?? null;
-  const scenarioBackstory = snapshot.backstory;
-  const scenarioEmotionalDriver = snapshot.emotional_driver;
-  const scenarioAiRole = snapshot.ai_role;
 
   const clinicianAudioEvents = events
     .filter(isClinicianAudioEvent)
@@ -349,8 +376,6 @@ export default function ReviewPage() {
   });
 
   const preliminary = isSessionPreliminary(score.turnCount);
-  const keyMoments = pickKeyMoments(score.evidence);
-  const timelineKeyMoments = pickKeyMoments(score.evidence, 8);
 
   const selectedTurn = turns.find((turn) => turn.id === selectedTurnId) ?? null;
   const canRestartFromSelectedTurn = Boolean(selectedTurn?.state_after && selectedTurn?.patient_prompt_after);
@@ -451,23 +476,14 @@ export default function ReviewPage() {
         <div className="space-y-4">
           <ReflectionPrompt sessionId={sessionId} />
 
-          {score.sessionValid && (
-            <div className="space-y-4">
-              <ReviewSummaryCard
-                sessionId={sessionId}
-                session={session}
-                score={score}
-                turns={turns}
-                keyMoments={keyMoments}
-                learningObjectives={learningObjectives}
-                milestones={milestones}
-                aiRole={scenarioAiRole}
-                backstory={scenarioBackstory}
-                emotionalDriver={scenarioEmotionalDriver}
-                traits={scenarioTraits}
-              />
-            </div>
-          )}
+          <div className="space-y-4">
+            <ReviewSummaryCard
+              sessionId={sessionId}
+              session={session}
+              turns={turns}
+              learningObjectives={learningObjectives}
+            />
+          </div>
         </div>
 
         <Card>
@@ -480,7 +496,6 @@ export default function ReviewPage() {
                 sessionId={sessionId}
                 events={events}
                 turns={turns}
-                keyMoments={timelineKeyMoments}
                 maxCeiling={snapshot.escalation_rules[0]?.max_ceiling ?? 8}
                 sessionStartedAt={recordingStartedAt ?? session.started_at}
                 recordingUrl={recordingUrl}

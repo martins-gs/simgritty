@@ -75,14 +75,58 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-export async function convertAudioBlobToWavBase64(blob: Blob): Promise<string> {
+async function resampleAudioBuffer(
+  audioBuffer: AudioBuffer,
+  targetSampleRate: number
+) {
+  if (audioBuffer.sampleRate === targetSampleRate) {
+    return audioBuffer;
+  }
+
+  const frameCount = Math.max(1, Math.ceil(audioBuffer.duration * targetSampleRate));
+  const offlineContext = new OfflineAudioContext(1, frameCount, targetSampleRate);
+  const source = offlineContext.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(offlineContext.destination);
+  source.start(0);
+
+  return offlineContext.startRendering();
+}
+
+interface ConvertAudioToWavOptions {
+  sampleRate?: number;
+}
+
+export async function convertAudioBlobToWavArrayBuffer(
+  blob: Blob,
+  options: ConvertAudioToWavOptions = {}
+): Promise<ArrayBuffer> {
   const audioContext = new AudioContext();
 
   try {
     const sourceBuffer = await blob.arrayBuffer();
-    const audioBuffer = await audioContext.decodeAudioData(sourceBuffer);
-    return arrayBufferToBase64(audioBufferToWav(audioBuffer));
+    const decodedBuffer = await audioContext.decodeAudioData(sourceBuffer);
+    const renderedBuffer = options.sampleRate
+      ? await resampleAudioBuffer(decodedBuffer, options.sampleRate)
+      : decodedBuffer;
+    return audioBufferToWav(renderedBuffer);
   } finally {
     await audioContext.close().catch(() => undefined);
   }
+}
+
+export async function convertAudioBlobToWavBlob(
+  blob: Blob,
+  options: ConvertAudioToWavOptions = {}
+): Promise<Blob> {
+  const wavBuffer = await convertAudioBlobToWavArrayBuffer(blob, options);
+  return new Blob([wavBuffer], { type: "audio/wav" });
+}
+
+export async function convertAudioBlobToWavBase64(
+  blob: Blob,
+  options: ConvertAudioToWavOptions = {}
+): Promise<string> {
+  const wavBuffer = await convertAudioBlobToWavArrayBuffer(blob, options);
+  return arrayBufferToBase64(wavBuffer);
 }

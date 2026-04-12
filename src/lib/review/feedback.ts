@@ -42,7 +42,7 @@ export interface ReviewSummaryData {
   outstandingObjectives: string[];
 }
 
-export const REVIEW_SUMMARY_VERSION = 4;
+export const REVIEW_SUMMARY_VERSION = 6;
 
 const reviewScenarioTraitsSchema = z.object({
   hostility: z.number().min(0).max(10),
@@ -128,6 +128,7 @@ export const reviewSummaryRequestSchema = z.object({
 export const generatedTimelineNarrativeSchema = z.object({
   turnIndex: z.number().int().min(0),
   timecode: z.string().min(1),
+  lens: z.string().nullable().default(null),
   headline: z.string(),
   likelyImpact: z.string(),
   whatHappenedNext: z.string(),
@@ -141,11 +142,36 @@ export const reviewTimelineResponseSchema = z.object({
   narratives: z.array(generatedTimelineNarrativeSchema).max(12).default([]),
 });
 
+export const reviewDebugSchema = z.object({
+  ok: z.boolean(),
+  message: z.string().nullable().default(null),
+  promptVersion: z.string().nullable().default(null),
+  schemaVersion: z.string().nullable().default(null),
+  model: z.string().nullable().default(null),
+  reasoningEffort: z.string().nullable().default(null),
+  fallbackUsed: z.boolean().default(false),
+  failureClass: z.enum(["parse", "schema", "semantic", "duplication", "provenance"]).nullable().default(null),
+  validatorFailures: z.array(z.string()).default([]),
+});
+
+export const reviewSummaryApiResponseSchema = z.object({
+  summary: reviewSummaryResponseSchema.nullable().default(null),
+  debug: reviewDebugSchema,
+});
+
+export const reviewTimelineApiResponseSchema = z.object({
+  timeline: reviewTimelineResponseSchema.nullable().default(null),
+  debug: reviewDebugSchema,
+});
+
 export type ReviewSummaryMomentInput = z.infer<typeof reviewSummaryMomentSchema>;
 export type ReviewSummaryRequest = z.infer<typeof reviewSummaryRequestSchema>;
 export type ReviewSummaryResponse = z.infer<typeof reviewSummaryResponseSchema>;
 export type GeneratedTimelineNarrative = z.infer<typeof generatedTimelineNarrativeSchema>;
 export type ReviewTimelineResponse = z.infer<typeof reviewTimelineResponseSchema>;
+export type ReviewDebug = z.infer<typeof reviewDebugSchema>;
+export type ReviewSummaryApiResponse = z.infer<typeof reviewSummaryApiResponseSchema>;
+export type ReviewTimelineApiResponse = z.infer<typeof reviewTimelineApiResponseSchema>;
 
 const DELIVERY_CONFIDENCE_THRESHOLD = 0.45;
 const POSITIVE_DELIVERY_MARKERS = new Set<TraineeDeliveryMarker>([

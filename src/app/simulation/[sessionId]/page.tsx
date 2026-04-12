@@ -4,13 +4,12 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSimulationStore } from "@/store/simulationStore";
 import {
-  type TraineeAudioSegment,
   type TraineeTranscriptMeta,
   useRealtimeSession,
 } from "@/hooks/useRealtimeSession";
 import { useRealtimeVoiceRenderer } from "@/hooks/useRealtimeVoiceRenderer";
 import { useSessionRecorder } from "@/hooks/useSessionRecorder";
-import { convertAudioBlobToWavBase64 } from "@/lib/audio/wav";
+import { convertAudioBlobToWavBlob } from "@/lib/audio/wav";
 import { EscalationEngine } from "@/lib/engine/escalationEngine";
 import { buildPrompt } from "@/lib/engine/promptBuilder";
 import {
@@ -20,7 +19,7 @@ import {
 } from "@/lib/engine/clinicianVoiceBuilder";
 import { Waveform } from "@/components/simulation/Waveform";
 import { LiveTranscript, type TranscriptEntry } from "@/components/simulation/LiveTranscript";
-import { Mic, MicOff, Square, Bot, Hand } from "lucide-react";
+import { Mic, MicOff, Square, Bot, Hand, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { EscalationState } from "@/types/escalation";
@@ -48,7 +47,6 @@ import {
   parseSimulationEvents,
   parseSimulationSession,
   parseStructuredVoiceProfile,
-  parseTraineeDeliveryAnalysis,
   parseTranscriptTurns,
   type ValidatedScenarioSnapshot,
 } from "@/lib/validation/schemas";
@@ -108,6 +106,12 @@ interface ClinicianAudioResult {
   elapsedMs: number | null;
 }
 
+interface EndingStatus {
+  title: string;
+  detail: string;
+  stepLabel: string;
+}
+
 interface PatientReplyUpdateResult {
   snapshot: PersistedTurnSnapshot | null;
   stateAfter: EscalationState;
@@ -128,23 +132,13 @@ interface SessionEventInput {
   payload?: Record<string, unknown>;
 }
 
-interface PendingTraineeAudioAnalysisTurn {
-  turnIndex: number;
-  utterance: string;
-  scenarioContext: string;
-  currentEscalation: number;
-  recentTurns: { speaker: string; content: string }[];
-  classifierResult: ClassifierResult;
-  snapshot: PersistedTurnSnapshot;
-  durationMs: number | null;
-  turnPersistPromise: Promise<unknown> | null;
-}
-
 const FALLBACK_BOT_TURN: PreparedBotTurn = {
   text: "I can see this is a difficult situation. Let me help.",
   technique: "general de-escalation",
   voiceProfile: null,
 };
+
+const skippedDevUnmountEndSessions = new Set<string>();
 
 export default function SimulationPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -190,6 +184,7 @@ export default function SimulationPage() {
   const [botActive, setBotActive] = useState(false);
   const [botSpeaking, setBotSpeaking] = useState(false);
   const [mobileTab, setMobileTab] = useState<"simulation" | "transcript" | "scenario">("simulation");
+  const [endingStatus, setEndingStatus] = useState<EndingStatus | null>(null);
 
   const engineRef = useRef<EscalationEngine | null>(null);
   const turnIndexRef = useRef(0);
@@ -221,9 +216,8 @@ export default function SimulationPage() {
   const lastClinicianVoiceProfileRef = useRef<StructuredVoiceProfile | null>(null);
   const pendingPatientTurnCompletionRef = useRef<PendingTurnCompletion | null>(null);
   const maxSessionDurationSecondsRef = useRef<number>(10 * 60);
-  const pendingTraineeAudioAnalysisTurnsRef = useRef<Map<string, PendingTraineeAudioAnalysisTurn>>(new Map());
-  const pendingTraineeAudioSegmentsRef = useRef<Map<string, TraineeAudioSegment>>(new Map());
-  const inFlightTraineeAudioAnalysisRef = useRef<Set<string>>(new Set());
+  const sessionStartedRef = useRef(false);
+  const liveRequestControllersRef = useRef<Set<AbortController>>(new Set());
 
   useEffect(() => { transcriptRef.current = transcriptEntries; }, [transcriptEntries]);
 
@@ -241,7 +235,7 @@ export default function SimulationPage() {
   // sendBeacon is guaranteed to be dispatched even as the page tears down.
   useEffect(() => {
     function handleUnload() {
-      if (endingRef.current) return;
+      if (endingRef.current || !sessionStartedRef.current) return;
       navigator.sendBeacon(
         `/api/sessions/${sessionId}/end`,
         new Blob(
@@ -360,7 +354,8 @@ export default function SimulationPage() {
             snapshot,
             engine.getState(),
             recentTurns,
-            patientVoiceProfileRef.current,
+            undefined,
+            undefined,
             abortController.signal
           );
         const instructions =
@@ -372,6 +367,8 @@ export default function SimulationPage() {
         const started = await startSession(abortController.signal);
         if (!started) {
           console.warn(`[Simulation Init] Continuing without confirmed session start for session=${sessionId}`);
+        } else {
+          sessionStartedRef.current = true;
         }
 
         await connect({
@@ -379,7 +376,6 @@ export default function SimulationPage() {
           instructions,
           turnPauseAllowanceMs: voiceConfig.turn_pause_allowance_ms,
           onTraineeTranscript: handleTraineeTranscript,
-          onTraineeAudioSegment: handleTraineeAudioSegment,
           onAiTranscript: handleAiTranscriptDone,
           onAiTranscriptDelta: handleAiDelta,
           onAiPlaybackComplete: handleAiPlaybackComplete,
@@ -428,7 +424,11 @@ export default function SimulationPage() {
       disconnect();
       disposeRecorder();
       // End the session on SPA navigation (component unmount) if not already ending
-      if (!endingRef.current) {
+      if (process.env.NODE_ENV !== "production" && !skippedDevUnmountEndSessions.has(sessionId)) {
+        skippedDevUnmountEndSessions.add(sessionId);
+        return;
+      }
+      if (!endingRef.current && sessionStartedRef.current) {
         fetch(`/api/sessions/${sessionId}/end`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -461,6 +461,23 @@ export default function SimulationPage() {
     return promise;
   }
 
+  function createLiveRequestController() {
+    const controller = new AbortController();
+    liveRequestControllersRef.current.add(controller);
+    return controller;
+  }
+
+  function releaseLiveRequestController(controller: AbortController) {
+    liveRequestControllersRef.current.delete(controller);
+  }
+
+  function abortLiveRequestControllers() {
+    for (const controller of liveRequestControllersRef.current) {
+      controller.abort();
+    }
+    liveRequestControllersRef.current.clear();
+  }
+
   async function flushPendingPersistence(timeoutMs: number = 2500) {
     const pending = Array.from(pendingPersistenceRef.current);
     if (pending.length === 0) return;
@@ -491,6 +508,9 @@ export default function SimulationPage() {
   }
 
   function persistSessionEventRequest(event: SessionEventInput) {
+    if (endingRef.current) {
+      return Promise.resolve(null);
+    }
     return trackPersistence(
       persistRequest(
         `event ${event.event_type}`,
@@ -526,6 +546,9 @@ export default function SimulationPage() {
     timestamp?: string,
     durationMs?: number | null
   ) {
+    if (endingRef.current) {
+      return Promise.resolve(null);
+    }
     return trackPersistence(
       persistRequest(
         `transcript turn ${turnIndex} ${speaker}`,
@@ -556,6 +579,9 @@ export default function SimulationPage() {
     turnIndex: number,
     snapshot: PersistedTurnSnapshot
   ) {
+    if (endingRef.current) {
+      return Promise.resolve(null);
+    }
     return trackPersistence(
       persistRequest(
         `transcript patch ${turnIndex}`,
@@ -572,29 +598,6 @@ export default function SimulationPage() {
             state_after: snapshot.stateAfter,
             patient_voice_profile_after: snapshot.patientVoiceProfileAfter,
             patient_prompt_after: snapshot.patientPromptAfter,
-          }),
-        }
-      )
-    );
-  }
-
-  function updatePersistedTurnDeliveryAnalysis(
-    turnIndex: number,
-    classifierResult: ClassifierResult | null,
-    traineeDeliveryAnalysis: TraineeDeliveryAnalysis
-  ) {
-    return trackPersistence(
-      persistRequest(
-        `transcript audio patch ${turnIndex}`,
-        `/api/sessions/${sessionId}/transcript`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          keepalive: true,
-          body: JSON.stringify({
-            turn_index: turnIndex,
-            classifier_result: classifierResult,
-            trainee_delivery_analysis: traineeDeliveryAnalysis,
           }),
         }
       )
@@ -648,166 +651,6 @@ export default function SimulationPage() {
     }
   }
 
-  function maybeStartTraineeAudioAnalysis(itemId: string) {
-    const turn = pendingTraineeAudioAnalysisTurnsRef.current.get(itemId);
-    const segment = pendingTraineeAudioSegmentsRef.current.get(itemId);
-    if (!turn || !segment || inFlightTraineeAudioAnalysisRef.current.has(itemId)) {
-      return;
-    }
-
-    inFlightTraineeAudioAnalysisRef.current.add(itemId);
-    pendingTraineeAudioAnalysisTurnsRef.current.delete(itemId);
-    pendingTraineeAudioSegmentsRef.current.delete(itemId);
-
-    void trackPersistence((async () => {
-      try {
-        if (turn.turnPersistPromise) {
-          await turn.turnPersistPromise.catch(() => null);
-        }
-
-        const audioBase64 = await convertAudioBlobToWavBase64(segment.blob);
-        const res = await fetch("/api/analysis/trainee-delivery", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            utterance: turn.utterance,
-            scenarioContext: turn.scenarioContext,
-            currentEscalation: turn.currentEscalation,
-            recentTurns: turn.recentTurns,
-            audioBase64,
-            durationMs: turn.durationMs ?? segment.durationMs ?? null,
-          }),
-        }).catch((error) => {
-          console.error("[Simulation] Trainee audio analysis request failed", error);
-          return null;
-        });
-
-        if (!res || !res.ok) {
-          const errorText = res ? await res.text().catch(() => "") : "";
-          console.warn(
-            `[Simulation] Trainee audio analysis request rejected item_id=${itemId} status=${res?.status ?? "network"}`,
-            errorText
-          );
-          return;
-        }
-
-        const deliveryAnalysis = await readJsonSafely(
-          res,
-          (raw) => {
-            if (typeof raw !== "object" || raw === null || !("deliveryAnalysis" in raw)) {
-              return null;
-            }
-            return parseTraineeDeliveryAnalysis((raw as Record<string, unknown>).deliveryAnalysis);
-          },
-          null,
-          "trainee delivery analysis"
-        );
-        if (!deliveryAnalysis) {
-          console.warn(
-            `[Simulation] Trainee audio analysis returned no structured result item_id=${itemId}`
-          );
-          return;
-        }
-        console.info(
-          `[Simulation] Trainee audio analysis received item_id=${itemId} turn_index=${turn.turnIndex} markers=${deliveryAnalysis.markers.join(",") || "none"} confidence=${deliveryAnalysis.confidence.toFixed(2)}`
-        );
-
-        const nextSnapshot: PersistedTurnSnapshot = {
-          ...turn.snapshot,
-          traineeDeliveryAnalysis: deliveryAnalysis,
-          classifierResult: {
-            ...turn.classifierResult,
-            trainee_delivery_analysis: deliveryAnalysis,
-          },
-        };
-
-        const audioAnalysisEventIndex = eventIndexRef.current++;
-        const eventRes = await persistSessionEventRequest({
-          event_index: audioAnalysisEventIndex,
-          event_type: "classification_result",
-          payload: {
-            __event_kind: "trainee_audio_delivery",
-            source: "trainee_audio_delivery",
-            item_id: itemId,
-            turn_index: turn.turnIndex,
-            delivery_analysis: deliveryAnalysis,
-          },
-        });
-        if (!eventRes?.ok) {
-          console.warn(
-            `[Simulation] Trainee audio analysis event fallback failed item_id=${itemId} turn_index=${turn.turnIndex} status=${eventRes?.status ?? "network"}`
-          );
-        } else {
-          console.info(
-            `[Simulation] Trainee audio analysis event fallback saved item_id=${itemId} turn_index=${turn.turnIndex}`
-          );
-        }
-
-        const patchRes = await updatePersistedTurnDeliveryAnalysis(
-          turn.turnIndex,
-          nextSnapshot.classifierResult,
-          deliveryAnalysis
-        );
-        if (!patchRes?.ok) {
-          console.warn(
-            `[Simulation] Trainee audio analysis patch failed item_id=${itemId} turn_index=${turn.turnIndex} status=${patchRes?.status ?? "network"}`
-          );
-          return;
-        }
-        const patchAck = await readJsonSafely(
-          patchRes,
-          (raw) => {
-            if (typeof raw !== "object" || raw === null) {
-              return null;
-            }
-            const record = raw as Record<string, unknown>;
-            return {
-              hasTraineeDeliveryAnalysis: record.hasTraineeDeliveryAnalysis === true,
-              markers: Array.isArray(record.markers)
-                ? record.markers.filter((value): value is string => typeof value === "string")
-                : [],
-              confirmedFrom:
-                typeof record.confirmedFrom === "string"
-                  ? record.confirmedFrom
-                  : null,
-            };
-          },
-          null,
-          "transcript patch acknowledgement"
-        );
-        if (!patchAck?.hasTraineeDeliveryAnalysis) {
-          console.warn(
-            `[Simulation] Trainee audio analysis patch acknowledged without stored delivery item_id=${itemId} turn_index=${turn.turnIndex}`
-          );
-          return;
-        }
-        const confirmedFrom = patchAck.confirmedFrom === "event_fallback"
-          ? "event_fallback"
-          : "transcript_turn";
-        console.info(
-          `[Simulation] Trainee audio analysis transcript save confirmed item_id=${itemId} turn_index=${turn.turnIndex} source=${confirmedFrom} markers=${patchAck.markers.join(",") || "none"} confidence=${deliveryAnalysis.confidence.toFixed(2)}`
-        );
-      } catch (error) {
-        console.error("[Simulation] Trainee audio analysis error", error);
-      } finally {
-        inFlightTraineeAudioAnalysisRef.current.delete(itemId);
-      }
-    })());
-  }
-
-  function queueTraineeAudioAnalysis(
-    itemId: string,
-    pendingTurn: PendingTraineeAudioAnalysisTurn
-  ) {
-    pendingTraineeAudioAnalysisTurnsRef.current.set(itemId, pendingTurn);
-    maybeStartTraineeAudioAnalysis(itemId);
-  }
-
-  function handleTraineeAudioSegment(segment: TraineeAudioSegment) {
-    pendingTraineeAudioSegmentsRef.current.set(segment.itemId, segment);
-    maybeStartTraineeAudioAnalysis(segment.itemId);
-  }
-
   async function fetchSessionRecord(
     id: string,
     signal?: AbortSignal
@@ -833,6 +676,51 @@ export default function SimulationPage() {
     const res = await fetch(`/api/sessions/${id}/events`, { signal }).catch(() => null);
     if (!res || !res.ok) return [];
     return readJsonSafely(res, parseSimulationEvents, [], "events");
+  }
+
+  async function submitSessionDeliveryAnalysis(
+    analysisBlob: Blob,
+    durationMs: number | null
+  ) {
+    const formData = new FormData();
+    formData.append("file", analysisBlob, "session-delivery.wav");
+    if (typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs > 0) {
+      formData.append("duration_ms", String(Math.round(durationMs)));
+    }
+
+    const res = await fetch(`/api/sessions/${sessionId}/session-delivery`, {
+      method: "POST",
+      body: formData,
+    }).catch((error) => {
+      console.error("[Session Delivery] Analysis request failed", error);
+      return null;
+    });
+
+    if (!res?.ok) {
+      const errorText = res ? await res.text().catch(() => "") : "";
+      console.warn(
+        `[Session Delivery] Request failed status=${res?.status ?? "network"}`,
+        errorText
+      );
+    }
+  }
+
+  async function precomputeReviewArtifacts() {
+    const res = await fetch(`/api/sessions/${sessionId}/review-precompute`, {
+      method: "POST",
+      cache: "no-store",
+    }).catch((error) => {
+      console.error("[Review Precompute] Request failed", error);
+      return null;
+    });
+
+    if (!res?.ok) {
+      const errorText = res ? await res.text().catch(() => "") : "";
+      console.warn(
+        `[Review Precompute] Request failed status=${res?.status ?? "network"}`,
+        errorText
+      );
+    }
   }
 
   async function startSession(signal?: AbortSignal): Promise<boolean> {
@@ -986,6 +874,7 @@ export default function SimulationPage() {
     currentState: ReturnType<EscalationEngine["getState"]>,
     recentTurns: { speaker: string; content: string }[],
     latestClinicianVoiceProfile?: StructuredVoiceProfile | null,
+    latestTraineeVoiceProfile?: StructuredVoiceProfile | null,
     signal?: AbortSignal
   ): Promise<StructuredVoiceProfile | null> {
     const { traits, voiceConfig } = getScenarioConfig(snapshot);
@@ -1004,6 +893,7 @@ export default function SimulationPage() {
         currentState,
         recentTurns,
         latestClinicianVoiceProfile,
+        latestTraineeVoiceProfile,
       }),
       signal,
     }).catch(() => null);
@@ -1028,6 +918,7 @@ export default function SimulationPage() {
     currentState: ReturnType<EscalationEngine["getState"]>,
     recentTurns: { speaker: string; content: string }[],
     latestClinicianVoiceProfile?: StructuredVoiceProfile | null,
+    latestTraineeVoiceProfile?: StructuredVoiceProfile | null,
     signal?: AbortSignal
   ): Promise<string | null> {
     const requestId = patientVoiceRequestRef.current + 1;
@@ -1038,6 +929,7 @@ export default function SimulationPage() {
       currentState,
       recentTurns,
       latestClinicianVoiceProfile,
+      latestTraineeVoiceProfile,
       signal
     );
     if (signal?.aborted || requestId !== patientVoiceRequestRef.current) return null;
@@ -1169,6 +1061,7 @@ export default function SimulationPage() {
       snapshot,
       stateAfter,
       recentTurnsForPrompt,
+      null,
       null,
       botAbortRef.current?.signal
     );
@@ -1386,12 +1279,14 @@ export default function SimulationPage() {
   }
 
   const handleAiDelta = useCallback((delta: string) => {
+    if (endingRef.current) return;
     aiSpeakingRef.current = true;
     setCurrentAiText((prev) => prev + delta);
     setIsSpeaking(true);
   }, []);
 
   async function handleAiTranscriptDone(text: string) {
+    if (endingRef.current) return;
     const timestamp = new Date().toISOString();
     const recentTurnsBeforeAiTurn = transcriptRef.current
       .slice(-4)
@@ -1439,11 +1334,11 @@ export default function SimulationPage() {
   }
 
   const handleTraineeTranscript = useCallback(async (text: string, meta?: TraineeTranscriptMeta) => {
+    if (endingRef.current) return;
     const timestamp = new Date().toISOString();
     const recentTurns = transcriptRef.current.slice(-4).map((e) => ({ speaker: e.speaker, content: e.content }));
     appendTranscriptEntry({ speaker: "trainee", content: text, timestamp });
     const idx = turnIndexRef.current++;
-    const itemId = meta?.itemId ?? null;
 
     if (classifyingRef.current || !engineRef.current || !scenarioRef.current) {
       const fallbackSnapshot = buildSnapshot();
@@ -1458,17 +1353,21 @@ export default function SimulationPage() {
     const snapshot = scenarioRef.current;
     const scenarioContext = `${snapshot.setting} - ${snapshot.ai_role} speaking with ${snapshot.trainee_role}`;
     const currentEscalation = engineRef.current.getLevel();
+    let traineeVoiceProfile: StructuredVoiceProfile | null = null;
 
     let classResult: ClassifierResult | null = null;
     let delta: { trigger_type: string; level_delta: number; trust_delta: number; listening_delta: number; reason: string } | null = null;
     let newState: EscalationState | null = null;
     let prevState: EscalationState | null = null;
+    const liveRequestController = createLiveRequestController();
+    const { signal } = liveRequestController;
 
     try {
       // Fetch trainee voice profile first so the classifier can assess tone
-      const traineeVoiceProfile = await fetch("/api/voice-profile/trainee", {
+      traineeVoiceProfile = await fetch("/api/voice-profile/trainee", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ utterance: text, scenarioContext, currentEscalation, recentTurns }),
+        signal,
       }).then(async (res) => {
         if (!res.ok) return null;
         return readJsonSafely<StructuredVoiceProfile | null>(
@@ -1485,7 +1384,11 @@ export default function SimulationPage() {
       const classifyRes = await fetch("/api/classify", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ utterance: text, context: { recentTurns, scenarioContext, currentEscalation, speakerVoiceProfile: traineeVoiceProfile, milestones: snapshot.scenario_milestones.filter((m) => m.id && !completedMilestonesRef.current.has(m.id)).map((m) => ({ id: m.id!, description: m.description, classifier_hint: m.classifier_hint })) } }),
+        signal,
       });
+      if (signal.aborted || endingRef.current) {
+        return;
+      }
       if (!classifyRes.ok) {
         console.error("[Escalation] Classify API failed:", classifyRes.status);
         const fallbackSnapshot = buildSnapshot();
@@ -1495,6 +1398,9 @@ export default function SimulationPage() {
         return;
       }
       classResult = await readJsonSafely(classifyRes, parseClassifierResult, null, "classification");
+      if (signal.aborted || endingRef.current) {
+        return;
+      }
       if (!classResult) {
         const fallbackSnapshot = buildSnapshot();
         if (fallbackSnapshot) {
@@ -1530,13 +1436,19 @@ export default function SimulationPage() {
 
       if (engineRef.current.shouldAutoEnd()) handleEndSession("auto_ceiling");
     } catch (err) {
+      if (signal.aborted || endingRef.current) {
+        return;
+      }
       console.error("Classification error:", err);
       const fallbackSnapshot = buildSnapshot();
       if (fallbackSnapshot) {
         persistTranscriptTurn(idx, "trainee", text, fallbackSnapshot, timestamp, meta?.durationMs ?? null);
       }
       return;
-    } finally { classifyingRef.current = false; resolveClassifyDone(); }
+    } finally {
+      classifyingRef.current = false;
+      resolveClassifyDone();
+    }
 
     // Resolve patient instructions outside the classifying lock so subsequent
     // trainee utterances can be classified without waiting for voice profile fetch
@@ -1544,8 +1456,12 @@ export default function SimulationPage() {
       const newInstructions = await resolvePatientInstructions(
         snapshot,
         newState!,
-        getRecentPromptTurns()
+        getRecentPromptTurns(),
+        undefined,
+        traineeVoiceProfile,
+        signal
       );
+      if (signal.aborted || endingRef.current) return;
       if (!newInstructions) return;
       patientPromptRef.current = newInstructions;
 
@@ -1556,7 +1472,7 @@ export default function SimulationPage() {
         patientPromptAfter: newInstructions,
       });
       if (turnSnapshot) {
-        const persistPromise = persistTranscriptTurn(
+        persistTranscriptTurn(
           idx,
           "trainee",
           text,
@@ -1564,19 +1480,6 @@ export default function SimulationPage() {
           timestamp,
           meta?.durationMs ?? null
         );
-        if (itemId && classResult) {
-          queueTraineeAudioAnalysis(itemId, {
-            turnIndex: idx,
-            utterance: text,
-            scenarioContext,
-            currentEscalation,
-            recentTurns,
-            classifierResult: classResult,
-            snapshot: turnSnapshot,
-            durationMs: meta?.durationMs ?? null,
-            turnPersistPromise: persistPromise ?? null,
-          });
-        }
       }
 
       if (aiSpeakingRef.current) {
@@ -1585,6 +1488,9 @@ export default function SimulationPage() {
         updateSession(newInstructions);
       }
     } catch (err) {
+      if (signal.aborted || endingRef.current) {
+        return;
+      }
       console.error("Patient instruction resolution error:", err);
       // Still persist the turn with what we have
       const fallbackSnapshot = buildSnapshot({
@@ -1593,7 +1499,7 @@ export default function SimulationPage() {
         stateAfter: newState!,
       });
       if (fallbackSnapshot) {
-        const persistPromise = persistTranscriptTurn(
+        persistTranscriptTurn(
           idx,
           "trainee",
           text,
@@ -1601,29 +1507,34 @@ export default function SimulationPage() {
           timestamp,
           meta?.durationMs ?? null
         );
-        if (itemId && classResult) {
-          queueTraineeAudioAnalysis(itemId, {
-            turnIndex: idx,
-            utterance: text,
-            scenarioContext,
-            currentEscalation,
-            recentTurns,
-            classifierResult: classResult,
-            snapshot: fallbackSnapshot,
-            durationMs: meta?.durationMs ?? null,
-            turnPersistPromise: persistPromise ?? null,
-          });
-        }
       }
+    } finally {
+      releaseLiveRequestController(liveRequestController);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, updateSession]);
 
   async function handleEndSession(exitType: string = "normal") {
     if (endingRef.current) return; endingRef.current = true;
+    setEndingStatus({
+      title: exitType === "normal" ? "Ending scenario" : "Scenario ended",
+      detail: exitType === "normal"
+        ? "Your request has been received. Saving the recording and processing the session outputs now. Review generation on the portal usually takes 1-2 minutes."
+        : "The scenario has been closed. Saving the recording and processing the session outputs now. Review generation on the portal usually takes 1-2 minutes.",
+      stepLabel: "Preparing review",
+    });
     if (timerRef.current) clearInterval(timerRef.current);
     stopBot();
+    abortLiveRequestControllers();
+    setTurnDetection(false);
+    setMicForcedOff(true);
     cancelCurrentResponse();
+    if (classifyingRef.current) {
+      await Promise.race([
+        classifyDoneRef.current,
+        new Promise((resolve) => setTimeout(resolve, 1500)),
+      ]);
+    }
     await new Promise((r) => setTimeout(r, 50));
 
     // Stop the recorder BEFORE disconnect — disconnect tears down the
@@ -1656,6 +1567,12 @@ export default function SimulationPage() {
           console.error("[SessionRecorder] Audio upload failed", err);
         })
       : Promise.resolve();
+    const sessionDeliveryAudioPromise = recordingBlob
+      ? convertAudioBlobToWavBlob(recordingBlob, { sampleRate: 16000 }).catch((err) => {
+          console.error("[Session Delivery] WAV conversion failed", err);
+          return null;
+        })
+      : Promise.resolve(null);
 
     await trackPersistence(
       persistRequest(
@@ -1674,7 +1591,32 @@ export default function SimulationPage() {
       )
     );
     await flushPendingPersistence(8000);
+    setEndingStatus({
+      title: "Scenario ended",
+      detail: "The session has been saved. Uploading the recording and preparing the post-session analysis. This usually takes 1-2 minutes on the portal.",
+      stepLabel: "Saving outputs",
+    });
     await audioUploadPromise;
+    const analysisBlob = await sessionDeliveryAudioPromise;
+    if (analysisBlob) {
+      setEndingStatus({
+        title: "Analysing delivery",
+        detail: "The recording is uploaded. We’re now analysing the tone and delivery across the full conversation. This usually takes 1-2 minutes on the portal.",
+        stepLabel: "Analysing audio",
+      });
+      await submitSessionDeliveryAnalysis(analysisBlob, elapsed * 1000);
+    }
+    setEndingStatus({
+      title: "Building your review",
+      detail: "We’re generating the timeline, summary, and coaching feedback from the session evidence. This usually takes 1-2 minutes on the portal.",
+      stepLabel: "Generating feedback",
+    });
+    await precomputeReviewArtifacts();
+    setEndingStatus({
+      title: "Opening review",
+      detail: "Your review is ready. Taking you there now.",
+      stepLabel: "Almost done",
+    });
     router.push(`/review/${sessionId}`);
   }
 
@@ -1722,6 +1664,7 @@ export default function SimulationPage() {
         currentState,
         recentPromptTurns,
         clinicianVoiceProfile,
+        null,
         signal
       );
 
@@ -2179,7 +2122,9 @@ export default function SimulationPage() {
   const traineeRole = (scenarioRef.current?.trainee_role as string) || "Clinician";
   const emotionalDriver = (scenarioRef.current?.emotional_driver as string) || "";
   const statusHeading = "Patient/relative status";
-  const supportStatusText = botActive
+  const supportStatusText = endingStatus
+    ? endingStatus.stepLabel
+    : botActive
     ? botSpeaking
       ? "AI clinician is speaking on your behalf"
       : isSpeaking
@@ -2194,9 +2139,12 @@ export default function SimulationPage() {
           : connectionStatus === "reconnecting"
             ? "Reconnecting..."
             : "Connecting...";
-  const supportHelperText = botActive
+  const supportHelperText = endingStatus
+    ? endingStatus.detail
+    : botActive
     ? "AI clinician support is active. Resume the conversation whenever you're ready."
     : "The AI clinician will take over temporarily and model a response. You can resume at any time.";
+  const endingInProgress = endingStatus !== null;
 
   if (!scenarioLoaded) {
     return (
@@ -2210,7 +2158,7 @@ export default function SimulationPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-36px)] flex-col bg-white text-slate-900">
+    <div className="relative flex h-[calc(100vh-36px)] flex-col bg-white text-slate-900">
       {/* Header */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-slate-100 px-4 sm:px-5">
         <div className="flex items-center gap-3 min-w-0">
@@ -2243,8 +2191,10 @@ export default function SimulationPage() {
           <button
             key={tab}
             onClick={() => setMobileTab(tab)}
+            disabled={endingInProgress}
             className={cn(
               "flex-1 py-2 text-[12px] font-medium text-center transition-colors",
+              endingInProgress && "cursor-not-allowed opacity-50",
               mobileTab === tab
                 ? "text-slate-900 border-b-2 border-slate-900"
                 : "text-slate-400 hover:text-slate-600"
@@ -2348,6 +2298,7 @@ export default function SimulationPage() {
             {botActive ? (
               <button
                 onClick={stopBot}
+                disabled={endingInProgress}
                 className="flex items-center gap-2 rounded-full bg-indigo-600 px-5 py-2.5 text-[13px] font-medium text-white shadow-sm transition-colors hover:bg-indigo-700"
               >
                 <Hand className="h-4 w-4" />
@@ -2357,8 +2308,10 @@ export default function SimulationPage() {
               <>
                 <button
                   onClick={handleToggleMic}
+                  disabled={endingInProgress}
                   className={cn(
                     "flex h-12 w-12 items-center justify-center rounded-full transition-all shadow-sm",
+                    endingInProgress && "cursor-not-allowed opacity-50",
                     micMuted
                       ? "bg-red-50 text-red-600 ring-1 ring-red-200 hover:bg-red-100"
                       : "bg-slate-900 text-white hover:bg-slate-800"
@@ -2369,8 +2322,8 @@ export default function SimulationPage() {
                 </button>
                 <button
                   onClick={startBot}
-                  disabled={connectionStatus !== "connected"}
-                  className="flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-[13px] font-medium text-indigo-700 shadow-sm transition-colors hover:bg-indigo-100 disabled:opacity-40"
+                  disabled={connectionStatus !== "connected" || endingInProgress}
+                  className="flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-[13px] font-medium text-indigo-700 shadow-sm transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <Bot className="h-3.5 w-3.5" />
                   Ask AI clinician for help
@@ -2379,10 +2332,20 @@ export default function SimulationPage() {
             )}
             <button
               onClick={() => handleEndSession("normal")}
-              className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-2.5 text-[13px] font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+              disabled={endingInProgress}
+              className={cn(
+                "flex items-center gap-2 rounded-full px-5 py-2.5 text-[13px] font-medium shadow-sm transition-colors disabled:cursor-not-allowed",
+                endingInProgress
+                  ? "border border-amber-200 bg-amber-50 text-amber-800"
+                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              )}
             >
-              <Square className="h-3.5 w-3.5" />
-              End scenario
+              {endingInProgress ? (
+                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Square className="h-3.5 w-3.5" />
+              )}
+              {endingInProgress ? "Ending scenario..." : "End scenario"}
             </button>
           </div>
           <p className="mt-4 max-w-lg text-center text-[12px] leading-relaxed text-slate-500">
@@ -2455,6 +2418,33 @@ export default function SimulationPage() {
           </div>
         )}
       </div>
+
+      {endingStatus && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/92 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-2xl">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200">
+              <LoaderCircle className="h-6 w-6 animate-spin" />
+            </div>
+            <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              {endingStatus.stepLabel}
+            </p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900">
+              {endingStatus.title}
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-slate-600">
+              {endingStatus.detail}
+            </p>
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-left">
+              <p className="text-[11px] font-medium text-slate-700">
+                We’ve recognised your request to end the scenario.
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
+                We’re now saving the recording, analysing the conversation, and preparing the review page.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

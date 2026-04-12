@@ -1,22 +1,9 @@
 import { NextResponse } from "next/server";
-import { generateReviewSummary } from "@/lib/openai/reviewSummary";
-import { parseRequestJson } from "@/lib/validation/http";
 import { createAdminClientIfAvailable, createClient } from "@/lib/supabase/server";
-import {
-  getStoredReviewSummarySource,
-  getStoredReviewSummaryVersion,
-  REVIEW_SUMMARY_VERSION,
-  reviewSummaryRequestSchema,
-  reviewSummaryResponseSchema,
-} from "@/lib/review/feedback";
-
-const reviewSummaryRequestCache = new Map<string, Promise<{
-  summaryToPersist: ReturnType<typeof reviewSummaryResponseSchema.parse>;
-  shouldPersistGeneratedSummary: boolean;
-}>>();
+import { ensureSessionReviewArtifacts } from "@/lib/review/reviewArtifactsService";
 
 export async function POST(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
@@ -26,88 +13,40 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data: session, error: sessionError } = await authSupabase
-    .from("simulation_sessions")
-    .select("id, trainee_id, review_summary")
-    .eq("id", id)
-    .eq("trainee_id", user.id)
-    .maybeSingle();
+  try {
+    const { artifacts } = await ensureSessionReviewArtifacts({
+      sessionId: id,
+      userId: user.id,
+      authSupabase,
+      persistSupabase: createAdminClientIfAvailable() ?? authSupabase,
+      surfaces: {
+        summary: true,
+      },
+    });
 
-  if (sessionError) {
-    return NextResponse.json({ error: sessionError.message }, { status: 500 });
-  }
-
-  if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  }
-
-  const storedSummary = reviewSummaryResponseSchema.safeParse(session.review_summary);
-  const storedVersion = getStoredReviewSummaryVersion(session.review_summary);
-  const storedSource = getStoredReviewSummarySource(session.review_summary);
-  if (
-    storedSummary.success &&
-    storedVersion >= REVIEW_SUMMARY_VERSION &&
-    storedSource === "generated"
-  ) {
-    return NextResponse.json(storedSummary.data, {
+    return NextResponse.json({
+      summary: artifacts.summary,
+      debug: {
+        ok: Boolean(artifacts.summary),
+        message: artifacts.summary
+          ? null
+          : "Session summary unavailable. Review the debug codes below to see why generation failed.",
+        promptVersion: artifacts.meta.summary?.prompt_version ?? null,
+        schemaVersion: artifacts.meta.summary?.schema_version ?? null,
+        model: artifacts.meta.summary?.model ?? null,
+        reasoningEffort: artifacts.meta.summary?.reasoning_effort ?? null,
+        fallbackUsed: artifacts.meta.summary?.fallback_used ?? false,
+        failureClass: artifacts.meta.summary?.failure_class ?? null,
+        validatorFailures: artifacts.meta.summary?.validator_failures ?? [],
+      },
+    }, {
       headers: {
         "Cache-Control": "no-store",
       },
     });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Session not found";
+    const status = message === "Session not found" ? 404 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
-
-  const parsed = await parseRequestJson(request, reviewSummaryRequestSchema);
-  if (!parsed.success) return parsed.response;
-
-  const requestKey = `${user.id}:${id}:${REVIEW_SUMMARY_VERSION}`;
-  let requestPromise = reviewSummaryRequestCache.get(requestKey);
-
-  if (!requestPromise) {
-    requestPromise = (async () => {
-      let summaryToPersist = parsed.data.fallback;
-      let shouldPersistGeneratedSummary = false;
-
-      try {
-        const generated = await generateReviewSummary(parsed.data);
-        if (generated) {
-          summaryToPersist = generated;
-          shouldPersistGeneratedSummary = true;
-        } else {
-          console.warn("[Review Summary] No structured summary returned; using local fallback for this response");
-        }
-      } catch (error) {
-        console.error("[Review Summary] Falling back to local summary", error);
-      }
-
-      return {
-        summaryToPersist,
-        shouldPersistGeneratedSummary,
-      };
-    })().finally(() => {
-      reviewSummaryRequestCache.delete(requestKey);
-    });
-
-    reviewSummaryRequestCache.set(requestKey, requestPromise);
-  }
-
-  const { summaryToPersist, shouldPersistGeneratedSummary } = await requestPromise;
-
-  if (shouldPersistGeneratedSummary) {
-    const persistSupabase = createAdminClientIfAvailable() ?? authSupabase;
-    const { error: updateError } = await persistSupabase
-      .from("simulation_sessions")
-      .update({ review_summary: summaryToPersist })
-      .eq("id", id)
-      .eq("trainee_id", user.id);
-
-    if (updateError) {
-      console.error("[Review Summary] Failed to persist summary", updateError);
-    }
-  }
-
-  return NextResponse.json(summaryToPersist, {
-    headers: {
-      "Cache-Control": "no-store",
-    },
-  });
 }

@@ -2,29 +2,39 @@
 
 import { useEffect, useState } from "react";
 import {
-  scenarioHistoryCoachResponseSchema,
-  type ScenarioHistoryCoachResponse,
+  scenarioHistoryApiResponseSchema,
+  type ScenarioHistoryApiResponse,
 } from "@/lib/review/history";
 
 interface ScenarioHistoryCoachCardProps {
   sessionId: string;
 }
 
-const FALLBACK_HISTORY_SUMMARY: ScenarioHistoryCoachResponse = {
-  totalSessions: 1,
-  sessionLabel: "1 non-deleted session in this scenario",
-  headline: "Use repeated runs of this scenario to turn one coaching point into a habit.",
-  progress: "Look for the moment where the tone starts to tip, because that is usually where the most useful learning sits.",
-  primaryTarget: "Keep the next target narrow: one calmer opening, one clearer explanation, or one firmer boundary.",
-  secondaryPatterns: [],
-  practiceTarget: "On the next attempt, choose one phrase you want to say more clearly and use it earlier.",
-};
+const scenarioHistoryResultCache = new Map<string, ScenarioHistoryApiResponse>();
+const scenarioHistoryRequestCache = new Map<string, Promise<ScenarioHistoryApiResponse>>();
 
-const scenarioHistoryResultCache = new Map<string, ScenarioHistoryCoachResponse>();
-const scenarioHistoryRequestCache = new Map<string, Promise<ScenarioHistoryCoachResponse>>();
+function buildUnavailableResponse(
+  message: string,
+  validatorFailures: string[]
+): ScenarioHistoryApiResponse {
+  return {
+    summary: null,
+    debug: {
+      ok: false,
+      message,
+      promptVersion: null,
+      schemaVersion: null,
+      model: null,
+      reasoningEffort: null,
+      fallbackUsed: false,
+      failureClass: "schema",
+      validatorFailures,
+    },
+  };
+}
 
 export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCardProps) {
-  const [summary, setSummary] = useState<ScenarioHistoryCoachResponse | null>(null);
+  const [response, setResponse] = useState<ScenarioHistoryApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -35,12 +45,12 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
 
       const cachedResult = scenarioHistoryResultCache.get(sessionId);
       if (cachedResult) {
-        setSummary(cachedResult);
+        setResponse(cachedResult);
         setLoading(false);
         return;
       }
 
-      let requestPromise = scenarioHistoryRequestCache.get(sessionId);
+      let requestPromise: Promise<ScenarioHistoryApiResponse> | undefined = scenarioHistoryRequestCache.get(sessionId);
       if (!requestPromise) {
         requestPromise = (async () => {
           try {
@@ -48,10 +58,18 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
               cache: "no-store",
             });
             const payload = await res.json().catch(() => null);
-            const parsed = scenarioHistoryCoachResponseSchema.safeParse(payload);
-            return parsed.success ? parsed.data : FALLBACK_HISTORY_SUMMARY;
+            const parsed = scenarioHistoryApiResponseSchema.safeParse(payload);
+            return parsed.success
+              ? parsed.data
+              : buildUnavailableResponse(
+                  "Progress analysis unavailable. The API returned an unexpected payload.",
+                  ["invalid_api_payload"]
+                );
           } catch {
-            return FALLBACK_HISTORY_SUMMARY;
+            return buildUnavailableResponse(
+              "Progress analysis unavailable. The request failed before a valid response was returned.",
+              ["request_failed"]
+            );
           }
         })().finally(() => {
           scenarioHistoryRequestCache.delete(sessionId);
@@ -59,12 +77,17 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
         scenarioHistoryRequestCache.set(sessionId, requestPromise);
       }
 
-      const result = await requestPromise;
-      if (!cancelled) {
-        scenarioHistoryResultCache.set(sessionId, result);
-        setSummary(result);
-        setLoading(false);
+      if (!requestPromise) {
+        return;
       }
+
+      const result = await requestPromise;
+      if (result.debug.ok || result.summary) {
+        scenarioHistoryResultCache.set(sessionId, result);
+      }
+      if (cancelled) return;
+      setResponse(result);
+      setLoading(false);
     }
 
     void loadSummary();
@@ -74,7 +97,7 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
     };
   }, [sessionId]);
 
-  if (loading && !summary) {
+  if (loading && !response) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-5 py-4">
@@ -104,7 +127,39 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
     );
   }
 
-  const resolvedSummary = summary ?? FALLBACK_HISTORY_SUMMARY;
+  if (!loading && response && !response.debug.ok && !response.summary) {
+    return (
+      <div className="rounded-2xl border border-rose-200 bg-rose-50/70 shadow-sm">
+        <div className="border-b border-rose-200/80 px-5 py-4">
+          <div className="inline-flex rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">
+            Review your progress unavailable
+          </div>
+          <p className="mt-3 text-[13px] leading-relaxed text-slate-700">
+            {response.debug.message ?? "The progress panel could not be generated for this scenario."}
+          </p>
+        </div>
+        <div className="space-y-3 px-5 py-4 text-[12px] text-slate-700">
+          {response.debug.failureClass && (
+            <p><span className="font-semibold text-slate-900">Failure class:</span> {response.debug.failureClass}</p>
+          )}
+          {response.debug.validatorFailures.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {response.debug.validatorFailures.map((issue) => (
+                <span key={issue} className="rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] text-rose-700">
+                  {issue}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const resolvedSummary = response?.summary;
+  if (!resolvedSummary) {
+    return null;
+  }
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">

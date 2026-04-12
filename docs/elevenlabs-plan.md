@@ -1,6 +1,6 @@
 # ElevenLabs TTS Integration — Feasibility & Implementation Plan
 
-> Status: proposal only. As of 2026-04-11, the current codebase does not use ElevenLabs in the runtime, settings UI, or environment configuration.
+> Status: proposal only. As of 2026-04-12, the current codebase does not use ElevenLabs in the runtime, settings UI, or environment configuration.
 >
 > Treat this as a design note, not a description of shipped functionality. Re-check ElevenLabs' current docs, pricing, latency, and model capabilities before implementation.
 
@@ -24,7 +24,7 @@ PROLOG has two independent voice pipelines:
 
 ### How clinician voice instructions work today
 
-Each clinician turn generates a `StructuredVoiceProfile` (via OpenAI structured outputs) with seven fields: `accent`, `voiceAffect`, `tone`, `pacing`, `emotion`, `delivery`, `variety`. These are rendered into rich natural-language instructions by `clinicianVoiceBuilder.ts` and passed to OpenAI's `gpt-4o-mini-tts`, which interprets them natively:
+Each clinician turn generates a `StructuredVoiceProfile` (via OpenAI structured outputs) with seven fields: `accent`, `voiceAffect`, `tone`, `pacing`, `emotion`, `delivery`, `variety`. These are rendered into rich natural-language instructions by `clinicianVoiceBuilder.ts` and passed to OpenAI's `gpt-4o-mini-tts`, which interprets them natively. On the patient side, the current voice-profile path also consumes the latest inferred speaker delivery profile so live patient tone can react to how the trainee or clinician seemed to sound.
 
 > "Warm, grounded, and gentle enough to hold grief without sounding mournful yourself. Add extra grounding and reassurance so the voice actively settles the interaction. Non-defensive, calm, and quietly credible."
 

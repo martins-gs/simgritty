@@ -278,6 +278,9 @@ function buildTone(
   if (voiceConfig.anger_expression >= 7 && state.anger >= 5) {
     parts.push("Heat sits close to the surface, even before the wording becomes openly aggressive.");
   }
+  if (state.anger >= 5 || state.frustration >= 6) {
+    parts.push("The irritation must be audible in the delivery itself through less warmth, shorter patience, and harder stress, not just stronger wording.");
+  }
 
   return `Tone: ${parts.join(" ")}`;
 }
@@ -292,9 +295,9 @@ function buildPacing(
   if (level <= 2) {
     pace = "Even and steady. Considered. Might trail off when emotion surfaces.";
   } else if (level <= 4) {
-    pace = "Picking up. Sentences shorter and more clipped. Less patience for pauses.";
+    pace = "Picking up. Sentences shorter and more clipped. Less patience for pauses. Audible exasperation in the rhythm.";
   } else if (level <= 6) {
-    pace = "Fast and pressured. Words tumbling out. Barely waiting for the clinician to finish.";
+    pace = "Fast and pressured. Words tumbling out. Barely waiting for the clinician to finish. The pace should feel irritated and volatile, not neutral.";
   } else if (level <= 8) {
     pace = "Rapid-fire. Sentences smashing into each other. No breathing room.";
   } else {
@@ -327,6 +330,9 @@ function buildPacing(
 
   if (state.willingness_to_listen <= 2) {
     pace += " Leaves very little space for the clinician to get a word in.";
+  }
+  if (state.frustration >= 6 && level >= 4) {
+    pace += " Impatience should be obvious in quicker cut-ins, clipped starts, and a sense of being fed up.";
   }
 
   return `Pacing: ${pace}`;
@@ -390,9 +396,9 @@ function buildDelivery(
   if (level <= 2) {
     parts.push("Volume: Normal conversational level, slightly tight.");
   } else if (level <= 4) {
-    parts.push("Volume: Firmer than normal. Voice projecting more.");
+    parts.push("Volume: Firmer than normal. Voice projecting more, with sharper emphasis and less softness.");
   } else if (level <= 6) {
-    parts.push("Volume: Raised. Noticeably louder. Emphatic stress on key words.");
+    parts.push("Volume: Raised. Noticeably louder. Emphatic stress on key words, with real edge rather than plain loudness.");
   } else if (level <= 8) {
     parts.push("Volume: SHOUTING or near-shouting. Forceful.");
   } else {
@@ -403,7 +409,7 @@ function buildDelivery(
   if (level <= 3) {
     parts.push("Breathing: Controlled but tense. Occasional heavy sigh.");
   } else if (level <= 6) {
-    parts.push("Breathing: Agitated. Short sharp exhales. Audible tension.");
+    parts.push("Breathing: Agitated. Short sharp exhales. Audible tension and impatience.");
   } else {
     parts.push("Breathing: Ragged, laboured. Gasping between outbursts.");
   }
@@ -429,6 +435,12 @@ function buildDelivery(
     parts.push("Pauses are short; delivery should feel flowing and responsive.");
   } else if (voiceConfig.pause_style === "long_dramatic") {
     parts.push("Allows a few heavier pauses to hang in the air when the emotional stakes hit.");
+  }
+  if (state.frustration >= 5 || state.anger >= 5) {
+    parts.push("Attack should be harder on stressed words, with less cushioning and less warmth.");
+  }
+  if (state.frustration >= 6 && level >= 4) {
+    parts.push("Allow audible exasperation through clipped breaths, scoffs, or fed-up sighs when natural.");
   }
 
   if (voiceConfig.turn_pause_allowance_ms >= 350) {
@@ -518,12 +530,14 @@ If your earlier turns were louder or more intense, you have now noticeably softe
     return `IMPORTANT — VOCAL REGISTER:
 Your voice carries an edge — tight, clipped, strained — but is NOT raised to shouting.
 You are tense and frustrated but still in control of your volume.
-Do NOT shout. Do NOT speak at high volume. Keep the intensity contained in your tone, not your volume.`;
+Do NOT shout. Do NOT speak at high volume. Keep the intensity contained in your tone, not your volume.
+Even at this level, the listener should clearly hear irritation, impatience, or strain in the delivery itself.`;
   }
   if (level <= 6) {
     return `IMPORTANT — VOCAL REGISTER:
 Your voice is RAISED and FORCEFUL. Speaking noticeably louder than normal.
-There is real heat and urgency in your delivery. You are not calmly composed.`;
+There is real heat and urgency in your delivery. You are not calmly composed.
+The listener should hear anger or frustration immediately through sharper attacks, less warmth, and a more volatile rhythm.`;
   }
   if (level <= 8) {
     return `IMPORTANT — VOCAL REGISTER:

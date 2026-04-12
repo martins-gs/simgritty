@@ -28,7 +28,13 @@ export async function POST(request: Request) {
       voiceConfig: body.voiceConfig,
       currentState: body.currentState,
       recentTurns: body.recentTurns ?? [],
-      latestClinicianVoiceProfile: body.latestClinicianVoiceProfile,
+      latestSpeakerVoiceProfile:
+        body.latestTraineeVoiceProfile ?? body.latestClinicianVoiceProfile ?? null,
+      latestSpeakerRole: body.latestTraineeVoiceProfile
+        ? "trainee"
+        : body.latestClinicianVoiceProfile
+          ? "clinician"
+          : null,
     });
   } catch (error) {
     console.error("Patient voice profile generation error:", error);

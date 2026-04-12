@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { mergeTraineeAudioDeliveryFromEvents } from "@/lib/review/traineeDelivery";
+import { getSessionAudioDeliveryFromEvents, mergeTraineeAudioDeliveryFromEvents } from "@/lib/review/traineeDelivery";
 import { createAdminClientIfAvailable, createClient } from "@/lib/supabase/server";
 import { parseRequestJson } from "@/lib/validation/http";
 import {
@@ -168,6 +168,7 @@ export async function GET(
   });
 
   let resolvedTurns = turns ?? [];
+  let parsedEvents = [] as ReturnType<typeof parseSimulationEvents>;
 
   if (needsEventBackfill) {
     const { data: eventRows, error: eventError } = await supabase
@@ -182,9 +183,10 @@ export async function GET(
         `[Transcript API] event backfill fetch failed session=${id}: ${eventError.message}`
       );
     } else {
+      parsedEvents = parseSimulationEvents(eventRows ?? []);
       resolvedTurns = mergeTraineeAudioDeliveryFromEvents(
         resolvedTurns,
-        parseSimulationEvents(eventRows ?? [])
+        parsedEvents
       );
     }
   }
@@ -198,9 +200,13 @@ export async function GET(
     }
     return [];
   });
+  const sessionDeliveryAnalysis = getSessionAudioDeliveryFromEvents(parsedEvents);
+  const sessionDeliveryStatus = sessionDeliveryAnalysis
+    ? `${sessionDeliveryAnalysis.supported ? "supported" : "unsupported"}:${sessionDeliveryAnalysis.evidenceTurnIndexes.join(",") || "none"}`
+    : "none";
 
   console.info(
-    `[Transcript API] session=${id} total_turns=${turns?.length ?? 0} trainee_audio_delivery_turns=${analysedTurnIndexes.join(",") || "none"}`
+    `[Transcript API] session=${id} total_turns=${turns?.length ?? 0} turn_audio_delivery_turns=${analysedTurnIndexes.join(",") || "none"} session_audio_delivery=${sessionDeliveryStatus}`
   );
 
   return NextResponse.json(resolvedTurns, {

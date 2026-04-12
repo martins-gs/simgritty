@@ -1,6 +1,10 @@
 import type { Response } from "openai/resources/responses/responses";
 import type { ZodType } from "zod";
 
+type StructuredResponseLike = Response & {
+  output_parsed?: unknown;
+};
+
 function collectResponseOutputTextSegments(response: Response) {
   const segments: string[] = [];
 
@@ -30,6 +34,30 @@ function collectResponseRefusalSegments(response: Response) {
     for (const content of item.content) {
       if (content.type === "refusal" && content.refusal.trim()) {
         segments.push(content.refusal.trim());
+      }
+    }
+  }
+
+  return segments;
+}
+
+function collectResponseParsedSegments(response: StructuredResponseLike) {
+  const segments: unknown[] = [];
+
+  if (response.output_parsed != null) {
+    segments.push(response.output_parsed);
+  }
+
+  for (const item of response.output) {
+    if (item.type !== "message") continue;
+
+    for (const content of item.content) {
+      if (
+        content.type === "output_text" &&
+        "parsed" in content &&
+        content.parsed != null
+      ) {
+        segments.push(content.parsed);
       }
     }
   }
@@ -100,6 +128,15 @@ export function parseStructuredOutputText<T>(
   response: Response | string | null | undefined,
   schema: ZodType<T>
 ) {
+  if (response && typeof response !== "string") {
+    for (const candidate of collectResponseParsedSegments(response as StructuredResponseLike)) {
+      const parsed = schema.safeParse(candidate);
+      if (parsed.success) {
+        return parsed.data;
+      }
+    }
+  }
+
   const rawText = typeof response === "string"
     ? response
     : response

@@ -35,6 +35,19 @@ interface SessionItem {
   trainee_name: string | null;
 }
 
+interface DashboardLoadResult {
+  scenarios: ScenarioItem[];
+  sessions: SessionItem[];
+  hasMoreSessions: boolean;
+  nextSessionOffset: number | null;
+  userName: string | null;
+  userId: string | null;
+}
+
+let dashboardLoadResultCache: DashboardLoadResult | null = null;
+let dashboardLoadRequestCache: Promise<DashboardLoadResult> | null = null;
+const DASHBOARD_SESSION_PAGE_SIZE = 20;
+
 export default function DashboardPage() {
   const [scenarios, setScenarios] = useState<ScenarioItem[]>([]);
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -43,31 +56,89 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<SessionItem | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [hasMoreSessions, setHasMoreSessions] = useState(false);
+  const [nextSessionOffset, setNextSessionOffset] = useState<number | null>(null);
+  const [loadingMoreSessions, setLoadingMoreSessions] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function load() {
       try {
-        const [scenRes, sessRes, profileRes] = await Promise.all([
-          fetch("/api/scenarios"),
-          fetch("/api/sessions/recent"),
-          fetch("/api/profile"),
-        ]);
-        if (scenRes.ok) setScenarios((await scenRes.json()).slice(0, 6));
-        else toast.error("Failed to load scenarios");
-        if (sessRes.ok) setSessions(await sessRes.json());
-        else toast.error("Failed to load recent sessions");
-        if (profileRes.ok) {
-          const profile = await profileRes.json();
-          if (profile.display_name) setUserName(profile.display_name);
-          if (profile.id) setUserId(profile.id);
+        if (dashboardLoadResultCache) {
+          if (!cancelled) {
+            setScenarios(dashboardLoadResultCache.scenarios);
+            setSessions(dashboardLoadResultCache.sessions);
+            setUserName(dashboardLoadResultCache.userName);
+            setUserId(dashboardLoadResultCache.userId);
+          }
+          return;
         }
+
+        if (!dashboardLoadRequestCache) {
+          dashboardLoadRequestCache = (async (): Promise<DashboardLoadResult> => {
+            const [scenRes, sessRes, profileRes] = await Promise.all([
+              fetch("/api/scenarios"),
+              fetch(`/api/sessions/recent?limit=${DASHBOARD_SESSION_PAGE_SIZE}`),
+              fetch("/api/profile"),
+            ]);
+
+            const result: DashboardLoadResult = {
+              scenarios: [],
+              sessions: [],
+              hasMoreSessions: false,
+              nextSessionOffset: null,
+              userName: null,
+              userId: null,
+            };
+
+            if (scenRes.ok) result.scenarios = (await scenRes.json()).slice(0, 6);
+            if (sessRes.ok) {
+              const sessionsPayload = await sessRes.json();
+              result.sessions = Array.isArray(sessionsPayload?.sessions) ? sessionsPayload.sessions : [];
+              result.hasMoreSessions = Boolean(sessionsPayload?.hasMore);
+              result.nextSessionOffset = typeof sessionsPayload?.nextOffset === "number"
+                ? sessionsPayload.nextOffset
+                : null;
+            }
+            if (profileRes.ok) {
+              const profile = await profileRes.json();
+              if (profile.display_name) result.userName = profile.display_name;
+              if (profile.id) result.userId = profile.id;
+            }
+
+            return result;
+          })().finally(() => {
+            dashboardLoadRequestCache = null;
+          });
+        }
+
+        const result = await dashboardLoadRequestCache;
+        dashboardLoadResultCache = result;
+
+        if (cancelled) return;
+
+        setScenarios(result.scenarios);
+        setSessions(result.sessions);
+        setHasMoreSessions(result.hasMoreSessions);
+        setNextSessionOffset(result.nextSessionOffset);
+        setUserName(result.userName);
+        setUserId(result.userId);
       } catch {
-        toast.error("Failed to load dashboard data");
+        if (!cancelled) {
+          toast.error("Failed to load dashboard data");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
     load();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function handleDeleteSession() {
@@ -76,12 +147,64 @@ export default function DashboardPage() {
     const res = await fetch(`/api/sessions/${deleteTarget.id}/delete`, { method: "DELETE" });
     if (res.ok) {
       setSessions((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      dashboardLoadResultCache = dashboardLoadResultCache
+        ? {
+            ...dashboardLoadResultCache,
+            sessions: dashboardLoadResultCache.sessions.filter((s) => s.id !== deleteTarget.id),
+          }
+        : null;
       toast.success("Session deleted");
     } else {
       toast.error("Failed to delete session");
     }
     setDeleting(false);
     setDeleteTarget(null);
+  }
+
+  async function handleLoadMoreSessions() {
+    if (loadingMoreSessions || nextSessionOffset == null) return;
+
+    setLoadingMoreSessions(true);
+    try {
+      const res = await fetch(
+        `/api/sessions/recent?limit=${DASHBOARD_SESSION_PAGE_SIZE}&offset=${nextSessionOffset}`
+      );
+      if (!res.ok) {
+        toast.error("Failed to load older sessions");
+        return;
+      }
+
+      const payload = await res.json();
+      const nextSessions: SessionItem[] = Array.isArray(payload?.sessions) ? payload.sessions : [];
+      const nextHasMore = Boolean(payload?.hasMore);
+      const nextOffset = typeof payload?.nextOffset === "number" ? payload.nextOffset : null;
+
+      setSessions((prev) => {
+        const seen = new Set(prev.map((session) => session.id));
+        const merged = [...prev];
+        for (const session of nextSessions) {
+          if (!seen.has(session.id)) {
+            merged.push(session);
+            seen.add(session.id);
+          }
+        }
+        dashboardLoadResultCache = dashboardLoadResultCache
+          ? {
+              ...dashboardLoadResultCache,
+              sessions: merged,
+              hasMoreSessions: nextHasMore,
+              nextSessionOffset: nextOffset,
+            }
+          : null;
+        return merged;
+      });
+      setHasMoreSessions(nextHasMore);
+      setNextSessionOffset(nextOffset);
+    } catch {
+      toast.error("Failed to load older sessions");
+    } finally {
+      setLoadingMoreSessions(false);
+    }
   }
 
   const publishedScenarios = scenarios.filter((s) => s.status === "published");
@@ -198,6 +321,18 @@ export default function DashboardPage() {
                 );
               })}
             </div>
+            {hasMoreSessions && (
+              <div className="mt-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLoadMoreSessions}
+                  disabled={loadingMoreSessions}
+                >
+                  {loadingMoreSessions ? "Loading older sessions..." : "Load older sessions"}
+                </Button>
+              </div>
+            )}
           </section>
         )}
       </div>
