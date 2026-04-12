@@ -54,6 +54,8 @@ Rules:
   2. What is one thing to keep doing?
   3. What is the main thing to do differently next time?
 - positiveMoment must name a reusable behaviour worth repeating, not just that the trainee was calmer.
+- overallDelivery should usually be null. Only populate it if the trainee's delivery showed a noticeable overall pattern across the conversation, or a clear shift under pressure, supported by more than one moment.
+- overallDelivery should summarise how the trainee sounded overall, not describe one isolated turn.
 - coachingFocus must contain one main teaching point only.
 - coachingFocus may fold in the wider scenario aim and the person's needs, but do not list multiple missed milestones or multiple personality adaptations.
 - objectiveFocus should usually be null. Only populate it if one short scenario-goal point is essential and not already clear in coachingFocus.
@@ -69,6 +71,7 @@ Rules:
 - Keep every other populated string to one short sentence.
 - Target word counts:
   - overview: 18 to 34 words total.
+  - overallDelivery: 10 to 22 words, or null.
   - positiveMoment: 10 to 18 words.
   - coachingFocus: 12 to 24 words.
   - whatToSayInstead: 8 to 20 words.
@@ -120,6 +123,7 @@ export async function generateReviewSummary(
     "",
     "Draft fallback summary (rough draft only — correct or discard anything formulaic, overstated, or contradicted by the turns):",
     `- Overview: ${input.fallback.overview}`,
+    `- Overall delivery: ${input.fallback.overallDelivery ?? "Not notable"}`,
     `- Positive moment: ${input.fallback.positiveMoment ?? "None identified"}`,
     `- Coaching focus: ${input.fallback.coachingFocus ?? "None identified"}`,
     `- What to say instead: ${input.fallback.whatToSayInstead ?? "None suggested"}`,

@@ -1,6 +1,6 @@
 # PROLOG
 
-Verified against this repository on 2026-04-11.
+Verified against this repository on 2026-04-12.
 
 PROLOG is a Next.js 16 App Router application for NHS clinical communication training. Trainees run real-time voice simulations with an AI patient or relative, educators author scenarios, and completed sessions can be reviewed with transcript, scoring, reflections, notes, and restart-from-turn forking.
 
@@ -9,7 +9,7 @@ PROLOG is a Next.js 16 App Router application for NHS clinical communication tra
 - Real-time voice simulation using the OpenAI Realtime API over WebRTC
 - Scenario authoring with 14 numeric trait dials, a separate bias-category selector, voice settings, escalation rules, milestones, and scoring weights
 - AI clinician takeover with its own clinician voice path and HTTP TTS fallback
-- Review workflow with a saved reflection check-in, persisted educator-style session summaries, communication-move coaching, a coaching timeline, per-scenario progress review, retry CTA, score cards or short-session placeholders, audio playback, and session forking
+- Review workflow with a saved reflection check-in, persisted educator-style session summaries, optional overall-delivery synthesis, communication-move coaching, a coaching timeline, per-scenario progress review with one primary target plus up to two secondary patterns, retry CTA, score cards or short-session placeholders, audio playback, and session forking
 - Supabase-backed auth, session persistence, transcript/event storage, event-backed transcript recovery for trainee audio delivery, and mixed session-audio uploads
 
 ## Documentation Map
@@ -131,7 +131,9 @@ Notes:
 - Session audio is recorded as one mixed file and uploaded to the `simulation-audio` Supabase Storage bucket at session end.
 - The review page stores the Session Summary JSON on `simulation_sessions.review_summary` after first generation, so the learner sees the same summary on later visits instead of a fresh variant each time.
 - Review coaching now prefers communication moves and response structure over stock scripts, so summaries and key moments describe what to do differently rather than insisting on one canonical phrase.
-- The review page also builds a deterministic `Review your progress` panel from the current user's non-deleted sessions in the same scenario, so the session count reflects historical sessions rather than utterances.
+- The Session Summary can now add an `Overall Delivery` note when the trainee's delivery shows a noticeable conversation-level pattern or a clear shift under pressure.
+- The review page also builds a deterministic `Review your progress` panel from the current user's non-deleted sessions in the same scenario. It prioritises one main target plus up to two secondary patterns instead of collapsing all coaching into a single line, and its session count reflects historical sessions rather than utterances.
+- Scenario milestones directly affect clinical-task scoring and review coaching. Free-text learning objectives do not change the numeric score directly, but they are still fed into the review summary as narrative objective guidance.
 - Sessions of 3-6 trainee turns still score as preliminary sessions, but extreme dimension scores are now softened to avoid hard zeros or hundreds from sparse evidence.
 - `max_escalation_ceiling` and `max_session_duration_minutes` are actively enforced at runtime.
 - `allow_discriminatory_content` and `require_consent_gate` are stored in `org_settings`, but they are not yet used to disable discriminatory scenarios or bypass the consent gate. The briefing flow currently always shows the consent gate.

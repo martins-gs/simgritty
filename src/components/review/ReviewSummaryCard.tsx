@@ -38,7 +38,7 @@ export function ReviewSummaryCard({
   emotionalDriver,
   traits,
 }: ReviewSummaryCardProps) {
-  const storedSummary = useMemo(() => {
+  const rawStoredSummary = useMemo(() => {
     const parsed = reviewSummaryResponseSchema.safeParse(session.review_summary);
     return parsed.success ? parsed.data : null;
   }, [session.review_summary]);
@@ -61,7 +61,14 @@ export function ReviewSummaryCard({
     traits,
     turns,
   ]);
-  const shouldRequestGeneratedSummary = !storedSummary && score.sessionValid && keyMoments.length > 0;
+  const storedSummary = useMemo(() => {
+    if (!rawStoredSummary) return null;
+    return {
+      ...rawStoredSummary,
+      overallDelivery: rawStoredSummary.overallDelivery ?? fallbackSummary.overallDelivery,
+    };
+  }, [fallbackSummary.overallDelivery, rawStoredSummary]);
+  const shouldRequestGeneratedSummary = !rawStoredSummary && score.sessionValid && keyMoments.length > 0;
   const reviewSummaryRequest = useMemo(() => ({
     scenarioTitle: session.scenario_templates?.title || "Simulation",
     learningObjectives: learningObjectives ?? null,
@@ -111,8 +118,14 @@ export function ReviewSummaryCard({
     data: ReviewSummaryData;
   } | null>(null);
   const currentSummaryState = summaryState?.requestKey === requestKey ? summaryState : null;
+  const generatedSummary = currentSummaryState
+    ? {
+        ...currentSummaryState.data,
+        overallDelivery: currentSummaryState.data.overallDelivery ?? fallbackSummary.overallDelivery,
+      }
+    : null;
   const summary = storedSummary
-    ?? currentSummaryState?.data
+    ?? generatedSummary
     ?? (!shouldRequestGeneratedSummary ? fallbackSummary : null);
   const loadingGeneratedSummary = shouldRequestGeneratedSummary && !currentSummaryState;
   const coachingFocus = useMemo(() => {
@@ -234,6 +247,16 @@ export function ReviewSummaryCard({
         <p className="mt-3 text-base leading-relaxed text-slate-900 sm:text-lg">
           {summary.overview}
         </p>
+        {summary.overallDelivery && (
+          <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50/70 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">
+              Overall Delivery
+            </p>
+            <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
+              {summary.overallDelivery}
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4 px-5 py-4 lg:grid-cols-3">

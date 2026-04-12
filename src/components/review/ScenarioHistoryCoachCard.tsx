@@ -15,7 +15,8 @@ const FALLBACK_HISTORY_SUMMARY: ScenarioHistoryCoachResponse = {
   sessionLabel: "1 non-deleted session in this scenario",
   headline: "Use repeated runs of this scenario to turn one coaching point into a habit.",
   progress: "Look for the moment where the tone starts to tip, because that is usually where the most useful learning sits.",
-  development: "Keep the next target narrow: one calmer opening, one clearer explanation, or one firmer boundary.",
+  primaryTarget: "Keep the next target narrow: one calmer opening, one clearer explanation, or one firmer boundary.",
+  secondaryPatterns: [],
   practiceTarget: "On the next attempt, choose one phrase you want to say more clearly and use it earlier.",
 };
 
@@ -69,7 +70,7 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
           </div>
         </div>
         <div className="space-y-4 px-5 py-5">
-          {Array.from({ length: 3 }).map((_, index) => (
+          {Array.from({ length: 4 }).map((_, index) => (
             <div key={index} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
               <div className="h-3 w-32 animate-pulse rounded bg-slate-100" />
               <div className="mt-3 space-y-2">
@@ -111,11 +112,33 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
 
         <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-800">
-            Keep developing
+            Main target
           </p>
           <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
-            {resolvedSummary.development}
+            {resolvedSummary.primaryTarget}
           </p>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
+            Also Keep In View
+          </p>
+          {resolvedSummary.secondaryPatterns.length > 0 ? (
+            <ul className="mt-2 space-y-2">
+              {resolvedSummary.secondaryPatterns.map((pattern) => (
+                <li
+                  key={pattern}
+                  className="rounded-lg border border-white/90 bg-white/80 px-3 py-2 text-[13px] leading-relaxed text-slate-700"
+                >
+                  {pattern}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
+              Keep the rest of the coaching narrow for now so the main target has a chance to become a habit.
+            </p>
+          )}
         </div>
 
         <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4">

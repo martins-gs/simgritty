@@ -1,7 +1,13 @@
 import type { ScoreBreakdown, ScoreEvidence } from "@/lib/engine/scoring";
 import { ESCALATION_LABELS } from "@/types/escalation";
 import type { ScenarioMilestone, ScenarioTraits } from "@/types/scenario";
-import type { ExitType, SimulationSession, TranscriptTurn } from "@/types/simulation";
+import type {
+  ExitType,
+  SimulationSession,
+  TranscriptTurn,
+  TraineeDeliveryAnalysis,
+  TraineeDeliveryMarker,
+} from "@/types/simulation";
 import { z } from "zod";
 
 export interface ReviewTurnContext {
@@ -23,6 +29,7 @@ export interface ReviewMomentNarrative {
 
 export interface ReviewSummaryData {
   overview: string;
+  overallDelivery: string | null;
   positiveMoment: string | null;
   coachingFocus: string | null;
   whatToSayInstead: string | null;
@@ -53,6 +60,7 @@ const reviewSummaryMomentSchema = z.object({
 
 export const reviewSummaryResponseSchema = z.object({
   overview: z.string(),
+  overallDelivery: z.string().nullable().default(null),
   positiveMoment: z.string().nullable().default(null),
   coachingFocus: z.string().nullable().default(null),
   whatToSayInstead: z.string().nullable().default(null),
@@ -79,6 +87,27 @@ export const reviewSummaryRequestSchema = z.object({
 export type ReviewSummaryMomentInput = z.infer<typeof reviewSummaryMomentSchema>;
 export type ReviewSummaryRequest = z.infer<typeof reviewSummaryRequestSchema>;
 export type ReviewSummaryResponse = z.infer<typeof reviewSummaryResponseSchema>;
+
+const DELIVERY_CONFIDENCE_THRESHOLD = 0.45;
+const POSITIVE_DELIVERY_MARKERS = new Set<TraineeDeliveryMarker>([
+  "calm_measured",
+  "warm_empathic",
+]);
+const NEGATIVE_DELIVERY_MARKERS = new Set<TraineeDeliveryMarker>([
+  "tense_hurried",
+  "flat_detached",
+  "defensive_tone",
+  "sarcastic_tone",
+  "irritated_tone",
+  "hostile_tone",
+  "anxious_unsteady",
+]);
+const STRONG_NEGATIVE_DELIVERY_MARKERS = new Set<TraineeDeliveryMarker>([
+  "defensive_tone",
+  "sarcastic_tone",
+  "irritated_tone",
+  "hostile_tone",
+]);
 
 function sentenceCase(value: string): string {
   const trimmed = value.trim();
@@ -114,6 +143,190 @@ function quoteTurn(turn: TranscriptTurn | null) {
 
 function getSortedTurns(turns: TranscriptTurn[]) {
   return [...turns].sort((a, b) => a.turn_index - b.turn_index);
+}
+
+function average(values: number[]) {
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function getTurnDeliveryAnalysis(turn: TranscriptTurn): TraineeDeliveryAnalysis | null {
+  const analysis = turn.trainee_delivery_analysis ?? turn.classifier_result?.trainee_delivery_analysis ?? null;
+  if (
+    !analysis ||
+    analysis.source !== "audio" ||
+    analysis.confidence < DELIVERY_CONFIDENCE_THRESHOLD
+  ) {
+    return null;
+  }
+
+  return analysis;
+}
+
+function scoreDeliveryMarkers(markers: TraineeDeliveryMarker[]) {
+  let score = 0;
+
+  for (const marker of markers) {
+    if (marker === "warm_empathic") {
+      score += 2;
+      continue;
+    }
+
+    if (marker === "calm_measured") {
+      score += 1;
+      continue;
+    }
+
+    if (STRONG_NEGATIVE_DELIVERY_MARKERS.has(marker)) {
+      score -= 2;
+      continue;
+    }
+
+    score -= 1;
+  }
+
+  return score;
+}
+
+function countDeliveryMarkerHits(
+  markerGroups: Array<{ markers: TraineeDeliveryMarker[] }>,
+  allowedMarkers: Set<TraineeDeliveryMarker>
+) {
+  const counts = new Map<TraineeDeliveryMarker, number>();
+
+  for (const group of markerGroups) {
+    for (const marker of group.markers) {
+      if (!allowedMarkers.has(marker)) continue;
+      counts.set(marker, (counts.get(marker) ?? 0) + 1);
+    }
+  }
+
+  return counts;
+}
+
+function describePositiveDelivery(
+  counts: Map<TraineeDeliveryMarker, number>
+) {
+  const calm = counts.get("calm_measured") ?? 0;
+  const warm = counts.get("warm_empathic") ?? 0;
+
+  if (calm > 0 && warm > 0) {
+    return "steady, measured, and warm";
+  }
+
+  if (warm > calm) {
+    return "warm and empathic";
+  }
+
+  return "steady and measured";
+}
+
+function describeNegativeDelivery(
+  counts: Map<TraineeDeliveryMarker, number>
+) {
+  const hurried =
+    (counts.get("tense_hurried") ?? 0) +
+    (counts.get("anxious_unsteady") ?? 0);
+  const defensive =
+    (counts.get("defensive_tone") ?? 0) +
+    (counts.get("sarcastic_tone") ?? 0) +
+    (counts.get("irritated_tone") ?? 0) +
+    (counts.get("hostile_tone") ?? 0);
+  const detached = counts.get("flat_detached") ?? 0;
+
+  if (hurried > 0 && defensive > 0) {
+    return "more hurried and defensive";
+  }
+
+  if (defensive > 0) {
+    return "more defensive and reactive";
+  }
+
+  if (hurried > 0) {
+    return "more hurried and less grounded";
+  }
+
+  if (detached > 0) {
+    return "flatter and more detached";
+  }
+
+  return "less settled";
+}
+
+function buildOverallDeliverySummary(turns: TranscriptTurn[]) {
+  const deliveryMoments = getSortedTurns(turns).flatMap((turn) => {
+    if (turn.speaker !== "trainee") return [];
+
+    const analysis = getTurnDeliveryAnalysis(turn);
+    if (!analysis) return [];
+
+    const markers = [...new Set(analysis.markers)];
+    if (markers.length === 0) return [];
+
+    return [{
+      markers,
+      score: scoreDeliveryMarkers(markers),
+    }];
+  });
+
+  if (deliveryMoments.length < 2) {
+    return null;
+  }
+
+  const positiveTurns = deliveryMoments.filter((moment) => moment.score > 0).length;
+  const negativeTurns = deliveryMoments.filter((moment) => moment.score < 0).length;
+  if (positiveTurns === 0 && negativeTurns === 0) {
+    return null;
+  }
+
+  const midpoint = Math.ceil(deliveryMoments.length / 2);
+  const firstHalfAverage = average(deliveryMoments.slice(0, midpoint).map((moment) => moment.score)) ?? 0;
+  const secondHalfAverage = average(deliveryMoments.slice(midpoint).map((moment) => moment.score)) ?? firstHalfAverage;
+  const totalScore = deliveryMoments.reduce((sum, moment) => sum + moment.score, 0);
+  const positiveCounts = countDeliveryMarkerHits(deliveryMoments, POSITIVE_DELIVERY_MARKERS);
+  const negativeCounts = countDeliveryMarkerHits(deliveryMoments, NEGATIVE_DELIVERY_MARKERS);
+  const strongNegativeHits = [...negativeCounts.entries()].reduce(
+    (sum, [marker, count]) => sum + (STRONG_NEGATIVE_DELIVERY_MARKERS.has(marker) ? count : 0),
+    0
+  );
+  const positiveDescriptor = describePositiveDelivery(positiveCounts);
+  const negativeDescriptor = describeNegativeDelivery(negativeCounts);
+
+  if (
+    deliveryMoments.length >= 3 &&
+    firstHalfAverage >= 0 &&
+    secondHalfAverage <= -0.75 &&
+    negativeTurns >= 2
+  ) {
+    return `Across the conversation, your delivery started steadier but became ${negativeDescriptor} once the pressure rose.`;
+  }
+
+  if (
+    deliveryMoments.length >= 3 &&
+    firstHalfAverage <= -0.75 &&
+    secondHalfAverage >= 0.5 &&
+    positiveTurns >= 2
+  ) {
+    return `Across the conversation, your delivery sounded tighter early on, then became ${positiveDescriptor} as the exchange settled.`;
+  }
+
+  if (negativeTurns >= 2 && (totalScore <= -2 || strongNegativeHits >= 2)) {
+    return `Across the conversation, your delivery often sounded ${negativeDescriptor}, which may have made the message harder to receive.`;
+  }
+
+  if (positiveTurns >= 2 && negativeTurns === 0 && totalScore >= 2) {
+    return `Across the conversation, your delivery stayed ${positiveDescriptor}, which likely helped the message land more easily.`;
+  }
+
+  if (positiveTurns >= 2 && negativeTurns === 1 && totalScore >= 2) {
+    return `Across the conversation, your delivery was mostly ${positiveDescriptor}, even though it tightened briefly under pressure.`;
+  }
+
+  if (negativeTurns >= 2 && positiveTurns === 1 && totalScore <= -2) {
+    return `Across the conversation, there were steadier moments, but your delivery more often sounded ${negativeDescriptor}.`;
+  }
+
+  return null;
 }
 
 function getCompletedMilestoneIds(score: ScoreBreakdown) {
@@ -615,6 +828,7 @@ export function buildFallbackReviewSummary(
   if (!score.sessionValid) {
     return {
       overview: "This session ended before there was enough trainee speech to build a full coaching summary. The transcript and reflection are still available below.",
+      overallDelivery: null,
       positiveMoment: null,
       coachingFocus: null,
       whatToSayInstead: null,
@@ -652,6 +866,7 @@ export function buildFallbackReviewSummary(
     options?.milestones ?? [],
     options?.learningObjectives
   );
+  const overallDelivery = buildOverallDeliverySummary(turns);
   const personFocus = buildPersonaGuidance({
     aiRole: options?.aiRole,
     backstory: options?.backstory,
@@ -661,6 +876,7 @@ export function buildFallbackReviewSummary(
 
   return {
     overview: overviewParts.join(" "),
+    overallDelivery,
     positiveMoment: summarizePositiveMoment(positiveMoment),
     coachingFocus: summarizeCoachingFocus({
       challengingMoment,

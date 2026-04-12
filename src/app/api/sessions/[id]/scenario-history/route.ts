@@ -113,23 +113,27 @@ export async function GET(
       supportThreshold: snapshot.support_threshold,
       criticalThreshold: snapshot.critical_threshold,
     });
+    const fallbackSummary = buildFallbackReviewSummary(
+      session,
+      score,
+      sessionTurns,
+      pickKeyMoments(score.evidence),
+      {
+        milestones: snapshot.scenario_milestones,
+        learningObjectives: snapshot.learning_objectives,
+        aiRole: snapshot.ai_role,
+        backstory: snapshot.backstory,
+        emotionalDriver: snapshot.emotional_driver,
+        traits: snapshot.scenario_traits[0] ?? null,
+      }
+    );
     const storedSummary = reviewSummaryResponseSchema.safeParse(session.review_summary);
     const reviewSummary = storedSummary.success
-      ? storedSummary.data
-      : buildFallbackReviewSummary(
-          session,
-          score,
-          sessionTurns,
-          pickKeyMoments(score.evidence),
-          {
-            milestones: snapshot.scenario_milestones,
-            learningObjectives: snapshot.learning_objectives,
-            aiRole: snapshot.ai_role,
-            backstory: snapshot.backstory,
-            emotionalDriver: snapshot.emotional_driver,
-            traits: snapshot.scenario_traits[0] ?? null,
-          }
-        );
+      ? {
+          ...storedSummary.data,
+          overallDelivery: storedSummary.data.overallDelivery ?? fallbackSummary.overallDelivery,
+        }
+      : fallbackSummary;
 
     return {
       id: session.id,

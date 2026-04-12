@@ -1,6 +1,6 @@
 # PROLOG Architecture Overview
 
-Last verified against the codebase on 2026-04-11.
+Last verified against the codebase on 2026-04-12.
 
 This document reflects the architecture currently implemented in the repository. It is an implementation reference, not a roadmap. The separate `docs/elevenlabs-plan.md` file is proposal-only.
 
@@ -231,6 +231,8 @@ The overall score is a weighted average using scenario-defined weights (or equal
 
 When `trainee_delivery_analysis` is present, composure and de-escalation also receive small, confidence-gated adjustments from the audio-derived markers. For example, `warm_empathic` can help slightly, while `defensive_tone`, `flat_detached`, or `tense_hurried` can subtract from the score. Low-confidence audio readings are deliberately damped.
 
+Free-text `learning_objectives` do **not** directly change the numeric score. They are used later in review generation as narrative objective guidance, especially when no authored milestones exist or when a broader scenario aim needs to be surfaced explicitly.
+
 **Qualitative labels**: Strong (80–100), Developing (60–79), Needs practice (0–59).
 
 **Session validity gate**: sessions under 3 trainee turns show no score. Sessions of 3–6 trainee turns display scores with a "preliminary" caveat, and their dimension scores are moderated toward the midpoint so sparse evidence does not produce hard zero or hundred scores too easily.
@@ -280,9 +282,9 @@ The review page (`src/app/review/[sessionId]/page.tsx`) loads session, transcrip
 
 The schema supports `exit_type` values `normal`, `instant_exit`, `educator_ended`, `timeout`, `auto_ceiling`, and `max_duration`. The current UI/runtime paths actively emit `normal`, `instant_exit`, `auto_ceiling`, and `max_duration`.
 
-`POST /api/sessions/[id]/review-summary` now behaves as a populate-if-missing route rather than a pure regeneration endpoint. It verifies session ownership, returns the saved `simulation_sessions.review_summary` when present, and otherwise generates one educator-style summary, persists the JSON, and reuses that stored version on later visits. `ReviewSummaryCard` prefers the stored summary immediately and only falls back to generation for sessions that do not have one yet.
+`POST /api/sessions/[id]/review-summary` now behaves as a populate-if-missing route rather than a pure regeneration endpoint. It verifies session ownership, returns the saved `simulation_sessions.review_summary` when present, and otherwise generates one educator-style summary, persists the JSON, and reuses that stored version on later visits. `ReviewSummaryCard` prefers the stored summary immediately and only falls back to generation for sessions that do not have one yet. The stored/generator summary schema now allows an optional `overallDelivery` field, used only when the trainee's delivery shows a noticeable conversation-level pattern or a clear shift under pressure.
 
-`GET /api/sessions/[id]/scenario-history` is a deterministic history endpoint for the `Review your progress` card. It loads the current user's non-deleted sessions for the same scenario, recomputes score from persisted transcript/events, reuses stored review summaries when present, falls back to local summary generation when they are missing, and produces a coach-style progress block plus an explicit non-deleted session count for that scenario.
+`GET /api/sessions/[id]/scenario-history` is a deterministic history endpoint for the `Review your progress` card. It loads the current user's non-deleted sessions for the same scenario, recomputes score from persisted transcript/events, reuses stored review summaries when present, falls back to local summary generation when they are missing, and produces a coach-style progress block plus an explicit non-deleted session count for that scenario. The current response shape includes a progress headline, one primary coaching target, up to two secondary patterns, and one practice target. Delivery is only allowed into those secondary patterns when it is recurrent and well-supported across runs.
 
 ### Responsive Layout
 
@@ -290,20 +292,20 @@ Both the simulation page and the review page are designed to work on mobile phon
 
 - **AppShell**: the sidebar nav (`w-56`) is hidden below the `md` breakpoint. The TopBar renders compact icon-based navigation links and a sign-out button on mobile instead.
 - **Simulation page**: uses a tab bar (Simulation / Transcript / Scenario) below `lg`, switching to the three-panel layout on larger screens.
-- **Review page**: the reflection check-in and the Session Summary both sit in a full-width vertical stack. The Session Summary uses a single narrative header, a 3-card coaching grid, and an embedded learning-objectives block. Below the timeline, the `Review your progress` card and the `Ready to try again?` retry CTA both sit above the score breakdown. The escalation timeline chart height reduces from `h-72` to `h-56` on mobile. Transcript/Event Log/Notes use `60vh` height on mobile instead of a fixed 500px. The Transcript / Event Log / Educator Notes section switcher is rendered as an explicit three-button segmented control, and mobile places the "Restart From Turn" action in its own full-width action area below the transcript list.
+- **Review page**: the reflection check-in and the Session Summary both sit in a full-width vertical stack. The Session Summary uses a narrative header, an optional overall-delivery block when warranted, a 3-card coaching grid, and an embedded learning-objectives block. Below the timeline, the `Review your progress` card and the `Ready to try again?` retry CTA both sit above the score breakdown. The escalation timeline chart height reduces from `h-72` to `h-56` on mobile. Transcript/Event Log/Notes use `60vh` height on mobile instead of a fixed 500px. The Transcript / Event Log / Educator Notes section switcher is rendered as an explicit three-button segmented control, and mobile places the "Restart From Turn" action in its own full-width action area below the transcript list.
 
 The review page displays:
 
 - **Top review section**: the `ReflectionPrompt` appears first and is always full width. Below it, the page shows either the persisted `ReviewSummaryCard` or the short-session placeholder when the session is too short to score.
 - **Reflection prompt**: unscored trainee self-reflection with emotion tags and free text, persisted separately from performance data and kept at the top of the review page even for short sessions. The prompt text now asks, "How do you think that conversation went?" If saved reflection data cannot be loaded, the component stays visible and shows an inline error state rather than disappearing.
-- **Session summary**: one overview sentence block plus `What Helped`, `Why It Mattered`, and `Try This Move`. The summary also contains the scenario's learning objectives so the broader goals sit alongside the coach summary rather than in a separate panel. The summary is generated with structured output, but once persisted it is reused rather than regenerated on each visit. Coaching now emphasises response function, timing, and structure over stock exemplar phrases.
+- **Session summary**: one overview block plus `What Helped`, `Why It Mattered`, and `Try This Move`, with an optional `Overall Delivery` note when the audio-derived delivery pattern is noticeable enough to mention at conversation level. The summary also contains the scenario's learning objectives so the broader goals sit alongside the coach summary rather than in a separate panel. Authored scenario milestones feed the clinical-task score and objective guidance directly; free-text learning objectives are narrative inputs rather than direct score inputs. The summary is generated with structured output, but once persisted it is reused rather than regenerated on each visit. Coaching now emphasises response function, timing, and structure over stock exemplar phrases.
 - **Conversation timeline**: always visible on the main screen (no longer in a tab), showing the conversation-intensity path with event markers, optional session-audio playback, a hover/playback cursor, and a persistent detail panel for the selected key moment.
 - **Timeline coaching cards**: up to 8 ranked scoring moments rendered as numbered tabs beneath the chart. The active card shows the headline, likely impact, one-turn-before/one-turn-after transcript context, what happened next, why it mattered here, and a suggested communication move when relevant.
-- **Review your progress**: a deterministic, coach-style scenario-history panel built from the current user's non-deleted sessions in the same scenario. Its count is session-based, not utterance-based.
+- **Review your progress**: a deterministic, coach-style scenario-history panel built from the current user's non-deleted sessions in the same scenario. Its count is session-based, not utterance-based. It now presents one primary target, up to two secondary patterns, and one practice target instead of collapsing everything into a single development line.
 - **Ready to try again?**: a scenario-level retry CTA that creates a fresh session from the same scenario so the learner can immediately practise the coached move again.
 - **ScoreCard**: qualitative label badge (Strong / Developing / Needs practice), an overall score badge, and four dimension bars (0–100) with weight percentages. Sessions under 3 trainee turns show the short-session placeholder instead of the score card. The score block now sits below the progress/retry coaching content with more vertical spacing.
 - **Section switcher**: Transcript, Event Log, and Educator Notes are shown one panel at a time using a segmented control rather than the previous tabs primitive.
-- **Audio delivery badges**: trainee turns can show a separate `Audio delivery` row with 0-3 markers and an assessment-confidence label. The confidence label refers to confidence in the audio reading itself, not the trainee's self-confidence.
+- **Audio delivery note**: trainee turns can show a separate `Audio delivery note` row with 0-3 markers and a short summary. The current transcript view does not display a standalone confidence badge.
 - **Fallback merge**: if `trainee_delivery_analysis` is missing on the transcript row but present in fallback events, the transcript API backfills it before returning rows, and the review page also merges the fallback payload defensively before rendering and scoring.
 
 ### Live Simulation Copy
@@ -316,7 +318,7 @@ The simulation page intentionally exposes trainee-facing copy rather than engine
 - while bot mode is active, status text explains that the AI clinician is speaking on the trainee's behalf or that the patient/relative is responding to the AI clinician
 - the live classifier summary is hidden from the trainee; technique labels and effectiveness remain part of scoring/review, not the in-session UI
 
-The `TranscriptViewer` displays per-turn audio delivery badges, including multiple markers when present, and the `EventLog` renders clinician audio events with path, timing, and error details. When a session has a recording, each trainee and patient turn shows a play button that seeks to the correct offset in the full session recording and plays the audio for that utterance.
+The `TranscriptViewer` displays per-turn audio delivery markers plus a short audio-delivery summary when present, and the `EventLog` renders clinician audio events with path, timing, and error details. When a session has a recording, each trainee and patient turn shows a play button that seeks to the correct offset in the full session recording and plays the audio for that utterance.
 
 ### Session Audio Recording And Playback
 

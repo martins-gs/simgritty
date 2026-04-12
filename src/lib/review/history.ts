@@ -11,43 +11,76 @@ interface ScenarioHistorySessionInput {
 
 const THEME_DEFINITIONS = [
   {
+    id: "emotion_first",
     positiveLabel: "acknowledging emotion earlier",
-    coachingLabel: "acknowledging the emotion before moving into explanation",
+    primaryGuidance: "Make acknowledgement your first move before explanation, so the other person can take in the rest.",
+    secondaryGuidance: "When the pressure rises, name the emotion or concern earlier instead of trying to solve it immediately.",
+    practiceCue: "On the next attempt, make your first sentence an acknowledgement of the emotion or concern before you explain anything else.",
     keywords: ["acknowledg", "emotion", "distress", "upsetting", "frustrat", "angry", "hear how", "validate", "empath"],
+    dimension: "deEscalation",
+    requiresRecurrence: false,
   },
   {
+    id: "barrier_next_step",
     positiveLabel: "explaining the barrier and next step more clearly",
-    coachingLabel: "pairing acknowledgement with a clear barrier and next step",
+    primaryGuidance: "After acknowledging the concern, explain the barrier and next step more clearly in the same reply.",
+    secondaryGuidance: "Keep the response concrete: what is happening, what you can do now, and what comes next.",
+    practiceCue: "On the next attempt, practise one reply that names the barrier and the next step in plain, concrete language.",
     keywords: ["explain", "barrier", "next step", "what is happening", "plan", "specific", "clear", "update", "practical"],
+    dimension: "clinicalTask",
+    requiresRecurrence: false,
   },
   {
+    id: "delivery_under_pressure",
     positiveLabel: "keeping the delivery steadier under pressure",
-    coachingLabel: "keeping the delivery calm and non-defensive under pressure",
-    keywords: ["calm", "steady", "steadier", "delivery", "composure", "defensive", "guarded", "hesitant"],
+    primaryGuidance: "Keep the opening of your reply slower and less defensive so the message can land under pressure.",
+    secondaryGuidance: "Watch for pace, tightness, or defensiveness once you are challenged; that is when the wording starts to lose impact.",
+    practiceCue: "On the next attempt, slow the first line of your reply and keep it shorter so the tone stays steadier under pressure.",
+    keywords: ["calm", "steady", "steadier", "delivery", "composure", "defensive", "guarded", "hesitant", "hurried", "tight", "tense", "measured", "pace"],
+    dimension: "composure",
+    requiresRecurrence: true,
   },
   {
+    id: "care_issue",
     positiveLabel: "staying anchored to the care issue",
-    coachingLabel: "bringing the conversation back to the immediate care issue",
+    primaryGuidance: "Bring the conversation back to the immediate care issue sooner so the practical task does not disappear into the conflict.",
+    secondaryGuidance: "Hold onto the concrete care problem while you manage the emotion, instead of treating them as separate jobs.",
+    practiceCue: "On the next attempt, bring the conversation back to the immediate care issue within the same reply that acknowledges the emotion.",
     keywords: ["discharge", "safety", "care", "clinical", "immediate issue", "barrier", "functional", "social"],
+    dimension: "clinicalTask",
+    requiresRecurrence: false,
   },
   {
+    id: "boundaries",
     positiveLabel: "setting clearer boundaries without matching the tone",
-    coachingLabel: "setting calm boundaries without getting pulled into the tone",
+    primaryGuidance: "Set calmer, clearer boundaries without matching the tone when the interaction turns hostile.",
+    secondaryGuidance: "Use a short limit-setting line, then refocus on care or safety rather than arguing with the tone.",
+    practiceCue: "On the next attempt, practise one short boundary line that stays calm and then returns to care or safety.",
     keywords: ["boundary", "boundaries", "limit", "limits", "discrimin", "remark"],
+    dimension: "composure",
+    requiresRecurrence: false,
   },
   {
+    id: "support",
     positiveLabel: "judging support needs more deliberately",
-    coachingLabel: "bringing in support at the right moment",
+    primaryGuidance: "Decide earlier whether this has crossed into a support-seeking moment instead of staying in solo repair mode too long.",
+    secondaryGuidance: "When the safety threshold is reached, bring in support promptly rather than trying one more explanation.",
+    practiceCue: "On the next attempt, decide the point where you would bring in support, and act there rather than one turn later.",
     keywords: ["support", "colleague", "senior", "help"],
+    dimension: "supportSeeking",
+    requiresRecurrence: false,
   },
 ] as const;
+
+type ThemeDefinition = (typeof THEME_DEFINITIONS)[number];
 
 const scenarioHistoryCoachResponseSchema = z.object({
   totalSessions: z.number().int().min(1),
   sessionLabel: z.string(),
   headline: z.string(),
   progress: z.string(),
-  development: z.string(),
+  primaryTarget: z.string(),
+  secondaryPatterns: z.array(z.string()).max(2).default([]),
   practiceTarget: z.string(),
 });
 
@@ -58,30 +91,47 @@ const DIMENSION_META = [
     key: "composure",
     label: "composure",
     description: "keeping your delivery steady under pressure",
+    fallbackTarget: "Keep one calm, structured reply under pressure so the message does not start to sound defensive.",
+    fallbackPractice: "On the next attempt, hold to one calm reply: acknowledge the concern, explain the barrier, then give the next step.",
   },
   {
     key: "deEscalation",
     label: "de-escalation",
     description: "lowering the emotional temperature",
+    fallbackTarget: "Make acknowledgement your first move before explanation, so the other person can take in the rest.",
+    fallbackPractice: "On the next attempt, make your first sentence an acknowledgement of the emotion or concern before you explain anything else.",
   },
   {
     key: "clinicalTask",
     label: "clinical task",
     description: "bringing the conversation back to the care issue",
+    fallbackTarget: "Keep the practical barrier and next step clearer in the same reply, so the care task does not go missing.",
+    fallbackPractice: "On the next attempt, answer with one short acknowledgement, one clear barrier, and one specific next step.",
   },
   {
     key: "supportSeeking",
     label: "support seeking",
     description: "judging when to bring in support",
+    fallbackTarget: "Decide earlier when the interaction has crossed into a support-seeking moment, rather than trying one more repair.",
+    fallbackPractice: "On the next attempt, pick the point where you would involve support, and act there instead of one turn later.",
   },
 ] as const;
+
+type DimensionMeta = (typeof DIMENSION_META)[number];
+type ThemeSignal = {
+  theme: ThemeDefinition;
+  sessionHits: number;
+  currentHit: boolean;
+  score: number;
+  eligible: boolean;
+};
 
 function average(values: number[]) {
   if (values.length === 0) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function getDimensionValue(score: ScoreBreakdown, key: (typeof DIMENSION_META)[number]["key"]) {
+function getDimensionValue(score: ScoreBreakdown, key: DimensionMeta["key"]) {
   if (key === "clinicalTask") {
     return score.clinicalTask;
   }
@@ -89,19 +139,14 @@ function getDimensionValue(score: ScoreBreakdown, key: (typeof DIMENSION_META)[n
   return score[key];
 }
 
+function includesThemeKeyword(text: string, theme: ThemeDefinition) {
+  return theme.keywords.some((keyword) => text.includes(keyword));
+}
+
 function getPositiveThemeLabel(texts: string[]) {
   const counts = THEME_DEFINITIONS.map((theme) => ({
     label: theme.positiveLabel,
-    count: texts.filter((text) => theme.keywords.some((keyword) => text.includes(keyword))).length,
-  }));
-  const bestMatch = counts.sort((a, b) => b.count - a.count)[0];
-  return bestMatch?.count ? bestMatch.label : null;
-}
-
-function getCoachingThemeLabel(texts: string[]) {
-  const counts = THEME_DEFINITIONS.map((theme) => ({
-    label: theme.coachingLabel,
-    count: texts.filter((text) => theme.keywords.some((keyword) => text.includes(keyword))).length,
+    count: texts.filter((text) => includesThemeKeyword(text, theme)).length,
   }));
   const bestMatch = counts.sort((a, b) => b.count - a.count)[0];
   return bestMatch?.count ? bestMatch.label : null;
@@ -128,6 +173,7 @@ function normalizeCoachingTexts(session: ScenarioHistorySessionInput | undefined
     session.reviewSummary.objectiveFocus,
     session.reviewSummary.personFocus,
     session.reviewSummary.whatToSayInstead,
+    session.reviewSummary.overallDelivery,
   ].flatMap((value) => (
     typeof value === "string" && value.trim()
       ? [value.trim().toLowerCase()]
@@ -161,14 +207,50 @@ function getBestImprovement(
   return deltas.sort((a, b) => b.delta - a.delta)[0];
 }
 
-function getWeakestCurrentDimension(current: ScenarioHistorySessionInput) {
-  const dimensions = DIMENSION_META.flatMap((dimension) => {
+function getSortedCurrentDimensions(current: ScenarioHistorySessionInput) {
+  return DIMENSION_META.flatMap((dimension) => {
     const value = getDimensionValue(current.score, dimension.key);
     return value == null ? [] : [{ ...dimension, value }];
-  });
+  }).sort((a, b) => a.value - b.value);
+}
 
-  if (dimensions.length === 0) return null;
-  return dimensions.sort((a, b) => a.value - b.value)[0];
+function getWeakestCurrentDimension(current: ScenarioHistorySessionInput) {
+  return getSortedCurrentDimensions(current)[0] ?? null;
+}
+
+function themeAppearsInSession(
+  session: ScenarioHistorySessionInput,
+  theme: ThemeDefinition
+) {
+  return normalizeCoachingTexts(session).some((text) => includesThemeKeyword(text, theme));
+}
+
+function rankThemeSignals(
+  sessions: ScenarioHistorySessionInput[],
+  current: ScenarioHistorySessionInput,
+  weakestDimension: ReturnType<typeof getWeakestCurrentDimension>
+) {
+  const currentTexts = normalizeCoachingTexts(current);
+
+  return THEME_DEFINITIONS
+    .map((theme) => {
+      const sessionHits = sessions.filter((session) => themeAppearsInSession(session, theme)).length;
+      const currentHit = currentTexts.some((text) => includesThemeKeyword(text, theme));
+      const weakestBoost = weakestDimension?.key === theme.dimension ? 1 : 0;
+      const eligible = theme.requiresRecurrence
+        ? sessionHits >= 2 && (currentHit || weakestBoost > 0)
+        : sessionHits >= 1 || currentHit || weakestBoost > 0;
+
+      return {
+        theme,
+        sessionHits,
+        currentHit,
+        score: sessionHits * 3 + (currentHit ? 2 : 0) + weakestBoost,
+        eligible,
+      };
+    })
+    .filter((signal) => signal.eligible)
+    .sort((a, b) => b.score - a.score || b.sessionHits - a.sessionHits);
 }
 
 function buildHeadline(totalSessions: number, overallTrend: number | null) {
@@ -219,34 +301,111 @@ function buildProgressParagraph(
   return "The summaries show glimpses of the right response, but the gain is not yet strong enough to call it a reliable shift.";
 }
 
-function buildDevelopmentParagraph(
+function getFallbackTargetFromDimension(
+  weakestDimension: ReturnType<typeof getWeakestCurrentDimension>
+) {
+  return weakestDimension?.fallbackTarget
+    ?? "Keep the next target narrow: one calmer opening, one clearer explanation, or one firmer boundary.";
+}
+
+function getFallbackPracticeTargetFromDimension(
+  weakestDimension: ReturnType<typeof getWeakestCurrentDimension>
+) {
+  return weakestDimension?.fallbackPractice
+    ?? "On the next attempt, aim for one calm reply that acknowledges the emotion, names the barrier, and gives the next step in your own words.";
+}
+
+function isDistinctPattern(candidate: string, existing: string[]) {
+  const normalizedCandidate = candidate.trim().toLowerCase();
+  if (!normalizedCandidate) return false;
+
+  return !existing.some((item) => {
+    const normalizedExisting = item.trim().toLowerCase();
+    return (
+      normalizedExisting === normalizedCandidate ||
+      normalizedExisting.includes(normalizedCandidate) ||
+      normalizedCandidate.includes(normalizedExisting)
+    );
+  });
+}
+
+function addPattern(
+  items: string[],
+  candidate: string | null | undefined,
+  existing: string[],
+  limit = 2
+) {
+  const value = candidate?.trim();
+  if (!value || items.length >= limit || !isDistinctPattern(value, existing)) {
+    return;
+  }
+
+  items.push(value);
+  existing.push(value);
+}
+
+function buildPrimaryTarget(
   totalSessions: number,
   current: ScenarioHistorySessionInput,
-  coachingThemeLabel: string | null
+  sessions: ScenarioHistorySessionInput[],
+  weakestDimension: ReturnType<typeof getWeakestCurrentDimension>
 ) {
-  const weakestDimension = getWeakestCurrentDimension(current);
+  const rankedThemes = rankThemeSignals(sessions, current, weakestDimension);
+  const primaryTheme = rankedThemes[0] ?? null;
+
+  if (primaryTheme) {
+    return {
+      text: primaryTheme.theme.primaryGuidance,
+      theme: primaryTheme.theme,
+      rankedThemes,
+    };
+  }
 
   if (totalSessions <= 1) {
-    if (coachingThemeLabel) {
-      return `The next step is ${coachingThemeLabel}. That is the move to practise until it starts to feel automatic rather than late.`;
+    const currentCoachingFocus = current.reviewSummary?.coachingFocus?.trim();
+    if (currentCoachingFocus) {
+      return {
+        text: currentCoachingFocus,
+        theme: null,
+        rankedThemes,
+      };
     }
-
-    return "The next step is to make the sequence clearer: acknowledge the emotion, name the main barrier, and give the next step in one calm reply.";
   }
 
-  if (coachingThemeLabel && weakestDimension) {
-    return `Keep working on ${coachingThemeLabel}. That theme is still showing up across your sessions, and it links closely to ${weakestDimension.description}.`;
+  return {
+    text: getFallbackTargetFromDimension(weakestDimension),
+    theme: null,
+    rankedThemes,
+  };
+}
+
+function buildSecondaryPatterns(
+  totalSessions: number,
+  current: ScenarioHistorySessionInput,
+  primaryTarget: string,
+  rankedThemes: ThemeSignal[]
+) {
+  const patterns: string[] = [];
+  const existing = [primaryTarget];
+
+  addPattern(patterns, current.reviewSummary?.objectiveFocus, existing, 2);
+  addPattern(patterns, current.reviewSummary?.personFocus, existing, 2);
+
+  if (totalSessions <= 1) {
+    return patterns;
   }
 
-  if (coachingThemeLabel) {
-    return `Keep working on ${coachingThemeLabel}. That is the thread that still needs to become more consistent across your attempts.`;
+  for (const signal of rankedThemes) {
+    if (patterns.length >= 2) break;
+    if (signal.sessionHits < 2) continue;
+    if (signal.theme.requiresRecurrence && signal.sessionHits < 2) continue;
+    if (!isDistinctPattern(signal.theme.secondaryGuidance, existing)) continue;
+
+    patterns.push(signal.theme.secondaryGuidance);
+    existing.push(signal.theme.secondaryGuidance);
   }
 
-  if (weakestDimension) {
-    return `The main development edge is ${weakestDimension.description}. That is where a little more structure would make the biggest difference next time.`;
-  }
-
-  return "The main development edge is still consistency: do the helpful move earlier, and hold onto it once the pressure rises.";
+  return patterns.slice(0, 2);
 }
 
 function buildPracticeTargetFromSuggestion(suggestedLine: string) {
@@ -285,18 +444,19 @@ function buildPracticeTargetFromSuggestion(suggestedLine: string) {
 
 function buildPracticeTarget(
   current: ScenarioHistorySessionInput,
-  coachingThemeLabel: string | null
+  primaryTheme: ThemeDefinition | null,
+  weakestDimension: ReturnType<typeof getWeakestCurrentDimension>
 ) {
   const suggestedLine = current.reviewSummary?.whatToSayInstead?.trim();
   if (suggestedLine) {
     return buildPracticeTargetFromSuggestion(suggestedLine);
   }
 
-  if (coachingThemeLabel) {
-    return `On the next attempt, make ${coachingThemeLabel} your first deliberate move, not your recovery move.`;
+  if (primaryTheme) {
+    return primaryTheme.practiceCue;
   }
 
-  return "On the next attempt, aim for one calm reply that acknowledges the emotion, names the barrier, and gives the next step in your own words.";
+  return getFallbackPracticeTargetFromDimension(weakestDimension);
 }
 
 export function buildScenarioHistoryCoachSummary(
@@ -317,7 +477,8 @@ export function buildScenarioHistoryCoachSummary(
         : `${totalSessionCount} non-deleted sessions in this scenario`,
       headline: "Use repeated runs of this scenario to turn one coaching point into a habit.",
       progress: "Look for the moment where the tone starts to tip, because that is usually where the most useful learning sits.",
-      development: "Keep the next target narrow: one calmer opening, one clearer explanation, or one firmer boundary.",
+      primaryTarget: "Keep the next target narrow: one calmer opening, one clearer explanation, or one firmer boundary.",
+      secondaryPatterns: [],
       practiceTarget: "On the next attempt, choose one phrase you want to say more clearly and use it earlier.",
     };
   }
@@ -331,8 +492,18 @@ export function buildScenarioHistoryCoachSummary(
   const positiveThemeLabel = getPositiveThemeLabel(
     sortedSessions.flatMap((session) => normalizePositiveTexts(session))
   );
-  const coachingThemeLabel = getCoachingThemeLabel(
-    sortedSessions.flatMap((session) => normalizeCoachingTexts(session))
+  const weakestDimension = getWeakestCurrentDimension(currentSession);
+  const primaryTarget = buildPrimaryTarget(
+    totalSessionCount,
+    currentSession,
+    sortedSessions,
+    weakestDimension
+  );
+  const secondaryPatterns = buildSecondaryPatterns(
+    totalSessionCount,
+    currentSession,
+    primaryTarget.text,
+    primaryTarget.rankedThemes
   );
 
   return scenarioHistoryCoachResponseSchema.parse({
@@ -342,8 +513,9 @@ export function buildScenarioHistoryCoachSummary(
       : `${totalSessionCount} non-deleted sessions in this scenario`,
     headline: buildHeadline(totalSessionCount, overallTrend),
     progress: buildProgressParagraph(totalSessionCount, currentSession, previousSessions, positiveThemeLabel),
-    development: buildDevelopmentParagraph(totalSessionCount, currentSession, coachingThemeLabel),
-    practiceTarget: buildPracticeTarget(currentSession, coachingThemeLabel),
+    primaryTarget: primaryTarget.text,
+    secondaryPatterns,
+    practiceTarget: buildPracticeTarget(currentSession, primaryTarget.theme, weakestDimension),
   });
 }
 
