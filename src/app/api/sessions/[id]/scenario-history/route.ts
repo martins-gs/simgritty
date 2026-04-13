@@ -55,7 +55,6 @@ export async function GET(
     .from("simulation_sessions")
     .select("id, scenario_id, trainee_id")
     .eq("id", id)
-    .eq("trainee_id", user.id)
     .maybeSingle();
 
   if (currentSessionError) {
@@ -70,7 +69,7 @@ export async function GET(
     .from("simulation_sessions")
     .select("*, scenario_templates(title, setting, ai_role, trainee_role, difficulty)")
     .eq("scenario_id", currentSession.scenario_id)
-    .eq("trainee_id", user.id)
+    .eq("trainee_id", currentSession.trainee_id)
     .order("created_at", { ascending: true });
 
   if (sessionsError) {

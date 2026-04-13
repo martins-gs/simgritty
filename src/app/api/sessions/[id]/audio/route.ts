@@ -26,6 +26,27 @@ async function getOwnedSession(
   return { error: null, session: data };
 }
 
+async function getVisibleSession(
+  sessionId: string,
+  supabase: Awaited<ReturnType<typeof createClient>>
+) {
+  const { data, error } = await supabase
+    .from("simulation_sessions")
+    .select("id, trainee_id, recording_path, recording_started_at")
+    .eq("id", sessionId)
+    .maybeSingle();
+
+  if (error) {
+    return { error: NextResponse.json({ error: error.message }, { status: 500 }), session: null };
+  }
+
+  if (!data) {
+    return { error: NextResponse.json({ error: "Session not found" }, { status: 404 }), session: null };
+  }
+
+  return { error: null, session: data };
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -38,8 +59,8 @@ export async function GET(
   if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { error: ownershipError, session } = await getOwnedSession(id, user.id, authSupabase);
-  if (ownershipError) return ownershipError;
+  const { error: sessionError, session } = await getVisibleSession(id, authSupabase);
+  if (sessionError) return sessionError;
 
   if (!session?.recording_path) {
     return NextResponse.json({ url: null, recordingStartedAt: null });

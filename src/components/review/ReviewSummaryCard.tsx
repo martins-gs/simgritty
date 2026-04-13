@@ -41,6 +41,14 @@ interface ReviewSummaryCardProps {
   learningObjectives?: string | null;
 }
 
+function getInaccessibleSessionMessage(status: number) {
+  if (status === 401 || status === 403 || status === 404) {
+    return "This session was not found or you do not have access to it.";
+  }
+
+  return `The request failed with status ${status}.`;
+}
+
 export function ReviewSummaryCard({
   sessionId,
   session,
@@ -149,6 +157,22 @@ export function ReviewSummaryCard({
               cache: "no-store",
             });
             const payload = await res.json().catch(() => null);
+            if (!res.ok) {
+              return {
+                summary: null,
+                debug: {
+                  ok: false,
+                  message: `Session summary unavailable. ${getInaccessibleSessionMessage(res.status)}`,
+                  promptVersion: null,
+                  schemaVersion: null,
+                  model: null,
+                  reasoningEffort: null,
+                  fallbackUsed: false,
+                  failureClass: "schema" as const,
+                  validatorFailures: [`http_${res.status}`],
+                },
+              };
+            }
             const parsed = reviewSummaryApiResponseSchema.safeParse(payload);
 
             if (parsed.success) {

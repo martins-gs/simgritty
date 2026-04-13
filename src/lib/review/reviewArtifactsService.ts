@@ -83,14 +83,12 @@ function isMissingReviewArtifactsColumn(error: { code?: string | null; message?:
 
 async function loadReviewSessionContext(
   authSupabase: SupabaseClient,
-  sessionId: string,
-  userId: string
+  sessionId: string
 ): Promise<LoadedReviewSessionContext | null> {
   const { data: sessionRow, error: sessionError } = await authSupabase
     .from("simulation_sessions")
     .select("*, scenario_templates(title, setting, ai_role, trainee_role)")
     .eq("id", sessionId)
-    .eq("trainee_id", userId)
     .maybeSingle();
 
   if (sessionError) {
@@ -161,7 +159,6 @@ export async function ensureSessionReviewArtifacts(
   options: EnsureReviewArtifactsOptions
 ) {
   const requestKey = [
-    options.userId,
     options.sessionId,
     options.surfaces.summary ? "summary" : "no-summary",
     options.surfaces.timeline ? "timeline" : "no-timeline",
@@ -174,8 +171,7 @@ export async function ensureSessionReviewArtifacts(
   const requestPromise = (async () => {
     const context = await loadReviewSessionContext(
       options.authSupabase,
-      options.sessionId,
-      options.userId
+      options.sessionId
     );
 
     if (!context) {
@@ -195,7 +191,7 @@ export async function ensureSessionReviewArtifacts(
       traits: context.snapshot.scenario_traits[0] ?? null,
     };
     const evidenceHash = buildReviewArtifactsEvidenceHash(draftContext);
-    const artifactCacheKey = `${options.userId}:${options.sessionId}:${evidenceHash}`;
+    const artifactCacheKey = `${context.session.trainee_id}:${options.sessionId}:${evidenceHash}`;
 
     const stored = parseStoredReviewArtifacts(context.session.review_artifacts);
     const storedMatches =
@@ -318,7 +314,7 @@ export async function ensureSessionReviewArtifacts(
           .from("simulation_sessions")
           .update(updateData)
           .eq("id", context.session.id)
-          .eq("trainee_id", options.userId);
+          .eq("trainee_id", context.session.trainee_id);
 
         if (persistError) {
           if (isMissingReviewArtifactsColumn(persistError)) {
@@ -333,7 +329,7 @@ export async function ensureSessionReviewArtifacts(
                 .from("simulation_sessions")
                 .update({ review_summary: summary })
                 .eq("id", context.session.id)
-                .eq("trainee_id", options.userId);
+                .eq("trainee_id", context.session.trainee_id);
 
               if (legacyPersistError) {
                 console.error("[Review Artifacts] Failed to persist legacy review summary", legacyPersistError);

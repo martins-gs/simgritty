@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionAudioDeliveryFromEvents, mergeTraineeAudioDeliveryFromEvents } from "@/lib/review/traineeDelivery";
+import { loadOwnedSession } from "@/lib/supabase/ownedSession";
 import { createAdminClientIfAvailable, createClient } from "@/lib/supabase/server";
 import { parseRequestJson } from "@/lib/validation/http";
 import {
@@ -224,6 +225,10 @@ export async function POST(
   const authSupabase = await createClient();
   const { data: { user } } = await authSupabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const ownership = await loadOwnedSession(authSupabase, id, user.id);
+  if (ownership.error) {
+    return NextResponse.json({ error: ownership.error }, { status: ownership.status ?? 500 });
+  }
   const supabase = createAdminClientIfAvailable() ?? authSupabase;
 
   const parsed = await parseRequestJson(request, transcriptTurnCreateRequestBodySchema);
@@ -296,6 +301,10 @@ export async function PATCH(
   const authSupabase = await createClient();
   const { data: { user } } = await authSupabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const ownership = await loadOwnedSession(authSupabase, id, user.id);
+  if (ownership.error) {
+    return NextResponse.json({ error: ownership.error }, { status: ownership.status ?? 500 });
+  }
   const supabase = createAdminClientIfAvailable() ?? authSupabase;
 
   const parsed = await parseRequestJson(request, transcriptTurnPatchRequestBodySchema);

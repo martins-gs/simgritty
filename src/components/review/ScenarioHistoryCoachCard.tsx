@@ -64,6 +64,14 @@ function buildUnavailableResponse(
   };
 }
 
+function getInaccessibleSessionMessage(status: number) {
+  if (status === 401 || status === 403 || status === 404) {
+    return "This session was not found or you do not have access to it.";
+  }
+
+  return `The request failed with status ${status}.`;
+}
+
 export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCardProps) {
   const [response, setResponse] = useState<ScenarioHistoryApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -89,6 +97,12 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
               cache: "no-store",
             });
             const payload = await res.json().catch(() => null);
+            if (!res.ok) {
+              return buildUnavailableResponse(
+                `Progress analysis unavailable. ${getInaccessibleSessionMessage(res.status)}`,
+                [`http_${res.status}`]
+              );
+            }
             const parsed = scenarioHistoryApiResponseSchema.safeParse(payload);
             return parsed.success
               ? parsed.data

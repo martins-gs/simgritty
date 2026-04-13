@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { loadOwnedSession } from "@/lib/supabase/ownedSession";
 import { createClient } from "@/lib/supabase/server";
 import { parseRequestJson } from "@/lib/validation/http";
 import { educatorNoteRequestBodySchema } from "@/lib/validation/schemas";
@@ -33,6 +34,10 @@ export async function POST(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const ownership = await loadOwnedSession(supabase, id, user.id);
+  if (ownership.error) {
+    return NextResponse.json({ error: ownership.error }, { status: ownership.status ?? 500 });
+  }
 
   const parsed = await parseRequestJson(request, educatorNoteRequestBodySchema);
   if (!parsed.success) return parsed.response;

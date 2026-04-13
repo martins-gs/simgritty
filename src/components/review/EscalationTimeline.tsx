@@ -59,6 +59,14 @@ const timelineNarrativeRequestCache = new Map<string, Promise<{
 const CHART_MARGIN = { top: 8, right: 24, bottom: 6, left: 0 };
 const PLAYBACK_CARD_DURATION_MS = 15_000;
 
+function getInaccessibleSessionMessage(status: number) {
+  if (status === 401 || status === 403 || status === 404) {
+    return "This session was not found or you do not have access to it.";
+  }
+
+  return `The request failed with status ${status}.`;
+}
+
 function getEventDotColor(type: string) {
   if (type === "escalation_change") return "#ef4444";
   if (type === "de_escalation_change") return "#10b981";
@@ -417,6 +425,22 @@ export function EscalationTimeline({
               cache: "no-store",
             });
             const payload = await res.json().catch(() => null);
+            if (!res.ok) {
+              return {
+                narratives: [],
+                debug: {
+                  ok: false,
+                  message: `Timeline analysis unavailable. ${getInaccessibleSessionMessage(res.status)}`,
+                  promptVersion: null,
+                  schemaVersion: null,
+                  model: null,
+                  reasoningEffort: null,
+                  fallbackUsed: false,
+                  failureClass: "schema" as const,
+                  validatorFailures: [`http_${res.status}`],
+                },
+              };
+            }
             const parsed = reviewTimelineApiResponseSchema.safeParse(payload);
 
             if (parsed.success) {

@@ -33,7 +33,6 @@ export async function GET(request: NextRequest) {
   const visibleSessions = (sessions ?? []).slice(0, limit);
   const hasMore = (sessions?.length ?? 0) > limit;
 
-  // Attach trainee display names and emails
   const traineeIds = [...new Set(visibleSessions.map((s) => s.trainee_id).filter(Boolean))];
   const nameMap: Record<string, { display_name: string | null; email: string | null }> = {};
   if (traineeIds.length > 0) {
@@ -50,7 +49,6 @@ export async function GET(request: NextRequest) {
     const profile = nameMap[s.trainee_id];
     const displayName = profile?.display_name ?? null;
     const email = profile?.email ?? null;
-    // Show "Display Name (email)" when both exist, otherwise whichever is available
     let trainee_name: string | null = null;
     if (displayName && email) {
       trainee_name = `${displayName} (${email})`;

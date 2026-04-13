@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { loadOwnedSession } from "@/lib/supabase/ownedSession";
 import { createClient } from "@/lib/supabase/server";
 import { parseRequestJson } from "@/lib/validation/http";
 import {
@@ -24,14 +25,17 @@ export async function POST(
   const body = parsedBody.data;
   const turnIndex = body.turn_index;
 
-  const { data: sourceSession, error: sessionError } = await supabase
-    .from("simulation_sessions")
-    .select("*")
-    .eq("id", id)
-    .single();
-
+  const { session: sourceSession, error: sessionError, status: sessionStatus } = await loadOwnedSession(
+    supabase,
+    id,
+    user.id,
+    "*"
+  );
   if (sessionError || !sourceSession) {
-    return NextResponse.json({ error: "Source session not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: sessionError === "Session not found" ? "Source session not found" : sessionError ?? "Source session not found" },
+      { status: sessionStatus ?? 404 }
+    );
   }
 
   const typedSourceSession = parseSimulationSession(sourceSession);
