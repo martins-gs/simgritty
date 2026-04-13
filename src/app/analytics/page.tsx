@@ -5,20 +5,9 @@ import {
   AlertTriangle,
   ChartScatter,
   RefreshCcw,
-  ShieldAlert,
   Sparkles,
   Users,
 } from "lucide-react";
-import {
-  CartesianGrid,
-  ResponsiveContainer,
-  Scatter,
-  ScatterChart,
-  Tooltip,
-  XAxis,
-  YAxis,
-  ZAxis,
-} from "recharts";
 import { AppShell } from "@/components/layout/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,62 +21,66 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type {
-  EducatorAnalyticsResponse,
-  EducatorAttemptView,
-  EducatorConversationStage,
-} from "@/lib/analytics/types";
+import type { EducatorAnalyticsResponse, EducatorAttemptView } from "@/lib/analytics/types";
 
 const ALL_VALUE = "__all";
 
 interface FilterState {
+  user: string | null;
   scenario: string | null;
-  scenarioType: string | null;
   dateFrom: string | null;
   dateTo: string | null;
   attemptView: EducatorAttemptView;
-  promptVersion: string | null;
 }
 
 const INITIAL_FILTERS: FilterState = {
+  user: null,
   scenario: null,
-  scenarioType: null,
   dateFrom: null,
   dateTo: null,
   attemptView: "all",
-  promptVersion: null,
 };
 
 function buildQueryString(filters: FilterState) {
   const params = new URLSearchParams();
+  if (filters.user) params.set("user", filters.user);
   if (filters.scenario) params.set("scenario", filters.scenario);
-  if (filters.scenarioType) params.set("scenarioType", filters.scenarioType);
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
   if (filters.attemptView !== "all") params.set("attemptView", filters.attemptView);
-  if (filters.promptVersion) params.set("promptVersion", filters.promptVersion);
   const query = params.toString();
   return query ? `?${query}` : "";
 }
 
-function getTrendColor(trend: string) {
-  if (trend === "improving") return "#15803d";
-  if (trend === "worsening") return "#b91c1c";
-  return "#475569";
-}
+function getHeatmapStyle(intensity: number) {
+  if (intensity <= 0) {
+    return {
+      backgroundColor: "#f8fafc",
+      borderColor: "#e2e8f0",
+      color: "#475569",
+    };
+  }
 
-function getHeatmapBackground(intensity: number) {
-  if (intensity >= 75) return "bg-red-500/85 text-white";
-  if (intensity >= 55) return "bg-orange-400/80 text-slate-950";
-  if (intensity >= 35) return "bg-amber-300/80 text-slate-950";
-  if (intensity >= 15) return "bg-sky-100 text-slate-700";
-  return "bg-muted/60 text-muted-foreground";
+  const clamped = Math.max(0, Math.min(intensity, 100)) / 100;
+  const hue = 52 - clamped * 46;
+  const lightness = 96 - clamped * 48;
+  const borderLightness = Math.max(34, lightness - 12);
+
+  return {
+    backgroundColor: `hsl(${hue} 96% ${lightness}%)`,
+    borderColor: `hsl(${Math.max(6, hue - 2)} 88% ${borderLightness}%)`,
+    color: clamped >= 0.58 ? "#fff7ed" : "#7c2d12",
+  };
 }
 
 function getPriorityBadgeVariant(level: string) {
   if (level === "high") return "default";
   if (level === "medium") return "secondary";
   return "outline";
+}
+
+function formatStageLabel(stage: string) {
+  return stage.replace(/_/g, " ");
 }
 
 function FilterField({
@@ -138,27 +131,6 @@ function AnalyticsHeadlineCard({
         <p className="text-[13px] leading-relaxed text-muted-foreground">{summary}</p>
       </CardContent>
     </Card>
-  );
-}
-
-function MatrixTooltip({
-  active,
-  payload,
-}: {
-  active?: boolean;
-  payload?: Array<{ payload: { label: string; learner_prevalence_pct: number; avg_impact_score: number; persistence_pct: number; trend: string } }>;
-}) {
-  if (!active || !payload?.length) return null;
-  const point = payload[0].payload;
-
-  return (
-    <div className="rounded-xl border border-border/70 bg-popover px-3 py-2 shadow-lg">
-      <p className="text-[12px] font-semibold text-popover-foreground">{point.label}</p>
-      <p className="mt-1 text-[11px] text-muted-foreground">
-        Prevalence {Math.round(point.learner_prevalence_pct)}% · Avg impact {point.avg_impact_score.toFixed(1)} · Persistence {Math.round(point.persistence_pct)}%
-      </p>
-      <p className="mt-1 text-[11px] text-muted-foreground">Trend: {point.trend}</p>
-    </div>
   );
 }
 
@@ -230,16 +202,25 @@ function PriorityTable({ data }: { data: EducatorAnalyticsResponse["report"]["to
   );
 }
 
-function StageLabel({ stage }: { stage: EducatorConversationStage }) {
-  return stage.replace(/_/g, " ");
-}
-
 export default function AnalyticsPage() {
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [data, setData] = useState<EducatorAnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const availableUsers = data?.available_filters.users ?? [];
+  const availableScenarios = data?.available_filters.scenarios ?? [];
+  const userLabelByValue = new Map<string, string>();
+  userLabelByValue.set(ALL_VALUE, "All users");
+  for (const user of availableUsers) {
+    userLabelByValue.set(user.value, user.label);
+  }
+
+  const scenarioLabelByValue = new Map<string, string>();
+  scenarioLabelByValue.set(ALL_VALUE, "All scenarios");
+  for (const scenario of availableScenarios) {
+    scenarioLabelByValue.set(scenario.value, scenario.label);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -301,7 +282,7 @@ export default function AnalyticsPage() {
                 Make the teaching priorities obvious.
               </h1>
               <p className="mt-3 max-w-2xl text-[14px] leading-relaxed text-white/75">
-                This view summarises recurring learner communication problems across recorded simulations, highlights where they do the most damage, and turns them into concrete tutorial and debrief actions.
+                This view summarises recurring challenges that learners experienced in the simulation sessions and helps identify opportunities for improvement.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -326,7 +307,7 @@ export default function AnalyticsPage() {
             <div>
               <h2 className="text-base font-semibold">Filters</h2>
               <p className="text-[13px] text-muted-foreground">
-                Compare cohorts, scenarios, attempt stages, and prompt versions without losing sight of the teaching question.
+                Compare users, scenarios, time windows, and attempt stages without losing sight of the teaching question.
               </p>
             </div>
             <Button
@@ -340,14 +321,32 @@ export default function AnalyticsPage() {
           </div>
 
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <FilterField label="Cohort" helper="Organisation-wide cohort">
-              <div className="rounded-lg border border-dashed border-border/70 px-3 py-2 text-[13px] text-foreground">
-                {data?.available_filters.cohort_label ?? "Current organisation"}
-              </div>
-            </FilterField>
-
             <FilterField label="Profession / Grade" helper="Not captured in the current dataset">
               <Input value="Not captured" disabled />
+            </FilterField>
+
+            <FilterField label="Users" helper="Focus on one learner or keep the whole filtered group">
+              <Select
+                value={filters.user ?? ALL_VALUE}
+                onValueChange={(value) => startTransition(() => setFilters((current) => ({
+                  ...current,
+                  user: value === ALL_VALUE ? null : value,
+                })))}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue>
+                    {(value) => userLabelByValue.get(String(value ?? ALL_VALUE)) ?? "All users"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_VALUE}>All users</SelectItem>
+                  {availableUsers.map((user) => (
+                    <SelectItem key={user.value} value={user.value}>
+                      {user.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </FilterField>
 
             <FilterField label="Scenario">
@@ -359,35 +358,15 @@ export default function AnalyticsPage() {
                 })))}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="All scenarios" />
+                  <SelectValue>
+                    {(value) => scenarioLabelByValue.get(String(value ?? ALL_VALUE)) ?? "All scenarios"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL_VALUE}>All scenarios</SelectItem>
-                  {data?.available_filters.scenarios.map((scenario) => (
+                  {availableScenarios.map((scenario) => (
                     <SelectItem key={scenario.value} value={scenario.value}>
                       {scenario.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FilterField>
-
-            <FilterField label="Scenario Type">
-              <Select
-                value={filters.scenarioType ?? ALL_VALUE}
-                onValueChange={(value) => startTransition(() => setFilters((current) => ({
-                  ...current,
-                  scenarioType: value === ALL_VALUE ? null : value,
-                })))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="All scenario types" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_VALUE}>All scenario types</SelectItem>
-                  {data?.available_filters.scenario_types.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -438,36 +417,8 @@ export default function AnalyticsPage() {
               </Select>
             </FilterField>
 
-            <FilterField label="Site / Programme" helper="Mapped from organisation">
-              <div className="rounded-lg border border-dashed border-border/70 px-3 py-2 text-[13px] text-foreground">
-                {data?.available_filters.site_programme_label ?? "Current organisation"}
-              </div>
-            </FilterField>
-
             <FilterField label="Educator / Facilitator" helper="Not captured in the current dataset">
               <Input value="Not captured" disabled />
-            </FilterField>
-
-            <FilterField label="Prompt Version">
-              <Select
-                value={filters.promptVersion ?? ALL_VALUE}
-                onValueChange={(value) => startTransition(() => setFilters((current) => ({
-                  ...current,
-                  promptVersion: value === ALL_VALUE ? null : value,
-                })))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="All prompt versions" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_VALUE}>All prompt versions</SelectItem>
-                  {data?.available_filters.prompt_versions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </FilterField>
           </div>
         </section>
@@ -496,7 +447,7 @@ export default function AnalyticsPage() {
         {!forbidden && !error && !loading && data && data.report.population_summary.sessions === 0 ? (
           <EmptyState
             title="No analysable sessions for this filter set"
-            description="Try widening the date range or clearing the scenario and prompt filters. This dashboard only uses sessions with stored review artefacts."
+            description="Try widening the date range or clearing the user or scenario filter. This dashboard only uses sessions with stored review artefacts."
           />
         ) : null}
 
@@ -523,88 +474,6 @@ export default function AnalyticsPage() {
               />
             </section>
 
-            <section className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-              <Card className="border border-border/60">
-                <CardHeader className="border-b border-border/50">
-                  <CardTitle>Priority Matrix</CardTitle>
-                  <CardDescription>
-                    Top-right is what to teach next: common problems that do clear conversational damage and keep recurring.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="pt-5">
-                  <div className="h-[360px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ScatterChart margin={{ top: 16, right: 16, bottom: 24, left: 8 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.25)" />
-                        <XAxis
-                          type="number"
-                          dataKey="learner_prevalence_pct"
-                          name="Learner prevalence"
-                          domain={[0, 100]}
-                          tickFormatter={(value) => `${value}%`}
-                        />
-                        <YAxis
-                          type="number"
-                          dataKey="avg_impact_score"
-                          name="Average impact"
-                          domain={[0, "dataMax + 4"]}
-                        />
-                        <ZAxis
-                          type="number"
-                          dataKey="persistence_pct"
-                          range={[120, 1000]}
-                          name="Persistence"
-                        />
-                        <Tooltip content={<MatrixTooltip />} cursor={{ strokeDasharray: "4 4" }} />
-                        {(["improving", "static", "worsening"] as const).map((trend) => (
-                          <Scatter
-                            key={trend}
-                            data={data.dashboard.priority_matrix.filter((point) => point.trend === trend)}
-                            fill={getTrendColor(trend)}
-                          />
-                        ))}
-                      </ScatterChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <Badge variant="outline">X: learner prevalence</Badge>
-                    <Badge variant="outline">Y: average impact</Badge>
-                    <Badge variant="outline">Bubble size: persistence across attempts</Badge>
-                    <Badge variant="outline">Colour: improving, static, worsening</Badge>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="border border-border/60">
-                <CardHeader className="border-b border-border/50">
-                  <CardTitle>Conversation-Stage Breakdown</CardTitle>
-                  <CardDescription>
-                    Where the breakdown is happening most often in the analysed sessions.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3 pt-5">
-                  {data.dashboard.conversation_stage_breakdown.map((item) => (
-                    <div key={item.stage} className="space-y-1.5">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-[13px] font-medium capitalize">
-                          <StageLabel stage={item.stage} />
-                        </p>
-                        <p className="text-[12px] text-muted-foreground">
-                          {item.count} moments · {item.pct}%
-                        </p>
-                      </div>
-                      <div className="h-2 rounded-full bg-muted">
-                        <div
-                          className="h-2 rounded-full bg-primary"
-                          style={{ width: `${item.pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            </section>
-
             <section className="space-y-3">
               <div>
                 <h2 className="text-base font-semibold">Ranked Struggle Table</h2>
@@ -619,7 +488,7 @@ export default function AnalyticsPage() {
               <div>
                 <h2 className="text-base font-semibold">Scenario × Struggle Heatmap</h2>
                 <p className="text-[13px] text-muted-foreground">
-                  This shows whether a skill problem is general across the course or largely being exposed by one scenario.
+                  This shows the percentage of learners in each scenario who showed that struggle theme.
                 </p>
               </div>
               <div className="overflow-x-auto rounded-xl border border-border/60 bg-card p-4">
@@ -650,10 +519,11 @@ export default function AnalyticsPage() {
                         return (
                           <div
                             key={`${scenario}:${theme.theme}`}
-                            className={`rounded-xl px-3 py-3 text-[12px] font-medium ${getHeatmapBackground(cell?.prevalence_pct ?? 0)}`}
+                            className="flex min-h-[76px] flex-col justify-center rounded-xl border px-3 py-3 text-center text-[12px] font-semibold shadow-sm"
+                            style={getHeatmapStyle(cell?.prevalence_pct ?? 0)}
                           >
                             <p>{cell?.prevalence_pct ?? 0}%</p>
-                            <p className="mt-1 text-[10px] opacity-80">priority {Math.round(cell?.priority_score ?? 0)}</p>
+                            <p className="mt-1 text-[10px] opacity-85">priority {Math.round(cell?.priority_score ?? 0)}</p>
                           </div>
                         );
                       })}
@@ -700,9 +570,9 @@ export default function AnalyticsPage() {
                               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">After</p>
                               <p className="mt-1 text-[13px] leading-relaxed">{example.after}</p>
                             </div>
-                            <div className="rounded-xl bg-muted/60 p-3">
-                              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Why It Matters</p>
-                              <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{example.why_it_matters}</p>
+                            <div className="rounded-xl border border-amber-200 bg-[#fff7ed] p-3">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-800">Why It Matters</p>
+                              <p className="mt-1 text-[13px] leading-relaxed text-slate-700">{example.why_it_matters}</p>
                             </div>
                             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
                               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">Better Alternative</p>
@@ -774,47 +644,36 @@ export default function AnalyticsPage() {
               </div>
             </section>
 
-            <section className="grid gap-4 xl:grid-cols-2">
+            <section className="space-y-3">
+              <div>
+                <h2 className="text-base font-semibold">Conversation-Stage Breakdown</h2>
+                <p className="text-[13px] text-muted-foreground">
+                  Where the breakdown is happening most often in the analysed sessions.
+                </p>
+              </div>
               <Card className="border border-border/60">
-                <CardHeader className="border-b border-border/50">
-                  <div className="flex items-center gap-2">
-                    <ShieldAlert className="h-4 w-4 text-amber-600" />
-                    <CardTitle>Scenario Design Issues</CardTitle>
-                  </div>
-                  <CardDescription>
-                    Flag these before turning them into pure teaching deficits.
-                  </CardDescription>
-                </CardHeader>
                 <CardContent className="space-y-3 pt-5">
-                  {data.report.scenario_design_issues.length === 0 ? (
-                    <p className="text-[13px] text-muted-foreground">No clear scenario-design issue detected from the current cohort evidence.</p>
+                  {data.dashboard.conversation_stage_breakdown.length === 0 ? (
+                    <p className="text-[13px] text-muted-foreground">
+                      No strong stage pattern yet for this filter set.
+                    </p>
                   ) : (
-                    data.report.scenario_design_issues.map((item) => (
-                      <div key={item} className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-[13px] leading-relaxed text-amber-900">
-                        {item}
-                      </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card className="border border-border/60">
-                <CardHeader className="border-b border-border/50">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 text-red-600" />
-                    <CardTitle>Data Quality Flags</CardTitle>
-                  </div>
-                  <CardDescription>
-                    Read these before drawing strong conclusions from a small or incomplete slice.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3 pt-5">
-                  {data.report.data_quality_flags.length === 0 ? (
-                    <p className="text-[13px] text-muted-foreground">No major data-quality concern detected for this slice.</p>
-                  ) : (
-                    data.report.data_quality_flags.map((item) => (
-                      <div key={item} className="rounded-xl border border-red-200 bg-red-50 p-3 text-[13px] leading-relaxed text-red-900">
-                        {item}
+                    data.dashboard.conversation_stage_breakdown.map((item) => (
+                      <div key={item.stage} className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-[13px] font-medium capitalize">
+                            {formatStageLabel(item.stage)}
+                          </p>
+                          <p className="text-[12px] text-muted-foreground">
+                            {item.count} moments · {item.pct}%
+                          </p>
+                        </div>
+                        <div className="h-2 rounded-full bg-muted">
+                          <div
+                            className="h-2 rounded-full bg-primary"
+                            style={{ width: `${item.pct}%` }}
+                          />
+                        </div>
                       </div>
                     ))
                   )}

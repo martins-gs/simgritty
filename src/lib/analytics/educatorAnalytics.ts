@@ -24,6 +24,7 @@ interface AnalyticsSessionRow {
   id: string;
   scenario_id: string;
   trainee_id: string;
+  trainee_label: string;
   org_id: string;
   status: string;
   created_at: string;
@@ -51,8 +52,8 @@ interface NormalizedSession {
   id: string;
   scenarioId: string;
   scenarioTitle: string;
-  scenarioType: string | null;
   traineeId: string;
+  traineeLabel: string;
   createdAt: string;
   createdAtMs: number;
   exitType: string | null;
@@ -60,7 +61,6 @@ interface NormalizedSession {
   peakEscalationLevel: number | null;
   attemptIndex: number;
   isRepeatAttempt: boolean;
-  promptVersion: string | null;
   traits: ScenarioTraits | null;
   reviewArtifacts: StoredReviewArtifacts | null;
 }
@@ -70,8 +70,6 @@ interface ThemeOccurrence {
   sessionId: string;
   traineeId: string;
   scenarioTitle: string;
-  scenarioType: string | null;
-  promptVersion: string | null;
   attemptIndex: number;
   isRepeatAttempt: boolean;
   stage: EducatorConversationStage;
@@ -90,6 +88,7 @@ interface ThemeSummary {
   affectedSessions: Set<string>;
   impacts: number[];
   stages: Map<EducatorConversationStage, number>;
+  scenarioLearnerCounts: Map<string, number>;
   scenarioCounts: Map<string, number>;
   behaviourCounts: Map<string, number>;
   examples: ThemeOccurrence[];
@@ -205,15 +204,6 @@ function normaliseText(value: string | null | undefined) {
     .trim();
 }
 
-function humanizeFilterValue(value: string | null | undefined) {
-  if (!value) return null;
-  return value
-    .split(/[_-]+/g)
-    .filter(Boolean)
-    .map((part) => part[0]?.toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
 function roundPct(value: number) {
   return Math.max(0, Math.round(value));
 }
@@ -233,27 +223,9 @@ function getMomentKey(turnIndex: number, evidenceType: string) {
   return `${turnIndex}:${normaliseText(evidenceType).replace(/\s+/g, "_")}`;
 }
 
-function getPromptVersion(reviewArtifacts: StoredReviewArtifacts | null) {
-  return (
-    reviewArtifacts?.meta.summary?.prompt_version ??
-    reviewArtifacts?.meta.timeline?.prompt_version ??
-    reviewArtifacts?.meta.moment_selection?.prompt_version ??
-    null
-  );
-}
-
 function getScenarioTitle(session: AnalyticsSessionRow) {
   const snapshot = parseScenarioSnapshot(session.scenario_snapshot);
   return snapshot.title?.trim() || "Untitled scenario";
-}
-
-function getScenarioType(session: AnalyticsSessionRow) {
-  if (typeof session.scenario_snapshot !== "object" || session.scenario_snapshot == null) {
-    return null;
-  }
-
-  const value = (session.scenario_snapshot as Record<string, unknown>).archetype_tag;
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function getScenarioTraits(session: AnalyticsSessionRow) {
@@ -270,8 +242,8 @@ function normaliseSessions(rows: AnalyticsSessionRow[]) {
       id: row.id,
       scenarioId: row.scenario_id,
       scenarioTitle: getScenarioTitle(row),
-      scenarioType: getScenarioType(row),
       traineeId: row.trainee_id,
+      traineeLabel: row.trainee_label,
       createdAt: row.created_at,
       createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
       exitType: row.exit_type,
@@ -279,7 +251,6 @@ function normaliseSessions(rows: AnalyticsSessionRow[]) {
       peakEscalationLevel: row.peak_escalation_level,
       attemptIndex: 1,
       isRepeatAttempt: false,
-      promptVersion: getPromptVersion(reviewArtifacts),
       traits: getScenarioTraits(row),
       reviewArtifacts,
     };
@@ -304,9 +275,8 @@ function normaliseSessions(rows: AnalyticsSessionRow[]) {
 }
 
 function matchesFilters(session: NormalizedSession, filters: EducatorAnalyticsFiltersInput) {
+  if (filters.trainee_id && session.traineeId !== filters.trainee_id) return false;
   if (filters.scenario_id && session.scenarioId !== filters.scenario_id) return false;
-  if (filters.scenario_type && session.scenarioType !== filters.scenario_type) return false;
-  if (filters.prompt_version && session.promptVersion !== filters.prompt_version) return false;
   if (filters.attempt_view === "first" && session.isRepeatAttempt) return false;
   if (filters.attempt_view === "repeat" && !session.isRepeatAttempt) return false;
   if (filters.date_from && session.createdAt.slice(0, 10) < filters.date_from) return false;
@@ -496,8 +466,6 @@ function buildOccurrence(
     sessionId: session.id,
     traineeId: session.traineeId,
     scenarioTitle: session.scenarioTitle,
-    scenarioType: session.scenarioType,
-    promptVersion: session.promptVersion,
     attemptIndex: session.attemptIndex,
     isRepeatAttempt: session.isRepeatAttempt,
     stage: detectStage(session, evidence, moment),
@@ -711,12 +679,25 @@ function computeThemeSummary(
   const affectedLearners = new Set(themeOccurrences.map((occurrence) => occurrence.traineeId));
   const affectedSessions = new Set(themeOccurrences.map((occurrence) => occurrence.sessionId));
   const stages = new Map<EducatorConversationStage, number>();
-  const scenarioCounts = new Map<string, number>();
+  const scenarioLearnerSets = new Map<string, Set<string>>();
+  const scenarioSessionSets = new Map<string, Set<string>>();
 
   for (const occurrence of themeOccurrences) {
     stages.set(occurrence.stage, (stages.get(occurrence.stage) ?? 0) + 1);
-    scenarioCounts.set(occurrence.scenarioTitle, (scenarioCounts.get(occurrence.scenarioTitle) ?? 0) + 1);
+    const scenarioLearners = scenarioLearnerSets.get(occurrence.scenarioTitle) ?? new Set<string>();
+    scenarioLearners.add(occurrence.traineeId);
+    scenarioLearnerSets.set(occurrence.scenarioTitle, scenarioLearners);
+    const scenarioSessions = scenarioSessionSets.get(occurrence.scenarioTitle) ?? new Set<string>();
+    scenarioSessions.add(occurrence.sessionId);
+    scenarioSessionSets.set(occurrence.scenarioTitle, scenarioSessions);
   }
+
+  const scenarioLearnerCounts = new Map(
+    [...scenarioLearnerSets.entries()].map(([scenarioTitle, learnerIds]) => [scenarioTitle, learnerIds.size])
+  );
+  const scenarioCounts = new Map(
+    [...scenarioSessionSets.entries()].map(([scenarioTitle, sessionIds]) => [scenarioTitle, sessionIds.size])
+  );
 
   const avgImpact = average(themeOccurrences.map((occurrence) => occurrence.impact));
   const learnerCount = new Set(selectedSessions.map((session) => session.traineeId)).size;
@@ -754,6 +735,7 @@ function computeThemeSummary(
     affectedSessions,
     impacts: themeOccurrences.map((occurrence) => occurrence.impact),
     stages,
+    scenarioLearnerCounts,
     scenarioCounts,
     behaviourCounts: buildBehaviourCounts(themeOccurrences),
     examples: selectExamples(themeOccurrences, 3),
@@ -774,7 +756,6 @@ function computeThemeSummary(
 function buildFiltersApplied(
   filters: EducatorAnalyticsFiltersInput,
   sessions: NormalizedSession[],
-  cohortLabel: string | null,
   siteProgrammeLabel: string | null
 ): EducatorAnalyticsFiltersApplied {
   const scenario = filters.scenario_id
@@ -786,29 +767,30 @@ function buildFiltersApplied(
       : null;
 
   return {
-    cohort: cohortLabel,
     profession_grade: null,
     scenario,
-    scenario_type: humanizeFilterValue(filters.scenario_type),
     date_range: dateRange,
     first_attempt_vs_repeat_attempts: filters.attempt_view,
     site_programme: siteProgrammeLabel,
     educator_facilitator: null,
-    prompt_version: filters.prompt_version,
   };
 }
 
 function buildComparisonLabel(filters: EducatorAnalyticsFiltersInput, baselineSessions: NormalizedSession[]) {
   if (baselineSessions.length === 0) {
-    return "No separate comparison cohort applied";
+    return "No separate comparison group applied";
   }
 
   if (filters.attempt_view === "first") {
-    return "Repeat attempts in the same filtered cohort";
+    return "Repeat attempts in the same filtered group";
   }
 
   if (filters.attempt_view === "repeat") {
-    return "First attempts in the same filtered cohort";
+    return "First attempts in the same filtered group";
+  }
+
+  if (filters.trainee_id) {
+    return "Other analysable sessions in the organisation";
   }
 
   return "Other analysable sessions in the organisation";
@@ -854,7 +836,7 @@ function formatScenarioList(summary: ThemeSummary, selectedSessions: NormalizedS
 
 function describeBaselineDelta(summary: ThemeSummary, comparisonGroup: string) {
   if (summary.baselineDeltaPct == null) {
-    return "No separate comparison cohort was applied for this view.";
+    return "No separate comparison group was applied for this view.";
   }
 
   const delta = Number(summary.baselineDeltaPct.toFixed(1));
@@ -1064,7 +1046,8 @@ function buildHeadlineCard(
 function buildDashboard(
   topThemes: ThemeSummary[],
   selectedSessions: NormalizedSession[],
-  allThemeSummaries: ThemeSummary[]
+  allThemeSummaries: ThemeSummary[],
+  selectedNegativeOccurrences: ThemeOccurrence[]
 ): EducatorAnalyticsDashboard {
   const mostWidespread = [...allThemeSummaries].sort((a, b) => b.learnerPrevalencePct - a.learnerPrevalencePct)[0] ?? null;
   const mostHarmful = [...allThemeSummaries].sort((a, b) => b.avgImpact - a.avgImpact)[0] ?? null;
@@ -1073,10 +1056,8 @@ function buildDashboard(
     .sort((a, b) => (b.improvementDeltaPct ?? 0) - (a.improvementDeltaPct ?? 0))[0] ?? null;
   const stageCounts = new Map<EducatorConversationStage, number>();
 
-  for (const summary of topThemes) {
-    for (const [stage, count] of summary.stages.entries()) {
-      stageCounts.set(stage, (stageCounts.get(stage) ?? 0) + count);
-    }
+  for (const occurrence of selectedNegativeOccurrences) {
+    stageCounts.set(occurrence.stage, (stageCounts.get(occurrence.stage) ?? 0) + 1);
   }
 
   const totalStageCount = [...stageCounts.values()].reduce((sum, value) => sum + value, 0);
@@ -1137,9 +1118,13 @@ function buildDashboard(
         label: summary.label,
       })),
       cells: scenarioTitles.flatMap((scenario) => topThemes.map((summary) => {
-        const count = summary.scenarioCounts.get(scenario) ?? 0;
-        const totalScenarioSessions = selectedSessions.filter((session) => session.scenarioTitle === scenario).length;
-        const prevalencePct = totalScenarioSessions === 0 ? 0 : (count / totalScenarioSessions) * 100;
+        const count = summary.scenarioLearnerCounts.get(scenario) ?? 0;
+        const totalScenarioLearners = new Set(
+          selectedSessions
+            .filter((session) => session.scenarioTitle === scenario)
+            .map((session) => session.traineeId)
+        ).size;
+        const prevalencePct = totalScenarioLearners === 0 ? 0 : (count / totalScenarioLearners) * 100;
         return {
           scenario,
           theme: summary.theme,
@@ -1165,29 +1150,21 @@ function buildDashboard(
 }
 
 function buildAvailableFilters(
-  allSessions: NormalizedSession[],
-  cohortLabel: string | null,
-  siteProgrammeLabel: string | null
+  allSessions: NormalizedSession[]
 ): EducatorAnalyticsResponse["available_filters"] {
+  const users = [...new Map(
+    allSessions.map((session) => [session.traineeId, { value: session.traineeId, label: session.traineeLabel }])
+  ).values()].sort((a, b) => a.label.localeCompare(b.label));
   const scenarios = [...new Map(
     allSessions.map((session) => [session.scenarioId, { value: session.scenarioId, label: session.scenarioTitle }])
   ).values()].sort((a, b) => a.label.localeCompare(b.label));
-  const scenarioTypes = [...new Set(allSessions.map((session) => session.scenarioType).filter(Boolean) as string[])]
-    .sort((a, b) => a.localeCompare(b))
-    .map((value) => ({ value, label: humanizeFilterValue(value) ?? value }));
-  const promptVersions = [...new Set(allSessions.map((session) => session.promptVersion).filter(Boolean) as string[])]
-    .sort((a, b) => a.localeCompare(b))
-    .map((value) => ({ value, label: value }));
   const dateValues = allSessions.map((session) => session.createdAt.slice(0, 10)).sort();
 
   return {
-    cohort_label: cohortLabel,
     profession_grade_available: false,
-    site_programme_label: siteProgrammeLabel,
     educator_facilitator_available: false,
+    users,
     scenarios,
-    scenario_types: scenarioTypes,
-    prompt_versions: promptVersions,
     min_date: dateValues[0] ?? null,
     max_date: dateValues[dateValues.length - 1] ?? null,
   };
@@ -1197,12 +1174,11 @@ export function buildEducatorAnalyticsResponse(input: {
   sessions: AnalyticsSessionRow[];
   evidenceRows: AnalyticsEvidenceRow[];
   filters: EducatorAnalyticsFiltersInput;
-  cohortLabel: string | null;
   siteProgrammeLabel: string | null;
 }) {
   const allSessions = normaliseSessions(input.sessions);
   const analysableSessions = allSessions.filter((session) => session.reviewArtifacts != null);
-  const availableFilters = buildAvailableFilters(analysableSessions, input.cohortLabel, input.siteProgrammeLabel);
+  const availableFilters = buildAvailableFilters(analysableSessions);
   const selectedSessions = analysableSessions.filter((session) => matchesFilters(session, input.filters));
   const baselineSessions = input.filters.attempt_view === "all"
     ? analysableSessions.filter((session) => !matchesFilters(session, input.filters))
@@ -1222,7 +1198,7 @@ export function buildEducatorAnalyticsResponse(input: {
     .sort((a, b) => b.priorityScore - a.priorityScore);
   const topThemes = themeSummaries.slice(0, Math.min(5, Math.max(3, themeSummaries.length)));
   const report: EducatorAnalyticsReport = {
-    filters_applied: buildFiltersApplied(input.filters, allSessions, input.cohortLabel, input.siteProgrammeLabel),
+    filters_applied: buildFiltersApplied(input.filters, allSessions, input.siteProgrammeLabel),
     population_summary: buildPopulationSummary(selectedSessions, comparisonGroup),
     top_struggle_areas: buildTopStruggleAreas(topThemes, selectedSessions, comparisonGroup),
     cross_cutting_patterns: buildCrossCuttingPatterns(topThemes, selectedNegative),
@@ -1231,7 +1207,7 @@ export function buildEducatorAnalyticsResponse(input: {
     data_quality_flags: buildDataQualityFlags(allSessions, selectedSessions),
     educator_takeaways: buildEducatorTakeaways(topThemes),
   };
-  const dashboard = buildDashboard(topThemes, selectedSessions, themeSummaries);
+  const dashboard = buildDashboard(topThemes, selectedSessions, themeSummaries, selectedNegative);
 
   return {
     generated_at: new Date().toISOString(),

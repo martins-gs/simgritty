@@ -10,6 +10,20 @@ function parseAttemptView(value: string | null): EducatorAttemptView {
   return "all";
 }
 
+function buildTraineeLabel(
+  displayName: string | null | undefined,
+  email: string | null | undefined,
+  id: string
+) {
+  const trimmedName = displayName?.trim() || null;
+  const trimmedEmail = email?.trim() || null;
+
+  if (trimmedName && trimmedEmail) return `${trimmedName} (${trimmedEmail})`;
+  if (trimmedEmail) return trimmedEmail;
+  if (trimmedName) return trimmedName;
+  return `User ${id.slice(0, 8)}`;
+}
+
 function coerceNumber(value: unknown) {
   if (typeof value === "number") return value;
   const parsed = Number(value);
@@ -51,12 +65,11 @@ export async function GET(request: NextRequest) {
   const supabase = createAdminClientIfAvailable() ?? authSupabase;
   const url = new URL(request.url);
   const filters = {
+    trainee_id: url.searchParams.get("user") || null,
     scenario_id: url.searchParams.get("scenario") || null,
-    scenario_type: url.searchParams.get("scenarioType") || null,
     date_from: url.searchParams.get("dateFrom") || null,
     date_to: url.searchParams.get("dateTo") || null,
     attempt_view: parseAttemptView(url.searchParams.get("attemptView")),
-    prompt_version: url.searchParams.get("promptVersion") || null,
   };
 
   const { data: sessions, error: sessionsError } = await supabase
@@ -67,6 +80,33 @@ export async function GET(request: NextRequest) {
 
   if (sessionsError) {
     return NextResponse.json({ error: sessionsError.message }, { status: 500 });
+  }
+
+  const traineeIds = [...new Set(
+    (sessions ?? [])
+      .map((session) => session.trainee_id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0)
+  )];
+  const traineeLabelById = new Map<string, string>();
+
+  for (const batch of chunk(traineeIds, 200)) {
+    if (batch.length === 0) continue;
+
+    const { data, error } = await supabase
+      .from("user_profiles")
+      .select("id, display_name, email")
+      .in("id", batch);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    for (const profileRow of data ?? []) {
+      traineeLabelById.set(
+        profileRow.id,
+        buildTraineeLabel(profileRow.display_name, profileRow.email, profileRow.id)
+      );
+    }
   }
 
   const sessionIds = (sessions ?? []).map((session) => session.id).filter(Boolean);
@@ -114,24 +154,24 @@ export async function GET(request: NextRequest) {
     typeof organisationRecord?.name === "string" ? organisationRecord.name : null;
 
   const response = buildEducatorAnalyticsResponse({
-    sessions: (sessions ?? []) as Array<{
-      id: string;
-      scenario_id: string;
-      trainee_id: string;
-      org_id: string;
-      status: string;
-      created_at: string;
-      started_at: string | null;
-      ended_at: string | null;
-      exit_type: string | null;
-      final_escalation_level: number | null;
-      peak_escalation_level: number | null;
-      scenario_snapshot: unknown;
-      review_artifacts: unknown;
-    }>,
+    sessions: (sessions ?? []).map((session) => ({
+      id: session.id,
+      scenario_id: session.scenario_id,
+      trainee_id: session.trainee_id,
+      trainee_label: traineeLabelById.get(session.trainee_id) ?? buildTraineeLabel(null, null, session.trainee_id),
+      org_id: session.org_id,
+      status: session.status,
+      created_at: session.created_at,
+      started_at: session.started_at,
+      ended_at: session.ended_at,
+      exit_type: session.exit_type,
+      final_escalation_level: session.final_escalation_level,
+      peak_escalation_level: session.peak_escalation_level,
+      scenario_snapshot: session.scenario_snapshot,
+      review_artifacts: session.review_artifacts,
+    })),
     evidenceRows,
     filters,
-    cohortLabel: organisationName,
     siteProgrammeLabel: organisationName,
   });
 

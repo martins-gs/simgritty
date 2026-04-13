@@ -53,24 +53,20 @@ export type EducatorPriorityLevel = "high" | "medium" | "low";
 export type EducatorTrend = "improving" | "static" | "worsening";
 
 export interface EducatorAnalyticsFiltersInput {
+  trainee_id: string | null;
   scenario_id: string | null;
-  scenario_type: string | null;
   date_from: string | null;
   date_to: string | null;
   attempt_view: EducatorAttemptView;
-  prompt_version: string | null;
 }
 
 export interface EducatorAnalyticsFiltersApplied {
-  cohort: string | null;
   profession_grade: string | null;
   scenario: string | null;
-  scenario_type: string | null;
   date_range: string | null;
   first_attempt_vs_repeat_attempts: EducatorAttemptView;
   site_programme: string | null;
   educator_facilitator: string | null;
-  prompt_version: string | null;
 }
 
 export interface EducatorPopulationSummary {
@@ -132,13 +128,10 @@ export interface EducatorFilterOption {
 }
 
 export interface EducatorAnalyticsAvailableFilters {
-  cohort_label: string | null;
   profession_grade_available: boolean;
-  site_programme_label: string | null;
   educator_facilitator_available: boolean;
+  users: EducatorFilterOption[];
   scenarios: EducatorFilterOption[];
-  scenario_types: EducatorFilterOption[];
-  prompt_versions: EducatorFilterOption[];
   min_date: string | null;
   max_date: string | null;
 }

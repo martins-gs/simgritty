@@ -14,10 +14,10 @@ export function TopBar() {
   const navItems = [
     { href: "/", label: "Home", icon: Home, exact: true },
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/scenarios", label: "Scenarios", icon: BookOpen },
     ...(userProfile?.role === "admin" || userProfile?.role === "educator"
       ? [{ href: "/analytics", label: "Analytics", icon: ChartColumn }]
       : []),
-    { href: "/scenarios", label: "Scenarios", icon: BookOpen },
     { href: "/settings", label: "Settings", icon: Settings },
   ];
 
