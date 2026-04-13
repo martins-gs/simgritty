@@ -7,24 +7,29 @@ import {
   Home,
   LayoutDashboard,
   BookOpen,
+  ChartColumn,
   Settings,
   LogOut,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { ProLogWordmark } from "@/components/ProLogLogo";
-
-const navItems = [
-  { href: "/", label: "Home", icon: Home, exact: true },
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/scenarios", label: "Scenarios", icon: BookOpen },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
+import { useAppStore } from "@/store/appStore";
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
+  const userProfile = useAppStore((s) => s.userProfile);
+  const navItems = [
+    { href: "/", label: "Home", icon: Home, exact: true },
+    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    ...(userProfile?.role === "admin" || userProfile?.role === "educator"
+      ? [{ href: "/analytics", label: "Analytics", icon: ChartColumn }]
+      : []),
+    { href: "/scenarios", label: "Scenarios", icon: BookOpen },
+    { href: "/settings", label: "Settings", icon: Settings },
+  ];
 
   async function handleSignOut() {
     await supabase.auth.signOut();

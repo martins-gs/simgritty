@@ -5,19 +5,21 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAppStore } from "@/store/appStore";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { Home, LayoutDashboard, BookOpen, Settings, LogOut } from "lucide-react";
-
-const navItems = [
-  { href: "/", label: "Home", icon: Home, exact: true },
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/scenarios", label: "Scenarios", icon: BookOpen },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
+import { Home, LayoutDashboard, BookOpen, ChartColumn, Settings, LogOut } from "lucide-react";
 
 export function TopBar() {
   const userProfile = useAppStore((s) => s.userProfile);
   const pathname = usePathname();
   const router = useRouter();
+  const navItems = [
+    { href: "/", label: "Home", icon: Home, exact: true },
+    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    ...(userProfile?.role === "admin" || userProfile?.role === "educator"
+      ? [{ href: "/analytics", label: "Analytics", icon: ChartColumn }]
+      : []),
+    { href: "/scenarios", label: "Scenarios", icon: BookOpen },
+    { href: "/settings", label: "Settings", icon: Settings },
+  ];
 
   async function handleSignOut() {
     const supabase = createClient();
