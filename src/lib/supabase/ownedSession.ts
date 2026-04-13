@@ -36,7 +36,7 @@ export async function loadOwnedSession<TSession extends Record<string, unknown> 
   }
 
   return {
-    session: data as TSession,
+    session: data as unknown as TSession,
     error: null,
     status: null,
   };
