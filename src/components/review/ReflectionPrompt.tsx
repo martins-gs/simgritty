@@ -5,6 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import {
+  insightBadgeClass,
+  insightGlassCardClass,
+  insightHeroClass,
+  reviewHeroStyle,
+} from "@/lib/ui/insightTheme";
 import { parseSessionReflection } from "@/lib/validation/schemas";
 import type { SessionReflection } from "@/types/simulation";
 
@@ -169,29 +175,29 @@ export function ReflectionPrompt({ sessionId }: ReflectionPromptProps) {
           : "Choose at least one feeling or add a note, then save it to this session.";
 
   return (
-    <div className="space-y-4 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-5 shadow-sm ring-1 ring-amber-100/80">
+    <div className={`${insightHeroClass} h-full space-y-4 p-5 sm:p-6`} style={reviewHeroStyle}>
       <div className="space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="inline-flex rounded-full border border-amber-300 bg-white/90 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-800">
+          <div className={insightBadgeClass}>
             Reflection check-in
           </div>
           <div
             className={cn(
               "inline-flex rounded-full border px-2.5 py-1 text-[11px] font-medium",
               savedReflection
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-amber-200 bg-white/90 text-slate-600"
+                ? "border-emerald-400/30 bg-emerald-400/15 text-emerald-200"
+                : "border-white/10 bg-white/[0.06] text-white/70"
             )}
           >
             {savedReflection ? "Saved to this session" : "Not yet saved"}
           </div>
         </div>
 
-        <div className="rounded-xl border border-white/80 bg-white/80 p-4 shadow-sm">
-          <p className="text-sm font-semibold text-slate-900">
+        <div className={`${insightGlassCardClass} p-4`}>
+          <p className="text-sm font-semibold text-white">
             Encounters like this can be draining, even in simulation. How did this one feel?
           </p>
-          <p className="mt-2 text-[12px] leading-5 text-slate-600">
+          <p className="mt-2 text-[12px] leading-5 text-white/70">
             This section is asking for your own reaction. It is not scored and is not part
             of your performance record.
           </p>
@@ -208,8 +214,8 @@ export function ReflectionPrompt({ sessionId }: ReflectionPromptProps) {
             className={cn(
               "rounded-full border px-3 py-1 text-[12px] font-medium transition-colors",
               selectedTags.includes(tag.value)
-                ? "border-amber-400 bg-amber-100 text-amber-950 shadow-sm ring-1 ring-amber-200"
-                : "border-amber-200 bg-white/90 text-slate-700 hover:border-amber-300 hover:bg-white"
+                ? "border-[#f0bb7e] bg-[#f8a757] text-[#4b2d12] shadow-sm"
+                : "border-white/12 bg-white/[0.08] text-white/76 hover:border-white/18 hover:bg-white/[0.12] hover:text-white"
             )}
           >
             {tag.label}
@@ -226,18 +232,18 @@ export function ReflectionPrompt({ sessionId }: ReflectionPromptProps) {
         }}
         placeholder="How do you think that conversation went? (optional)"
         rows={2}
-        className="border-amber-200 bg-white/95 text-sm shadow-sm placeholder:text-slate-400 focus-visible:border-amber-400 focus-visible:ring-amber-200/60"
+        className="border-white/10 bg-white/[0.06] text-sm text-white shadow-none placeholder:text-white/40 focus-visible:border-[#f8a757] focus-visible:ring-[#f8a757]/40"
       />
 
-      <div className="rounded-xl border border-amber-200/80 bg-white/85 p-4 shadow-sm">
+      <div className={`${insightGlassCardClass} p-4`}>
         <p
           className={cn(
             "text-[12px] leading-5",
             errorMessage
-              ? "text-red-600"
+              ? "text-rose-200"
               : statusMessage || savedReflection
-                ? "text-emerald-700"
-                : "text-slate-500"
+                ? "text-emerald-200"
+                : "text-white/65"
           )}
         >
           {helperText}
@@ -251,8 +257,8 @@ export function ReflectionPrompt({ sessionId }: ReflectionPromptProps) {
           className={cn(
             "mt-3 w-full rounded-xl border text-sm font-semibold shadow-sm disabled:opacity-100",
             canSubmit
-              ? "border-slate-900 bg-slate-900 text-white hover:bg-slate-800"
-              : "cursor-not-allowed border-amber-300 bg-white text-amber-900"
+              ? "border-[#f0bb7e] bg-[#f8a757] text-[#4b2d12] hover:bg-[#f3b26c]"
+              : "cursor-not-allowed border-white/12 bg-white/[0.06] text-white/55"
           )}
         >
           {buttonLabel}

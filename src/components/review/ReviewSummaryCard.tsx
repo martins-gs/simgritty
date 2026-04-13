@@ -10,6 +10,19 @@ import {
 import {
   parseStoredReviewArtifacts,
 } from "@/lib/review/artifacts";
+import {
+  heatmapPlainCardClass,
+  heatmapPlumCardClass,
+  heatmapPlumCardStyle,
+  heatmapSageCardClass,
+  heatmapSageCardStyle,
+  heatmapShellClass,
+  heatmapShellStyle,
+  heatmapSoftCardClass,
+  heatmapSoftCardStyle,
+  heatmapWarmCardClass,
+  heatmapWarmCardStyle,
+} from "@/lib/ui/insightTheme";
 import type { SimulationSession, TranscriptTurn } from "@/types/simulation";
 
 const reviewSummaryResultCache = new Map<string, {
@@ -34,6 +47,20 @@ export function ReviewSummaryCard({
   turns,
   learningObjectives,
 }: ReviewSummaryCardProps) {
+  const loadingCardVariants = [
+    {
+      className: heatmapSageCardClass,
+      style: heatmapSageCardStyle,
+    },
+    {
+      className: heatmapWarmCardClass,
+      style: heatmapWarmCardStyle,
+    },
+    {
+      className: heatmapPlumCardClass,
+      style: heatmapPlumCardStyle,
+    },
+  ] as const;
   const storedArtifacts = useMemo(
     () => parseStoredReviewArtifacts(session.review_artifacts),
     [session.review_artifacts]
@@ -189,7 +216,7 @@ export function ReviewSummaryCard({
   if (loadingGeneratedSummary || !summary) {
     if (!loadingGeneratedSummary && debug && !debug.ok) {
       return (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50/70 shadow-sm">
+        <div className={`${heatmapShellClass} overflow-hidden`} style={heatmapShellStyle}>
           <div className="border-b border-rose-200/80 px-5 py-4">
             <div className="inline-flex rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">
               Session summary unavailable
@@ -221,9 +248,9 @@ export function ReviewSummaryCard({
 
     if (!loadingGeneratedSummary && !summary) {
       return (
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-5 py-4">
-            <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+        <div className={`${heatmapShellClass} overflow-hidden`} style={heatmapShellStyle}>
+          <div className="border-b border-slate-200/70 px-5 py-4">
+            <div className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
               Session summary unavailable
             </div>
             <p className="mt-3 text-[13px] leading-relaxed text-slate-600">
@@ -235,9 +262,9 @@ export function ReviewSummaryCard({
     }
 
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-5 py-4">
-          <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+      <div className={`${heatmapShellClass} overflow-hidden`} style={heatmapShellStyle}>
+        <div className="border-b border-slate-200/70 px-5 py-4">
+          <div className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
             Session summary
           </div>
           <p className="mt-3 text-[13px] leading-relaxed text-slate-500">
@@ -251,8 +278,8 @@ export function ReviewSummaryCard({
         </div>
 
         <div className="grid gap-4 px-5 py-4 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <div key={index} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          {loadingCardVariants.map((variant, index) => (
+            <div key={index} className={`${variant.className} p-4`} style={variant.style}>
               <div className="h-3 w-32 animate-pulse rounded bg-slate-100" />
               <div className="mt-3 space-y-2">
                 <div className="h-3 w-full animate-pulse rounded bg-slate-100" />
@@ -267,17 +294,17 @@ export function ReviewSummaryCard({
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-100 px-5 py-4">
-        <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+    <div className={`${heatmapShellClass} h-full overflow-hidden`} style={heatmapShellStyle}>
+      <div className="border-b border-slate-200/70 px-5 py-4">
+        <div className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
           Session summary
         </div>
         <p className="mt-3 text-base leading-relaxed text-slate-900 sm:text-lg">
           {summary.overview}
         </p>
         {summary.overallDelivery && (
-          <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50/70 p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">
+          <div className={`${heatmapSoftCardClass} mt-4 p-4`} style={heatmapSoftCardStyle}>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
               Overall Delivery
             </p>
             <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
@@ -288,29 +315,29 @@ export function ReviewSummaryCard({
       </div>
 
       <div className="grid gap-4 px-5 py-4 lg:grid-cols-3">
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
+        <div className={`${heatmapSageCardClass} p-4`} style={heatmapSageCardStyle}>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#355644]">
             What Helped
           </p>
-          <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
+          <p className="mt-2 text-[13px] leading-relaxed text-[#355644]">
             {summary.positiveMoment ?? "No single positive move stood out strongly enough to highlight on its own."}
           </p>
         </div>
 
-        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-800">
+        <div className={`${heatmapWarmCardClass} p-4`} style={heatmapWarmCardStyle}>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#4b2d12]">
             Why It Mattered
           </p>
-          <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
+          <p className="mt-2 text-[13px] leading-relaxed text-[#4b2d12]">
             {summary.whyItMattered ?? "See the timeline below for the moment that most shaped the conversation and why it mattered here."}
           </p>
         </div>
 
-        <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+        <div className={`${heatmapPlumCardClass} p-4`} style={heatmapPlumCardStyle}>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#4d3f68]">
             Next Best Move
           </p>
-          <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
+          <p className="mt-2 text-[13px] leading-relaxed text-[#4d3f68]">
             {summary.whatToSayInstead
               ? summary.whatToSayInstead
               : "A next best move will appear here when the review identifies one clear coaching opportunity."}
@@ -319,8 +346,8 @@ export function ReviewSummaryCard({
       </div>
 
       {objectiveItems.length > 0 && (
-        <div className="border-t border-slate-100 px-5 py-4">
-          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+        <div className="border-t border-slate-200/70 px-5 py-4">
+          <div className={`${heatmapPlainCardClass} p-4`}>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
               Learning Objectives
             </p>

@@ -15,6 +15,7 @@ import {
 import { Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MomentTranscriptContext } from "@/components/review/MomentTranscriptContext";
+import { heatmapSoftCardClass, heatmapSoftCardStyle } from "@/lib/ui/insightTheme";
 import {
   reviewDebugSchema,
   reviewTimelineApiResponseSchema,
@@ -146,7 +147,7 @@ function TimelineMomentCard({
   const lens = entry.narrative.lens?.trim() || (entry.narrative.positive ? "Helpful moment" : "Moment to revisit");
 
   return (
-    <div className="w-full rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-lg backdrop-blur-sm">
+    <div className="w-full rounded-2xl border border-slate-200/90 bg-white p-4 shadow-[0_18px_36px_-32px_rgba(15,23,42,0.28)]">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
           {entry.narrative.timecode} • {lens}
@@ -184,7 +185,7 @@ function TimelineMomentCard({
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+        <div className={`${heatmapSoftCardClass} p-3`} style={heatmapSoftCardStyle}>
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
             What happened next
           </p>
@@ -192,22 +193,22 @@ function TimelineMomentCard({
             {entry.narrative.whatHappenedNext}
           </p>
         </div>
-        <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+        <div className="rounded-xl border border-[#e7be8f] bg-[#eed8bb] p-3">
           <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
             Why it mattered here
           </p>
-          <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
+          <p className="mt-2 text-[12px] leading-relaxed text-[#4b2d12]">
             {entry.narrative.whyItMattered}
           </p>
         </div>
       </div>
 
       {entry.narrative.tryInstead && (
-        <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50/80 p-3">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+        <div className="mt-4 rounded-xl border border-[#d7cce8] bg-[#ede7f4] p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#4d3f68]">
             Next Best Move
           </p>
-          <p className="mt-2 text-[12px] leading-relaxed text-slate-700">
+          <p className="mt-2 text-[12px] leading-relaxed text-[#4d3f68]">
             {entry.narrative.tryInstead}
           </p>
         </div>
@@ -566,208 +567,235 @@ export function EscalationTimeline({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="max-w-2xl">
-          <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-            Conversation path
-          </p>
-          <p className="mt-1 text-[13px] leading-relaxed text-slate-600">
-            Hover the line, or play the recording, to see the moments that most changed the conversation.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] text-slate-600">
-            {formatTime(resolvedPlaybackTime)} / {formatTime(timelineMaxTime)}
+    <div className="overflow-hidden rounded-[24px] border border-slate-200/90 bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]">
+      <section className="space-y-4 p-4 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="max-w-3xl">
+            <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
+              Conversation path
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-slate-600">
+              Read the full path of the encounter, then use the analysis beneath it to unpack the moments that changed it.
+            </p>
           </div>
-          <Button
-            type="button"
-            size="sm"
-            disabled={!recordingUrl}
-            onClick={() => {
-              const audio = audioRef.current;
-              if (!audio) return;
 
-              if (!audio.paused) {
-                audio.pause();
-                return;
-              }
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] text-slate-600">
+              {formatTime(resolvedPlaybackTime)} / {formatTime(timelineMaxTime)}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!recordingUrl}
+              onClick={() => {
+                const audio = audioRef.current;
+                if (!audio) return;
 
-              const duration = Number.isFinite(audio.duration) ? audio.duration : resolvedAudioDuration;
-              if (duration > 0 && audio.currentTime >= duration - 0.25) {
-                audio.currentTime = 0;
-                setPlaybackTime(0);
-              }
+                if (!audio.paused) {
+                  audio.pause();
+                  return;
+                }
 
-              void audio.play().catch(() => {
-                setIsPlaying(false);
-              });
-            }}
-            className="gap-2"
-            title={recordingUrl ? (playbackActive ? "Pause conversation playback" : "Play full conversation") : "Session audio unavailable"}
-          >
-            {playbackActive ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            {playbackActive ? "Pause" : "Play"}
-          </Button>
-        </div>
-      </div>
+                const duration = Number.isFinite(audio.duration) ? audio.duration : resolvedAudioDuration;
+                if (duration > 0 && audio.currentTime >= duration - 0.25) {
+                  audio.currentTime = 0;
+                  setPlaybackTime(0);
+                }
 
-      <div
-        ref={chartContainerRef}
-        className={cn(
-          "relative h-56 w-full rounded-2xl border border-slate-200 bg-white/80 p-2 sm:h-72",
-          recordingUrl && "cursor-pointer"
-        )}
-        style={{ minWidth: 1, minHeight: 1 }}
-        onClick={(event) => {
-          if (!recordingUrl || !chartSize) return;
-          const audio = audioRef.current;
-          if (!audio) return;
-
-          const rect = event.currentTarget.getBoundingClientRect();
-          const usableWidth = chartSize.width - CHART_MARGIN.left - CHART_MARGIN.right;
-          if (usableWidth <= 0 || timelineMaxTime <= 0) return;
-
-          const x = event.clientX - rect.left - CHART_MARGIN.left;
-          const clampedX = Math.min(Math.max(x, 0), usableWidth);
-          const seekTime = (clampedX / usableWidth) * timelineMaxTime;
-          audio.currentTime = seekTime;
-          setPlaybackTime(seekTime);
-        }}
-        onMouseMove={(event) => {
-          if (!chartSize) return;
-
-          const rect = event.currentTarget.getBoundingClientRect();
-          const usableWidth = chartSize.width - CHART_MARGIN.left - CHART_MARGIN.right;
-          if (usableWidth <= 0 || timelineMaxTime <= 0) return;
-
-          const x = event.clientX - rect.left - CHART_MARGIN.left;
-          const clampedX = Math.min(Math.max(x, 0), usableWidth);
-          const ratio = clampedX / usableWidth;
-          setHoveredTime(ratio * timelineMaxTime);
-        }}
-        onMouseLeave={() => setHoveredTime(null)}
-      >
-        {chartSize ? (
-          <AreaChart
-            width={chartSize.width}
-            height={chartSize.height}
-            data={data}
-            margin={CHART_MARGIN}
-          >
-            <defs>
-              <linearGradient id="escalationGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#ef4444" stopOpacity={0.18} />
-                <stop offset="40%" stopColor="#f59e0b" stopOpacity={0.08} />
-                <stop offset="100%" stopColor="#10b981" stopOpacity={0.03} />
-              </linearGradient>
-            </defs>
-
-            <ReferenceArea y1={0} y2={2.5} fill="#10b981" fillOpacity={0.03} />
-            <ReferenceArea y1={2.5} y2={4.5} fill="#f59e0b" fillOpacity={0.03} />
-            <ReferenceArea y1={4.5} y2={6.5} fill="#f97316" fillOpacity={0.03} />
-            <ReferenceArea y1={6.5} y2={8.5} fill="#ef4444" fillOpacity={0.03} />
-            <ReferenceArea y1={8.5} y2={10} fill="#991b1b" fillOpacity={0.03} />
-
-            <CartesianGrid strokeDasharray="3 6" stroke="#e2e8f0" vertical={false} />
-
-            <XAxis
-              dataKey="time"
-              type="number"
-              domain={[0, timelineMaxTime]}
-              tickFormatter={formatTime}
-              stroke="#94a3b8"
-              fontSize={11}
-              tickLine={false}
-              axisLine={{ stroke: "#e2e8f0" }}
-            />
-            <YAxis
-              domain={[0, 10]}
-              ticks={[1, 3, 5, 7, 9]}
-              stroke="#94a3b8"
-              fontSize={11}
-              tickLine={false}
-              axisLine={false}
-              width={24}
-            />
-
-            {markerTime !== null && markerPoint && (
-              <>
-                <ReferenceLine
-                  x={markerTime}
-                  stroke={hoveredSecond !== null && !playbackActive ? "#0f172a" : "#2563eb"}
-                  strokeDasharray={hoveredSecond !== null && !playbackActive ? "4 4" : "6 3"}
-                  strokeWidth={1.5}
-                />
-                <ReferenceDot
-                  x={markerTime}
-                  y={markerPoint.level}
-                  ifOverflow="extendDomain"
-                  shape={(props: { cx?: number; cy?: number }) => {
-                    if (!props.cx || !props.cy) return <g />;
-                    return (
-                      <g>
-                        <circle
-                          cx={props.cx}
-                          cy={props.cy}
-                          r={10}
-                          fill={hoveredSecond !== null && !playbackActive ? "#0f172a" : "#2563eb"}
-                          opacity={0.14}
-                        />
-                        <circle
-                          cx={props.cx}
-                          cy={props.cy}
-                          r={5}
-                          fill={hoveredSecond !== null && !playbackActive ? "#0f172a" : "#2563eb"}
-                          stroke="white"
-                          strokeWidth={2}
-                        />
-                      </g>
-                    );
-                  }}
-                />
-              </>
-            )}
-
-            <ReferenceLine
-              y={maxCeiling}
-              stroke="#ef4444"
-              strokeDasharray="6 4"
-              strokeWidth={1.25}
-              label={{
-                value: `Cap ${maxCeiling}`,
-                position: "right",
-                fontSize: 10,
-                fill: "#ef4444",
-                fontWeight: 600,
+                void audio.play().catch(() => {
+                  setIsPlaying(false);
+                });
               }}
-            />
+              className="gap-2"
+              title={recordingUrl ? (playbackActive ? "Pause conversation playback" : "Play full conversation") : "Session audio unavailable"}
+            >
+              {playbackActive ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+              {playbackActive ? "Pause" : "Play"}
+            </Button>
+          </div>
+        </div>
 
-            <Area
-              type="stepAfter"
-              dataKey="level"
-              stroke="none"
-              fill="url(#escalationGradient)"
-            />
+        <div
+          ref={chartContainerRef}
+          className={cn(
+            "relative h-64 w-full overflow-hidden rounded-2xl border border-slate-200/90 bg-[#f8fafc] p-2 sm:h-80",
+            recordingUrl && "cursor-pointer"
+          )}
+          style={{ minWidth: 1, minHeight: 1 }}
+          onClick={(event) => {
+            if (!recordingUrl || !chartSize) return;
+            const audio = audioRef.current;
+            if (!audio) return;
 
-            <Area
-              type="stepAfter"
-              dataKey="level"
-              stroke="#334155"
-              strokeWidth={2.5}
-              fill="none"
-              dot={<CustomDot />}
-              activeDot={{ r: 7, fill: "#334155", stroke: "white", strokeWidth: 3 }}
-            />
-          </AreaChart>
-        ) : (
-          <div className="h-full w-full animate-pulse rounded-xl bg-slate-100/70" />
-        )}
-      </div>
+            const rect = event.currentTarget.getBoundingClientRect();
+            const usableWidth = chartSize.width - CHART_MARGIN.left - CHART_MARGIN.right;
+            if (usableWidth <= 0 || timelineMaxTime <= 0) return;
 
-      {(keyMomentEntries.length > 0 || (!loadingNarratives && resolvedDebug && !resolvedDebug.ok)) && (
-        <div className="space-y-3">
+            const x = event.clientX - rect.left - CHART_MARGIN.left;
+            const clampedX = Math.min(Math.max(x, 0), usableWidth);
+            const seekTime = (clampedX / usableWidth) * timelineMaxTime;
+            audio.currentTime = seekTime;
+            setPlaybackTime(seekTime);
+          }}
+          onMouseMove={(event) => {
+            if (!chartSize) return;
+
+            const rect = event.currentTarget.getBoundingClientRect();
+            const usableWidth = chartSize.width - CHART_MARGIN.left - CHART_MARGIN.right;
+            if (usableWidth <= 0 || timelineMaxTime <= 0) return;
+
+            const x = event.clientX - rect.left - CHART_MARGIN.left;
+            const clampedX = Math.min(Math.max(x, 0), usableWidth);
+            const ratio = clampedX / usableWidth;
+            setHoveredTime(ratio * timelineMaxTime);
+          }}
+          onMouseLeave={() => setHoveredTime(null)}
+        >
+          {chartSize ? (
+            <AreaChart
+              width={chartSize.width}
+              height={chartSize.height}
+              data={data}
+              margin={CHART_MARGIN}
+            >
+              <defs>
+                <linearGradient id="escalationGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#ef4444" stopOpacity={0.18} />
+                  <stop offset="40%" stopColor="#f59e0b" stopOpacity={0.08} />
+                  <stop offset="100%" stopColor="#10b981" stopOpacity={0.03} />
+                </linearGradient>
+              </defs>
+
+              <ReferenceArea y1={0} y2={2.5} fill="#10b981" fillOpacity={0.03} />
+              <ReferenceArea y1={2.5} y2={4.5} fill="#f59e0b" fillOpacity={0.03} />
+              <ReferenceArea y1={4.5} y2={6.5} fill="#f97316" fillOpacity={0.03} />
+              <ReferenceArea y1={6.5} y2={8.5} fill="#ef4444" fillOpacity={0.03} />
+              <ReferenceArea y1={8.5} y2={10} fill="#991b1b" fillOpacity={0.03} />
+
+              <CartesianGrid strokeDasharray="3 6" stroke="#e2e8f0" vertical={false} />
+
+              <XAxis
+                dataKey="time"
+                type="number"
+                domain={[0, timelineMaxTime]}
+                tickFormatter={formatTime}
+                stroke="#94a3b8"
+                fontSize={11}
+                tickLine={false}
+                axisLine={{ stroke: "#e2e8f0" }}
+              />
+              <YAxis
+                domain={[0, 10]}
+                ticks={[1, 3, 5, 7, 9]}
+                stroke="#94a3b8"
+                fontSize={11}
+                tickLine={false}
+                axisLine={false}
+                width={24}
+              />
+
+              {markerTime !== null && markerPoint && (
+                <>
+                  <ReferenceLine
+                    x={markerTime}
+                    stroke={hoveredSecond !== null && !playbackActive ? "#0f172a" : "#2563eb"}
+                    strokeDasharray={hoveredSecond !== null && !playbackActive ? "4 4" : "6 3"}
+                    strokeWidth={1.5}
+                  />
+                  <ReferenceDot
+                    x={markerTime}
+                    y={markerPoint.level}
+                    ifOverflow="extendDomain"
+                    shape={(props: { cx?: number; cy?: number }) => {
+                      if (!props.cx || !props.cy) return <g />;
+                      return (
+                        <g>
+                          <circle
+                            cx={props.cx}
+                            cy={props.cy}
+                            r={10}
+                            fill={hoveredSecond !== null && !playbackActive ? "#0f172a" : "#2563eb"}
+                            opacity={0.14}
+                          />
+                          <circle
+                            cx={props.cx}
+                            cy={props.cy}
+                            r={5}
+                            fill={hoveredSecond !== null && !playbackActive ? "#0f172a" : "#2563eb"}
+                            stroke="white"
+                            strokeWidth={2}
+                          />
+                        </g>
+                      );
+                    }}
+                  />
+                </>
+              )}
+
+              <ReferenceLine
+                y={maxCeiling}
+                stroke="#ef4444"
+                strokeDasharray="6 4"
+                strokeWidth={1.25}
+                label={{
+                  value: `Cap ${maxCeiling}`,
+                  position: "insideTopRight",
+                  fontSize: 10,
+                  fill: "#ef4444",
+                  fontWeight: 600,
+                }}
+              />
+
+              <Area
+                type="stepAfter"
+                dataKey="level"
+                stroke="none"
+                fill="url(#escalationGradient)"
+              />
+
+              <Area
+                type="stepAfter"
+                dataKey="level"
+                stroke="#334155"
+                strokeWidth={2.5}
+                fill="none"
+                dot={<CustomDot />}
+                activeDot={{ r: 7, fill: "#334155", stroke: "white", strokeWidth: 3 }}
+              />
+            </AreaChart>
+          ) : (
+            <div className="h-full w-full animate-pulse rounded-xl bg-slate-100/70" />
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 border-t border-slate-200/80 pt-4 text-[11px] text-slate-500">
+          <span className="flex items-center gap-1.5">
+            <svg width="16" height="4">
+              <line x1="0" y1="2" x2="16" y2="2" stroke="#334155" strokeWidth="2.5" />
+            </svg>
+            Conversation intensity
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full border-2 border-blue-500 bg-white" />
+            Hover or playback marker
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full border-2 border-red-400 bg-white" />
+            Change point
+          </span>
+        </div>
+      </section>
+
+      <section className="space-y-4 border-t border-slate-200/80 bg-[#f5f7fb] p-4 sm:p-5">
+          <div className="max-w-2xl">
+            <div className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
+              Timeline analysis
+            </div>
+            <p className="mt-3 text-[13px] leading-relaxed text-slate-600">
+              Each numbered moment maps back to the path above, so the coaching stays tied to the same stretch of dialogue.
+            </p>
+          </div>
+
           {keyMomentEntries.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {keyMomentEntries.map((entry, tabIndex) => {
@@ -784,7 +812,7 @@ export function EscalationTimeline({
                       isSelected
                         ? "border-slate-900 bg-slate-900 text-white"
                         : isPreviewed
-                          ? "border-blue-300 bg-blue-50 text-blue-700"
+                          ? "border-[#d7cce8] bg-[#ede7f4] text-[#4d3f68]"
                           : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
                     )}
                   >
@@ -796,11 +824,11 @@ export function EscalationTimeline({
             </div>
           )}
 
-          <div className="min-h-[30rem]">
+          <div className="min-h-[24rem]">
             {loadingNarratives && !displayedKeyMomentEntry ? (
-              <div className="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-lg">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_18px_36px_-32px_rgba(15,23,42,0.18)]">
                 <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
-                  Tailored coaching
+                  Timeline analysis
                 </div>
                 <p className="mt-3 text-[13px] leading-relaxed text-slate-500">
                   Analysing these moments and tailoring the coaching to this dialogue. This can take up to a minute.
@@ -813,7 +841,7 @@ export function EscalationTimeline({
                 </div>
               </div>
             ) : !loadingNarratives && resolvedDebug && !resolvedDebug.ok ? (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 shadow-lg">
+              <div className="rounded-2xl border border-rose-200 bg-rose-50/80 p-4 shadow-[0_18px_36px_-32px_rgba(15,23,42,0.12)]">
                 <div className="inline-flex rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-rose-700">
                   Timeline analysis unavailable
                 </div>
@@ -842,32 +870,14 @@ export function EscalationTimeline({
                 showNow={playbackActive && displayedKeyMomentIndex === playbackOverlayMomentIndex}
               />
             ) : (
-              <div className="flex min-h-[18rem] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50">
-                <p className="text-[12px] text-slate-400">
+              <div className="flex min-h-[18rem] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white/75">
+                <p className="max-w-sm text-center text-[12px] text-slate-400">
                   Select a numbered moment above to keep one coaching detail panel in view.
                 </p>
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
-        <span className="flex items-center gap-1.5">
-          <svg width="16" height="4">
-            <line x1="0" y1="2" x2="16" y2="2" stroke="#334155" strokeWidth="2.5" />
-          </svg>
-          Conversation intensity
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full border-2 border-blue-500 bg-white" />
-          Hover or playback marker
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full border-2 border-red-400 bg-white" />
-          Change point
-        </span>
-      </div>
+      </section>
     </div>
   );
 }

@@ -5,6 +5,19 @@ import {
   scenarioHistoryApiResponseSchema,
   type ScenarioHistoryApiResponse,
 } from "@/lib/review/history";
+import {
+  heatmapPlainCardClass,
+  heatmapPlumCardClass,
+  heatmapPlumCardStyle,
+  heatmapSageCardClass,
+  heatmapSageCardStyle,
+  heatmapShellClass,
+  heatmapShellStyle,
+  heatmapSoftCardClass,
+  heatmapSoftCardStyle,
+  heatmapWarmCardClass,
+  heatmapWarmCardStyle,
+} from "@/lib/ui/insightTheme";
 
 interface ScenarioHistoryCoachCardProps {
   sessionId: string;
@@ -12,6 +25,24 @@ interface ScenarioHistoryCoachCardProps {
 
 const scenarioHistoryResultCache = new Map<string, ScenarioHistoryApiResponse>();
 const scenarioHistoryRequestCache = new Map<string, Promise<ScenarioHistoryApiResponse>>();
+const loadingCardVariants = [
+  {
+    className: heatmapSageCardClass,
+    style: heatmapSageCardStyle,
+  },
+  {
+    className: heatmapWarmCardClass,
+    style: heatmapWarmCardStyle,
+  },
+  {
+    className: heatmapPlainCardClass,
+    style: undefined,
+  },
+  {
+    className: heatmapPlumCardClass,
+    style: heatmapPlumCardStyle,
+  },
+] as const;
 
 function buildUnavailableResponse(
   message: string,
@@ -99,9 +130,9 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
 
   if (loading && !response) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-5 py-4">
-          <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+      <div className={`${heatmapShellClass} overflow-hidden`} style={heatmapShellStyle}>
+        <div className="border-b border-slate-200/70 px-5 py-4">
+          <div className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
             Review your progress
           </div>
           <p className="mt-3 text-[13px] leading-relaxed text-slate-500">
@@ -113,8 +144,8 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
           </div>
         </div>
         <div className="space-y-4 px-5 py-5">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <div key={index} className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          {loadingCardVariants.map((variant, index) => (
+            <div key={index} className={`${variant.className} p-4`} style={variant.style}>
               <div className="h-3 w-32 animate-pulse rounded bg-slate-100" />
               <div className="mt-3 space-y-2">
                 <div className="h-3 w-full animate-pulse rounded bg-slate-100" />
@@ -129,7 +160,7 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
 
   if (!loading && response && !response.debug.ok && !response.summary) {
     return (
-      <div className="rounded-2xl border border-rose-200 bg-rose-50/70 shadow-sm">
+      <div className={`${heatmapShellClass} overflow-hidden`} style={heatmapShellStyle}>
         <div className="border-b border-rose-200/80 px-5 py-4">
           <div className="inline-flex rounded-full border border-rose-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-rose-700">
             Review your progress unavailable
@@ -162,9 +193,9 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-100 px-5 py-4">
-        <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
+    <div className={`${heatmapShellClass} overflow-hidden`} style={heatmapShellStyle}>
+      <div className="border-b border-slate-200/70 px-5 py-4">
+        <div className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700">
           Review your progress
         </div>
         <p className="mt-3 text-base leading-relaxed text-slate-900 sm:text-lg">
@@ -176,25 +207,25 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
       </div>
 
       <div className="space-y-4 px-5 py-5">
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
+        <div className={`${heatmapSageCardClass} p-4`} style={heatmapSageCardStyle}>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#355644]">
             What is improving
           </p>
-          <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
+          <p className="mt-2 text-[13px] leading-relaxed text-[#355644]">
             {resolvedSummary.progress}
           </p>
         </div>
 
-        <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-800">
+        <div className={`${heatmapWarmCardClass} p-4`} style={heatmapWarmCardStyle}>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#4b2d12]">
             Main target
           </p>
-          <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
+          <p className="mt-2 text-[13px] leading-relaxed text-[#4b2d12]">
             {resolvedSummary.primaryTarget}
           </p>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+        <div className={`${heatmapSoftCardClass} p-4`} style={heatmapSoftCardStyle}>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
             Also Keep In View
           </p>
@@ -203,7 +234,7 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
               {resolvedSummary.secondaryPatterns.map((pattern) => (
                 <li
                   key={pattern}
-                  className="rounded-lg border border-white/90 bg-white/80 px-3 py-2 text-[13px] leading-relaxed text-slate-700"
+                  className="rounded-lg border border-white/90 bg-white/72 px-3 py-2 text-[13px] leading-relaxed text-slate-700"
                 >
                   {pattern}
                 </li>
@@ -216,11 +247,11 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
           )}
         </div>
 
-        <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-blue-700">
+        <div className={`${heatmapPlumCardClass} p-4`} style={heatmapPlumCardStyle}>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#4d3f68]">
             Practice target
           </p>
-          <p className="mt-2 text-[13px] leading-relaxed text-slate-700">
+          <p className="mt-2 text-[13px] leading-relaxed text-[#4d3f68]">
             {resolvedSummary.practiceTarget}
           </p>
         </div>

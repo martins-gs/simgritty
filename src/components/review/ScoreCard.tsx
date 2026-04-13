@@ -2,6 +2,7 @@
 
 import type { ScoreBreakdown } from "@/lib/engine/scoring";
 import type { QualitativeLabel } from "@/types/simulation";
+import { heatmapShellClass, heatmapShellStyle } from "@/lib/ui/insightTheme";
 import { cn } from "@/lib/utils";
 
 interface ScoreCardProps {
@@ -71,8 +72,8 @@ export function ScoreCard({ score, preliminary }: ScoreCardProps) {
   const labelColors = getLabelColors(score.qualitativeLabel);
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-      <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
+    <div className={`${heatmapShellClass} overflow-hidden`} style={heatmapShellStyle}>
+      <div className="border-b border-slate-200/70 px-4 py-4 sm:px-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -97,7 +98,7 @@ export function ScoreCard({ score, preliminary }: ScoreCardProps) {
           </div>
         </div>
         {preliminary && (
-          <p className="mt-3 text-[11px] font-medium text-amber-700">
+          <p className="mt-3 text-[11px] font-medium text-[#9a5a12]">
             Short session: treat this breakdown as especially tentative. Extreme scores are softened until there is more evidence.
           </p>
         )}
@@ -132,7 +133,7 @@ export function ScoreCard({ score, preliminary }: ScoreCardProps) {
           description="Measures judgment about when to continue alone and when to request support"
         />
       </div>
-      <div className="border-t border-slate-100 px-4 py-2.5 sm:px-5">
+      <div className="border-t border-slate-200/70 px-4 py-2.5 sm:px-5">
         <p className="text-[11px] text-slate-400">
           Percentages in brackets show this scenario&apos;s weighting for each dimension.
         </p>

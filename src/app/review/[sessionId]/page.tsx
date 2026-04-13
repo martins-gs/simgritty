@@ -12,11 +12,18 @@ import { ReflectionPrompt } from "@/components/review/ReflectionPrompt";
 import { ReviewSummaryCard } from "@/components/review/ReviewSummaryCard";
 import { ScenarioHistoryCoachCard } from "@/components/review/ScenarioHistoryCoachCard";
 import { computeScore, isSessionPreliminary } from "@/lib/engine/scoring";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { mergeTraineeAudioDeliveryFromEvents } from "@/lib/review/traineeDelivery";
 import { parseStoredReviewArtifacts } from "@/lib/review/artifacts";
+import {
+  heatmapShellClass,
+  heatmapShellStyle,
+  insightBadgeClass,
+  insightHeroClass,
+  insightStatClass,
+  reviewHeroStyle,
+} from "@/lib/ui/insightTheme";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type {
@@ -117,7 +124,7 @@ function ScorePlaceholderCard({
   restarting: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 overflow-hidden">
+    <div className="overflow-hidden rounded-xl border border-amber-200 bg-[#fff7ed]">
       <div className="border-b border-amber-200/80 px-5 py-4">
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-800">
           Performance Score
@@ -376,6 +383,7 @@ export default function ReviewPage() {
   });
 
   const preliminary = isSessionPreliminary(score.turnCount);
+  const traineeTurnCount = turns.filter((turn) => turn.speaker === "trainee").length;
 
   const selectedTurn = turns.find((turn) => turn.id === selectedTurnId) ?? null;
   const canRestartFromSelectedTurn = Boolean(selectedTurn?.state_after && selectedTurn?.patient_prompt_after);
@@ -456,41 +464,81 @@ export default function ReviewPage() {
   return (
     <AppShell>
       <div className="space-y-4 sm:space-y-6 px-1 sm:px-0">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold">{scenarioTitle}</h1>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Badge variant={session.status === "completed" ? "default" : "destructive"}>
-              {session.exit_type === "instant_exit" ? "Exited early" : session.status}
-            </Badge>
-            {duration && (
-              <Badge variant="secondary">{formatDuration(duration)}</Badge>
-            )}
-            {session.started_at && (
-              <Badge variant="secondary">
-                {new Date(session.started_at).toLocaleDateString()}
-              </Badge>
-            )}
-          </div>
-        </div>
+        <section className={`${insightHeroClass} px-5 py-6 sm:px-7 sm:py-7`} style={reviewHeroStyle}>
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl">
+              <span className={insightBadgeClass}>Session review</span>
+              <h1 className="mt-4 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+                {scenarioTitle}
+              </h1>
+              <p className="mt-3 max-w-2xl text-[14px] leading-relaxed text-white/70">
+                Review the encounter, capture your own reaction, and turn the next practice run
+                into a narrower, clearer teaching target.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <span
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]",
+                    session.status === "completed"
+                      ? "border-emerald-400/30 bg-emerald-400/15 text-emerald-200"
+                      : "border-rose-400/30 bg-rose-400/15 text-rose-100"
+                  )}
+                >
+                  {session.exit_type === "instant_exit" ? "Exited early" : session.status}
+                </span>
+                {duration && (
+                  <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-[11px] font-medium text-white/80">
+                    {formatDuration(duration)}
+                  </span>
+                )}
+                {session.started_at && (
+                  <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-[11px] font-medium text-white/80">
+                    {new Date(session.started_at).toLocaleDateString()}
+                  </span>
+                )}
+              </div>
+            </div>
 
-        <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className={insightStatClass}>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-white/55">Trainee turns</p>
+                <p className="mt-1 text-2xl font-semibold text-white">{traineeTurnCount}</p>
+              </div>
+              <div className={insightStatClass}>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-white/55">Peak escalation</p>
+                <p className="mt-1 text-2xl font-semibold text-white">
+                  {session.peak_escalation_level ?? "—"}
+                </p>
+              </div>
+              <div className={`${insightStatClass} col-span-2 sm:col-span-1`}>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-white/55">Exit type</p>
+                <p className="mt-1 text-sm font-semibold text-white capitalize">
+                  {session.exit_type?.replace(/_/g, " ") ?? "Standard end"}
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="grid gap-4 xl:grid-cols-[0.82fr_1.18fr]">
           <ReflectionPrompt sessionId={sessionId} />
 
-          <div className="space-y-4">
-            <ReviewSummaryCard
-              sessionId={sessionId}
-              session={session}
-              turns={turns}
-              learningObjectives={learningObjectives}
-            />
-          </div>
+          <ReviewSummaryCard
+            sessionId={sessionId}
+            session={session}
+            turns={turns}
+            learningObjectives={learningObjectives}
+          />
         </div>
 
-        <Card>
-          <CardHeader>
+        <Card className={`${heatmapShellClass} gap-0 py-0 ring-0`} style={heatmapShellStyle}>
+          <CardHeader className="border-b border-slate-200/70 px-5 pb-4 pt-5 sm:px-6">
             <CardTitle>Conversation Timeline</CardTitle>
+            <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-slate-600">
+              The path and the analysis are meant to be read together: the timeline shows how the encounter moved, and the section beneath explains why those shifts mattered.
+            </p>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-0">
             {session.started_at ? (
               <EscalationTimeline
                 sessionId={sessionId}
@@ -509,7 +557,7 @@ export default function ReviewPage() {
         <div className="space-y-6 pt-8 sm:space-y-8 sm:pt-10">
           <ScenarioHistoryCoachCard sessionId={sessionId} />
 
-          <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-amber-50 p-5 shadow-sm">
+          <div className={`${heatmapShellClass} p-5 sm:p-6`} style={heatmapShellStyle}>
             <div className="max-w-3xl">
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                 Next practice run
@@ -526,7 +574,7 @@ export default function ReviewPage() {
               size="lg"
               onClick={handleRetryScenario}
               disabled={retryingScenario}
-              className="mt-4"
+              className="mt-4 border border-[#efba7d] bg-[#f8a757] text-[#4b2d12] shadow-[0_18px_32px_-24px_rgba(169,96,24,0.65)] hover:bg-[#f3b26c]"
             >
               {retryingScenario ? "Starting another run..." : "Retry This Scenario"}
             </Button>
@@ -547,7 +595,7 @@ export default function ReviewPage() {
           <div
             role="tablist"
             aria-label="Review sections"
-            className="grid grid-cols-3 gap-1 rounded-lg border border-border/60 bg-muted/40 p-1"
+            className="grid grid-cols-3 gap-1 rounded-2xl border border-slate-200 bg-[#e9eff5] p-1.5 shadow-[0_18px_36px_-30px_rgba(15,23,42,0.18)]"
           >
             {reviewPanels.map((panel) => (
               <button
@@ -559,10 +607,10 @@ export default function ReviewPage() {
                 aria-selected={activePanel === panel.value}
                 onClick={() => setActivePanel(panel.value)}
                 className={cn(
-                  "rounded-md px-3 py-2 text-xs font-medium transition-colors sm:text-sm",
+                  "rounded-xl px-3 py-2.5 text-xs font-medium transition-colors sm:text-sm",
                   activePanel === panel.value
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
+                    ? "bg-slate-950 text-white shadow-[0_14px_30px_-22px_rgba(15,23,42,0.9)]"
+                    : "text-slate-500 hover:bg-white/80 hover:text-slate-900"
                 )}
               >
                 {panel.label}
@@ -575,8 +623,9 @@ export default function ReviewPage() {
               id="review-panel-transcript"
               role="tabpanel"
               aria-labelledby="review-tab-transcript"
+              className={`${heatmapShellClass} py-0 ring-0`} style={heatmapShellStyle}
             >
-              <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+              <CardHeader className="flex flex-col gap-3 border-b border-slate-200/70 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <div>
                   <CardTitle className="text-base">Transcript</CardTitle>
                   <p className="text-xs sm:text-sm text-muted-foreground">
@@ -627,6 +676,7 @@ export default function ReviewPage() {
               id="review-panel-events"
               role="tabpanel"
               aria-labelledby="review-tab-events"
+              className={`${heatmapShellClass} py-0 ring-0`} style={heatmapShellStyle}
             >
               <CardContent className="p-0 h-[60vh] sm:h-[500px]">
                 <EventLog
@@ -642,6 +692,7 @@ export default function ReviewPage() {
               id="review-panel-notes"
               role="tabpanel"
               aria-labelledby="review-tab-notes"
+              className={`${heatmapShellClass} py-0 ring-0`} style={heatmapShellStyle}
             >
               <CardContent className="p-0 h-[60vh] sm:h-[500px]">
                 <EducatorNotes
