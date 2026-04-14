@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { invalidateScenarioHistoryArtifact } from "@/lib/review/scenarioHistoryArtifactsService";
+import { createAdminClientIfAvailable, createClient } from "@/lib/supabase/server";
 
 export async function DELETE(
   _request: Request,
@@ -13,7 +14,7 @@ export async function DELETE(
   // Verify ownership
   const { data: session } = await supabase
     .from("simulation_sessions")
-    .select("trainee_id")
+    .select("trainee_id, scenario_id")
     .eq("id", id)
     .single();
   if (!session || session.trainee_id !== user.id) {
@@ -37,6 +38,15 @@ export async function DELETE(
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  try {
+    await invalidateScenarioHistoryArtifact(createAdminClientIfAvailable() ?? supabase, {
+      userId: user.id,
+      scenarioId: session.scenario_id,
+    });
+  } catch (invalidateError) {
+    console.error("[Scenario History] session delete invalidation failed", invalidateError);
   }
 
   return NextResponse.json({ success: true });

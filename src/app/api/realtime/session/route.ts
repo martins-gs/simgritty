@@ -75,6 +75,7 @@ export async function POST(request: Request) {
   }
 
   const data = await response.json();
+  const effectiveIceServers = data.session?.ice_servers ?? data.ice_servers ?? null;
   console.info(
     `[Realtime Session] OK — model=${REALTIME_MODEL}, ` +
     `has_client_secret=${!!data.value}, ` +
@@ -82,6 +83,7 @@ export async function POST(request: Request) {
   );
   return NextResponse.json({
     ...data,
+    ice_servers: effectiveIceServers,
     model: data.session?.model ?? REALTIME_MODEL,
     client_secret: data.value ? { value: data.value } : null,
   });

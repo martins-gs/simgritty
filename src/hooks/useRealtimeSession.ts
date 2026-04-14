@@ -3,6 +3,8 @@
 import { useRef, useCallback, useEffect } from "react";
 import {
   countSdpCandidates,
+  formatIceCandidateError,
+  isNonFatalIceCandidateError,
   mergeIceCandidatesIntoSdp,
   resolveIceServers,
   selectBestLocalSdp,
@@ -719,11 +721,13 @@ export function useRealtimeSession() {
       };
 
       nextPc.onicecandidateerror = (event) => {
-        console.error(
-          `[Realtime] iceCandidateError → address=${event.address || "unknown"} ` +
-          `port=${event.port || "unknown"} url=${event.url || "unknown"} ` +
-          `errorCode=${event.errorCode} errorText=${event.errorText}`
-        );
+        const details = formatIceCandidateError(event);
+        if (isNonFatalIceCandidateError(event)) {
+          console.warn(`[Realtime] Non-fatal ICE candidate lookup error → ${details}`);
+          return;
+        }
+
+        console.error(`[Realtime] iceCandidateError → ${details}`);
       };
 
       // Safety timeout: if the data channel hasn't opened within

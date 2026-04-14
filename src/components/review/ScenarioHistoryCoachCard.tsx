@@ -23,7 +23,6 @@ interface ScenarioHistoryCoachCardProps {
   sessionId: string;
 }
 
-const scenarioHistoryResultCache = new Map<string, ScenarioHistoryApiResponse>();
 const scenarioHistoryRequestCache = new Map<string, Promise<ScenarioHistoryApiResponse>>();
 const loadingCardVariants = [
   {
@@ -82,13 +81,6 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
     async function loadSummary() {
       setLoading(true);
 
-      const cachedResult = scenarioHistoryResultCache.get(sessionId);
-      if (cachedResult) {
-        setResponse(cachedResult);
-        setLoading(false);
-        return;
-      }
-
       let requestPromise: Promise<ScenarioHistoryApiResponse> | undefined = scenarioHistoryRequestCache.get(sessionId);
       if (!requestPromise) {
         requestPromise = (async () => {
@@ -96,6 +88,10 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
             const res = await fetch(`/api/sessions/${sessionId}/scenario-history`, {
               cache: "no-store",
             });
+            const source = res.headers.get("X-Scenario-History-Source");
+            if (process.env.NODE_ENV !== "production" && source) {
+              console.info(`[Scenario History] source=${source}`);
+            }
             const payload = await res.json().catch(() => null);
             if (!res.ok) {
               return buildUnavailableResponse(
@@ -127,9 +123,6 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
       }
 
       const result = await requestPromise;
-      if (result.debug.ok || result.summary) {
-        scenarioHistoryResultCache.set(sessionId, result);
-      }
       if (cancelled) return;
       setResponse(result);
       setLoading(false);
@@ -217,6 +210,9 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
         </p>
         <p className="mt-2 text-[11px] font-medium uppercase tracking-[0.16em] text-slate-500">
           {resolvedSummary.sessionLabel}
+        </p>
+        <p className="mt-3 max-w-2xl text-[12px] leading-relaxed text-slate-500">
+          Built from all of your non-deleted sessions in this scenario. On older review pages, this can include later runs.
         </p>
       </div>
 

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { reviewDebugSchema } from "@/lib/review/feedback";
 
+export const SCENARIO_HISTORY_ARTIFACTS_VERSION = 1;
+
 export interface ScenarioHistorySessionInput {
   id: string;
   createdAt: string;
@@ -36,5 +38,16 @@ export const scenarioHistoryApiResponseSchema = z.object({
   debug: reviewDebugSchema,
 });
 
+export const storedScenarioHistoryArtifactSchema = z.object({
+  version: z.number().int().min(1),
+  evidence_hash: z.string(),
+  generated_at: z.string(),
+  latest_session_id: z.string().nullable().default(null),
+  total_session_count: z.number().int().min(0),
+  summary: scenarioHistoryCoachResponseSchema.nullable().default(null),
+  debug: reviewDebugSchema,
+});
+
 export type ScenarioHistoryCoachResponse = z.infer<typeof scenarioHistoryCoachResponseSchema>;
 export type ScenarioHistoryApiResponse = z.infer<typeof scenarioHistoryApiResponseSchema>;
+export type StoredScenarioHistoryArtifact = z.infer<typeof storedScenarioHistoryArtifactSchema>;

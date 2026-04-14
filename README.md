@@ -146,7 +146,7 @@ Notes:
 - The Session Summary and Conversation Timeline are now LLM-first surfaces over a persisted review evidence ledger plus explicit debug metadata. Learner-facing deterministic fallback prose has been removed.
 - The Session Summary can add an `Overall Delivery` note when the session-level delivery aggregate shows a noticeable overall pattern or shift under pressure.
 - Timeline cards are generated through GPT-5.4 moment selection plus GPT-5.4 timeline rendering over the stored evidence ledger, not directly from score-ranked canned review moments.
-- `Review your progress` is still generated on demand from the user's prior sessions in the same scenario. It is intentionally allowed to be slower than summary/timeline and now surfaces debug metadata instead of learner-facing deterministic fallback prose.
+- `Review your progress` is now stored per learner+scenario and reused across that learner's review pages for the same scenario. It refreshes when scenario history changes, and older review pages can therefore show a panel that includes later runs.
 - Scoring still powers the bottom-of-page score block and evidence ledger, but the top-half review surfaces are no longer organised around direct score-picked coaching text.
 - Scenario milestones directly affect clinical-task scoring and review coaching. Free-text learning objectives do not change the numeric score directly, but they are still fed into the review summary as narrative objective guidance.
 - Sessions of 3-6 trainee turns still score as preliminary sessions, but extreme dimension scores are now softened to avoid hard zeros or hundreds from sparse evidence.

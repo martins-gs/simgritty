@@ -1608,7 +1608,7 @@ export default function SimulationPage() {
     }
     setEndingStatus({
       title: "Building your review",
-      detail: "We’re generating the timeline, summary, and coaching feedback from the session evidence. This usually takes 1-2 minutes on the portal.",
+      detail: "We’re generating the timeline, summary, and progress coaching from the session evidence. This usually takes 1-2 minutes on the portal.",
       stepLabel: "Generating feedback",
     });
     await precomputeReviewArtifacts();

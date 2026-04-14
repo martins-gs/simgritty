@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClientIfAvailable, createClient } from "@/lib/supabase/server";
 import { ensureSessionReviewArtifacts } from "@/lib/review/reviewArtifactsService";
+import { ensureScenarioHistoryArtifact } from "@/lib/review/scenarioHistoryArtifactsService";
 
 export async function POST(
   _request: Request,
@@ -16,21 +17,36 @@ export async function POST(
   }
 
   try {
+    const persistSupabase = createAdminClientIfAvailable() ?? authSupabase;
     const { artifacts } = await ensureSessionReviewArtifacts({
       sessionId: id,
       userId: user.id,
       authSupabase,
-      persistSupabase: createAdminClientIfAvailable() ?? authSupabase,
+      persistSupabase,
       surfaces: {
         summary: true,
         timeline: true,
       },
     });
 
+    let scenarioHistoryReady = false;
+    try {
+      const { artifact } = await ensureScenarioHistoryArtifact({
+        authSupabase,
+        userId: user.id,
+        persistSupabase,
+        sessionId: id,
+      });
+      scenarioHistoryReady = Boolean(artifact?.summary);
+    } catch (error) {
+      console.error("[Scenario History] precompute failed", error);
+    }
+
     return NextResponse.json(
       {
         summaryReady: Boolean(artifacts.summary),
         timelineReady: Boolean(artifacts.timeline),
+        scenarioHistoryReady,
       },
       {
         headers: {

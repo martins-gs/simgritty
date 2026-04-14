@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { invalidateScenarioHistoryArtifactsForScenario } from "@/lib/review/scenarioHistoryArtifactsService";
+import { createAdminClientIfAvailable, createClient } from "@/lib/supabase/server";
 import { parseRequestJson } from "@/lib/validation/http";
 import { scenarioUpsertBodySchema } from "@/lib/validation/schemas";
 
@@ -145,6 +146,15 @@ export async function PUT(
     console.log("[Scenarios PUT] milestones field undefined, skipping");
   }
 
+  try {
+    await invalidateScenarioHistoryArtifactsForScenario(
+      createAdminClientIfAvailable() ?? supabase,
+      id
+    );
+  } catch (invalidateError) {
+    console.error("[Scenario History] scenario update invalidation failed", invalidateError);
+  }
+
   return NextResponse.json({ id });
 }
 
@@ -199,6 +209,15 @@ export async function DELETE(
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  try {
+    await invalidateScenarioHistoryArtifactsForScenario(
+      createAdminClientIfAvailable() ?? supabase,
+      id
+    );
+  } catch (invalidateError) {
+    console.error("[Scenario History] scenario delete invalidation failed", invalidateError);
   }
 
   return NextResponse.json({ success: true });

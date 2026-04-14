@@ -11,7 +11,6 @@ export interface GatheredIceCandidate {
 const FALLBACK_STUN_ICE_SERVERS: RTCIceServer[] = [
   {
     urls: [
-      "stun:stun.cloudflare.com:3478",
       "stun:stun.l.google.com:19302",
     ],
   },
@@ -74,6 +73,22 @@ export function summarizeIceCandidate(candidate: RTCIceCandidate | RTCIceCandida
   const port = parts[5] ?? "unknown";
   const type = extractCandidateType(candidateLine);
   return `type=${type} protocol=${protocol} address=${address} port=${port}`;
+}
+
+export function formatIceCandidateError(
+  event: Pick<RTCPeerConnectionIceErrorEvent, "address" | "port" | "url" | "errorCode" | "errorText">
+) {
+  return (
+    `address=${event.address || "unknown"} ` +
+    `port=${event.port || "unknown"} url=${event.url || "unknown"} ` +
+    `errorCode=${event.errorCode} errorText=${event.errorText}`
+  );
+}
+
+export function isNonFatalIceCandidateError(
+  event: Pick<RTCPeerConnectionIceErrorEvent, "url" | "errorCode">
+) {
+  return event.errorCode === 701 && (event.url || "").startsWith("stun:");
 }
 
 export function summarizeSdpCandidates(sdp: string) {
