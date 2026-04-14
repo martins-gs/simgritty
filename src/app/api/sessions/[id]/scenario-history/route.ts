@@ -20,6 +20,7 @@ export async function GET(
       persistSupabase: createAdminClientIfAvailable() ?? authSupabase,
       sessionId: id,
       preferStored: true,
+      trigger: "review_page",
     });
 
     if (!artifact) {

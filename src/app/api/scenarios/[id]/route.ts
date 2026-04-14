@@ -149,7 +149,8 @@ export async function PUT(
   try {
     await invalidateScenarioHistoryArtifactsForScenario(
       createAdminClientIfAvailable() ?? supabase,
-      id
+      id,
+      "scenario_updated"
     );
   } catch (invalidateError) {
     console.error("[Scenario History] scenario update invalidation failed", invalidateError);
@@ -214,7 +215,8 @@ export async function DELETE(
   try {
     await invalidateScenarioHistoryArtifactsForScenario(
       createAdminClientIfAvailable() ?? supabase,
-      id
+      id,
+      "scenario_deleted"
     );
   } catch (invalidateError) {
     console.error("[Scenario History] scenario delete invalidation failed", invalidateError);

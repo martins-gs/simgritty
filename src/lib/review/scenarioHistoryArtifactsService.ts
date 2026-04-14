@@ -51,6 +51,46 @@ interface EnsureScenarioHistoryArtifactOptions {
   sessionId?: string;
   scenarioId?: string;
   preferStored?: boolean;
+  trigger?: string;
+}
+
+interface StoredScenarioHistoryArtifactLookup {
+  artifact: StoredScenarioHistoryArtifact | null;
+  found: boolean;
+  parsed: boolean;
+  tableAvailable: boolean;
+  rowCreatedAt: string | null;
+  rowUpdatedAt: string | null;
+  parseIssues: string[];
+}
+
+interface ScenarioHistoryLogContext {
+  trigger: string;
+  userId: string;
+  scenarioId: string;
+  sessionId: string | null;
+  preferStored: boolean;
+  persistMode: "admin" | "auth";
+}
+
+function logScenarioHistory(
+  level: "info" | "warn" | "error",
+  event: string,
+  details: object,
+  error?: unknown
+) {
+  const message = `[Scenario History] ${event} ${JSON.stringify(details)}`;
+  if (level === "error") {
+    console.error(message, error ?? "");
+    return;
+  }
+
+  if (level === "warn") {
+    console.warn(message, error ?? "");
+    return;
+  }
+
+  console.info(message);
 }
 
 function truncatePromptText(value: string | null | undefined, maxLength = 180) {
@@ -136,7 +176,89 @@ function buildScenarioHistoryEvidenceHash(context: ScenarioHistoryContext) {
 
 function parseStoredScenarioHistoryArtifact(value: unknown) {
   const parsed = storedScenarioHistoryArtifactSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
+  return {
+    artifact: parsed.success ? parsed.data : null,
+    parseIssues: parsed.success
+      ? []
+      : parsed.error.issues.map((issue) => `${issue.path.join(".") || "root"}:${issue.message}`).slice(0, 8),
+  };
+}
+
+function buildScenarioHistoryLogContext(
+  options: EnsureScenarioHistoryArtifactOptions,
+  scenarioId: string
+): ScenarioHistoryLogContext {
+  return {
+    trigger: options.trigger ?? "unspecified",
+    userId: options.userId,
+    scenarioId,
+    sessionId: options.sessionId ?? null,
+    preferStored: Boolean(options.preferStored),
+    persistMode: options.persistSupabase && options.persistSupabase !== options.authSupabase ? "admin" : "auth",
+  };
+}
+
+function buildStoredArtifactLogDetails(lookup: StoredScenarioHistoryArtifactLookup) {
+  return {
+    storedFound: lookup.found,
+    storedParsed: lookup.parsed,
+    tableAvailable: lookup.tableAvailable,
+    rowCreatedAt: lookup.rowCreatedAt,
+    rowUpdatedAt: lookup.rowUpdatedAt,
+    parseIssues: lookup.parseIssues,
+    storedVersion: lookup.artifact?.version ?? null,
+    storedGeneratedAt: lookup.artifact?.generated_at ?? null,
+    storedLatestSessionId: lookup.artifact?.latest_session_id ?? null,
+    storedTotalSessionCount: lookup.artifact?.total_session_count ?? null,
+    storedSummaryPresent: Boolean(lookup.artifact?.summary),
+    storedDebugOk: lookup.artifact?.debug.ok ?? null,
+    storedPromptVersion: lookup.artifact?.debug.promptVersion ?? null,
+    storedSchemaVersion: lookup.artifact?.debug.schemaVersion ?? null,
+    storedEvidenceHash: lookup.artifact?.evidence_hash ?? null,
+  };
+}
+
+function getStoredArtifactUsabilityReasons(lookup: StoredScenarioHistoryArtifactLookup) {
+  if (!lookup.found) {
+    return lookup.tableAvailable ? ["stored_row_missing"] : ["stored_table_unavailable"];
+  }
+
+  if (!lookup.parsed || !lookup.artifact) {
+    return ["stored_row_invalid_schema"];
+  }
+
+  const reasons: string[] = [];
+
+  if (lookup.artifact.version !== SCENARIO_HISTORY_ARTIFACTS_VERSION) {
+    reasons.push("stored_version_mismatch");
+  }
+  if (!lookup.artifact.summary) {
+    reasons.push("stored_summary_missing");
+  }
+  if (!lookup.artifact.debug.ok) {
+    reasons.push("stored_debug_not_ok");
+  }
+  if (lookup.artifact.debug.promptVersion !== REVIEW_HISTORY_PROMPT_VERSION) {
+    reasons.push("stored_prompt_version_mismatch");
+  }
+  if (lookup.artifact.debug.schemaVersion !== REVIEW_HISTORY_SCHEMA_VERSION) {
+    reasons.push("stored_schema_version_mismatch");
+  }
+
+  return reasons;
+}
+
+function getStoredArtifactGenerationReasons(
+  lookup: StoredScenarioHistoryArtifactLookup,
+  evidenceHash: string
+) {
+  const reasons = getStoredArtifactUsabilityReasons(lookup);
+
+  if (lookup.artifact?.evidence_hash && lookup.artifact.evidence_hash !== evidenceHash) {
+    reasons.push("stored_evidence_hash_mismatch");
+  }
+
+  return reasons.length > 0 ? reasons : ["stored_reuse_check_failed"];
 }
 
 async function fetchStoredScenarioHistoryArtifact(
@@ -148,7 +270,7 @@ async function fetchStoredScenarioHistoryArtifact(
 ) {
   const { data: storedRow, error: storedError } = await supabase
     .from("scenario_history_artifacts")
-    .select("artifact")
+    .select("artifact, created_at, updated_at")
     .eq("trainee_id", options.userId)
     .eq("scenario_id", options.scenarioId)
     .maybeSingle();
@@ -157,10 +279,39 @@ async function fetchStoredScenarioHistoryArtifact(
     if (!isMissingScenarioHistoryArtifactsTable(storedError)) {
       throw new Error(storedError.message);
     }
-    return null;
+    return {
+      artifact: null,
+      found: false,
+      parsed: false,
+      tableAvailable: false,
+      rowCreatedAt: null,
+      rowUpdatedAt: null,
+      parseIssues: [],
+    } satisfies StoredScenarioHistoryArtifactLookup;
   }
 
-  return parseStoredScenarioHistoryArtifact(storedRow?.artifact);
+  if (!storedRow) {
+    return {
+      artifact: null,
+      found: false,
+      parsed: false,
+      tableAvailable: true,
+      rowCreatedAt: null,
+      rowUpdatedAt: null,
+      parseIssues: [],
+    } satisfies StoredScenarioHistoryArtifactLookup;
+  }
+
+  const parsed = parseStoredScenarioHistoryArtifact(storedRow.artifact);
+  return {
+    artifact: parsed.artifact,
+    found: true,
+    parsed: Boolean(parsed.artifact),
+    tableAvailable: true,
+    rowCreatedAt: storedRow.created_at ?? null,
+    rowUpdatedAt: storedRow.updated_at ?? null,
+    parseIssues: parsed.parseIssues,
+  } satisfies StoredScenarioHistoryArtifactLookup;
 }
 
 function isStoredScenarioHistoryArtifactUsable(
@@ -341,6 +492,7 @@ export async function invalidateScenarioHistoryArtifact(
   options: {
     userId: string;
     scenarioId: string;
+    reason?: string;
   }
 ) {
   const { error } = await supabase
@@ -352,11 +504,19 @@ export async function invalidateScenarioHistoryArtifact(
   if (error && !isMissingScenarioHistoryArtifactsTable(error)) {
     throw new Error(error.message);
   }
+
+  logScenarioHistory("info", "invalidate.user_scenario", {
+    userId: options.userId,
+    scenarioId: options.scenarioId,
+    reason: options.reason ?? "unspecified",
+    tableAvailable: !error,
+  });
 }
 
 export async function invalidateScenarioHistoryArtifactsForScenario(
   supabase: SupabaseClient,
-  scenarioId: string
+  scenarioId: string,
+  reason = "unspecified"
 ) {
   const { error } = await supabase
     .from("scenario_history_artifacts")
@@ -366,26 +526,54 @@ export async function invalidateScenarioHistoryArtifactsForScenario(
   if (error && !isMissingScenarioHistoryArtifactsTable(error)) {
     throw new Error(error.message);
   }
+
+  logScenarioHistory("info", "invalidate.scenario", {
+    scenarioId,
+    reason,
+    tableAvailable: !error,
+  });
 }
 
 export async function ensureScenarioHistoryArtifact(
   options: EnsureScenarioHistoryArtifactOptions
 ) {
+  const startedAt = Date.now();
   const persistClient = options.persistSupabase ?? options.authSupabase;
   const scenarioId = await resolveScenarioHistoryTarget(options);
-  const stored = await fetchStoredScenarioHistoryArtifact(persistClient, {
+  const logContext = buildScenarioHistoryLogContext(options, scenarioId);
+
+  logScenarioHistory("info", "ensure.start", logContext);
+
+  const storedLookup = await fetchStoredScenarioHistoryArtifact(persistClient, {
     userId: options.userId,
     scenarioId,
+  });
+  const stored = storedLookup.artifact;
+
+  logScenarioHistory("info", "stored.lookup", {
+    ...logContext,
+    ...buildStoredArtifactLogDetails(storedLookup),
   });
 
   if (options.preferStored) {
     if (isStoredScenarioHistoryArtifactUsable(stored)) {
+      logScenarioHistory("info", "ensure.return_stored_preferred", {
+        ...logContext,
+        durationMs: Date.now() - startedAt,
+        ...buildStoredArtifactLogDetails(storedLookup),
+      });
       return {
         scenarioId,
         artifact: stored,
         source: "stored" as const,
       };
     }
+
+    logScenarioHistory("info", "ensure.preferred_storage_miss", {
+      ...logContext,
+      reasons: getStoredArtifactUsabilityReasons(storedLookup),
+      ...buildStoredArtifactLogDetails(storedLookup),
+    });
   }
 
   const context = await loadScenarioHistoryContext({
@@ -393,10 +581,24 @@ export async function ensureScenarioHistoryArtifact(
     scenarioId,
   });
 
+  logScenarioHistory("info", "context.loaded", {
+    ...logContext,
+    totalSessionCount: context.totalSessionCount,
+    startedSessionCount: context.sessions.length,
+    latestSessionId: context.latestSessionId,
+  });
+
   if (context.sessions.length === 0) {
     await invalidateScenarioHistoryArtifact(persistClient, {
       userId: options.userId,
       scenarioId: context.scenarioId,
+      reason: "no_started_sessions",
+    });
+
+    logScenarioHistory("warn", "ensure.no_started_sessions", {
+      ...logContext,
+      durationMs: Date.now() - startedAt,
+      totalSessionCount: context.totalSessionCount,
     });
 
     return {
@@ -419,6 +621,12 @@ export async function ensureScenarioHistoryArtifact(
   );
 
   if (storedReusable && stored) {
+    logScenarioHistory("info", "ensure.return_stored_hash_match", {
+      ...logContext,
+      durationMs: Date.now() - startedAt,
+      evidenceHash,
+      ...buildStoredArtifactLogDetails(storedLookup),
+    });
     return {
       scenarioId: context.scenarioId,
       artifact: stored,
@@ -426,10 +634,32 @@ export async function ensureScenarioHistoryArtifact(
     };
   }
 
+  const generationReasons = getStoredArtifactGenerationReasons(storedLookup, evidenceHash);
+  logScenarioHistory("info", "generate.start", {
+    ...logContext,
+    evidenceHash,
+    totalSessionCount: context.totalSessionCount,
+    startedSessionCount: context.sessions.length,
+    latestSessionId: context.latestSessionId,
+    reasons: generationReasons,
+    ...buildStoredArtifactLogDetails(storedLookup),
+  });
+
+  const generationStartedAt = Date.now();
   const generated = await generateScenarioHistoryCoachSummary({
     currentSessionId: context.latestSessionId ?? context.sessions[context.sessions.length - 1]?.id ?? context.sessions[0].id,
     totalSessionCount: context.totalSessionCount,
     sessions: context.sessions,
+  });
+
+  logScenarioHistory("info", "generate.finish", {
+    ...logContext,
+    durationMs: Date.now() - generationStartedAt,
+    summaryPresent: Boolean(generated.summary),
+    failureClass: generated.meta.failure_class,
+    validatorFailures: generated.meta.validator_failures,
+    promptVersion: generated.meta.prompt_version,
+    schemaVersion: generated.meta.schema_version,
   });
 
   const artifact = storedScenarioHistoryArtifactSchema.parse({
@@ -463,7 +693,31 @@ export async function ensureScenarioHistoryArtifact(
     );
 
   if (persistError && !isMissingScenarioHistoryArtifactsTable(persistError)) {
+    logScenarioHistory("error", "persist.failed", {
+      ...logContext,
+      evidenceHash,
+      summaryPresent: Boolean(artifact.summary),
+    }, persistError);
     throw new Error(persistError.message);
+  }
+
+  if (persistError) {
+    logScenarioHistory("warn", "persist.skipped_missing_table", {
+      ...logContext,
+      evidenceHash,
+      summaryPresent: Boolean(artifact.summary),
+    });
+  } else {
+    logScenarioHistory("info", "persist.success", {
+      ...logContext,
+      durationMs: Date.now() - startedAt,
+      evidenceHash,
+      generatedAt: artifact.generated_at,
+      latestSessionId: artifact.latest_session_id,
+      totalSessionCount: artifact.total_session_count,
+      summaryPresent: Boolean(artifact.summary),
+      debugOk: artifact.debug.ok,
+    });
   }
 
   return {

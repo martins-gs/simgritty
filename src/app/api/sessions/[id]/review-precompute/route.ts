@@ -36,6 +36,7 @@ export async function POST(
         userId: user.id,
         persistSupabase,
         sessionId: id,
+        trigger: "review_precompute",
       });
       scenarioHistoryReady = Boolean(artifact?.summary);
     } catch (error) {

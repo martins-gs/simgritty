@@ -44,6 +44,7 @@ export async function DELETE(
     await invalidateScenarioHistoryArtifact(createAdminClientIfAvailable() ?? supabase, {
       userId: user.id,
       scenarioId: session.scenario_id,
+      reason: "session_deleted",
     });
   } catch (invalidateError) {
     console.error("[Scenario History] session delete invalidation failed", invalidateError);

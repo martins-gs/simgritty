@@ -88,10 +88,6 @@ export function ScenarioHistoryCoachCard({ sessionId }: ScenarioHistoryCoachCard
             const res = await fetch(`/api/sessions/${sessionId}/scenario-history`, {
               cache: "no-store",
             });
-            const source = res.headers.get("X-Scenario-History-Source");
-            if (process.env.NODE_ENV !== "production" && source) {
-              console.info(`[Scenario History] source=${source}`);
-            }
             const payload = await res.json().catch(() => null);
             if (!res.ok) {
               return buildUnavailableResponse(
