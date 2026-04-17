@@ -1,6 +1,6 @@
 # PROLOG Architecture Overview
 
-Last verified against the codebase on 2026-04-12.
+Last verified against the codebase on 2026-04-17.
 
 This document reflects the architecture currently implemented in the repository. It is an implementation reference, not a roadmap. The separate `docs/elevenlabs-plan.md` file is proposal-only.
 
@@ -254,7 +254,7 @@ The current review flow computes score and evidence on demand from transcript tu
 - **Behavioural**: willingness_to_listen, sarcasm, volatility, boundary_respect, interruption_likelihood
 - **Cognitive / contextual**: coherence, repetition, entitlement, bias_intensity, escalation_tendency
 
-Each numeric trait has a 0–10 range with human-readable low/high labels. Bias category is configured separately (`none`, `gender`, `racial`, `age`, `accent`, `class_status`, `role_status`, `mixed`).
+Each numeric trait has a 0–10 range with human-readable low/high labels. Bias categories are stored separately as `none`, a single value, or a comma-separated list. The current scenario editor exposes a multi-select for `gender`, `racial`, `age`, `accent`, `class_status`, and `role_status`; the legacy `mixed` value still exists in the shared type list but is not exposed as its own UI option.
 
 `src/lib/engine/archetypePresets.ts` provides five ready-made scenario configurations:
 
@@ -272,7 +272,7 @@ Supabase stores:
 
 - authored scenarios (`scenario_templates`, `scenario_traits`, `scenario_voice_config`, `escalation_rules`, `scenario_milestones`)
 - live and completed sessions (`simulation_sessions` with frozen `scenario_snapshot`, `recording_path`, `recording_started_at`, legacy `review_summary`, and persisted `review_artifacts`)
-- session audio recordings (Supabase Storage bucket `simulation-audio`, private, one `.webm` file per session)
+- session audio recordings (Supabase Storage bucket `simulation-audio`, private, one browser-recorded file per session, typically `.webm` and `.mp4` on browsers that record that way)
 - transcript turns (`transcript_turns` with per-turn snapshots: `classifier_result`, `trainee_delivery_analysis`, `trigger_type`, `state_after`, `patient_voice_profile_after`, `patient_prompt_after`)
 - simulation state events (`simulation_state_events` — event types: `session_started`, `session_ended`, `escalation_change`, `de_escalation_change`, `ceiling_reached`, `trainee_exit`, `classification_result`, `clinician_audio`, `prompt_update`, `error`; both trainee clip-delivery fallback events and session-level delivery events are stored as `classification_result` with `__event_kind: "trainee_audio_delivery"` or `__event_kind: "session_audio_delivery"`)
 - optional legacy scoring tables (`session_scores`, `session_score_evidence`) that are not used by the current review flow
@@ -353,6 +353,8 @@ PROLOG uses **email OTP (magic link)** via Supabase Auth. Access is restricted t
 
 The confirm page is intentionally client-side rather than a server-side route handler. Email clients (including Outlook's reading pane) make background GET requests to links in emails; a server-side handler would consume the one-time token before the user ever clicked. With a client-side page the token is only consumed when JavaScript runs in a real browser and the user explicitly clicks the button.
 
+The repo also still includes `GET /auth/callback` as a server-side code-exchange helper route, but the current sign-in entry point does not send users there by default.
+
 There is no self-service password-based signup. Supabase creates a new user record automatically on first OTP sign-in for any valid `@nhs.scot` address.
 
 ### Authorisation
@@ -362,6 +364,7 @@ Three user roles exist: **admin**, **educator**, and **trainee**, stored on `use
 Current enforcement:
 
 - **Scenario creation** (`POST /api/scenarios`): restricted to admin and educator roles.
+- **Educator analytics** (`GET /api/analytics/educator` and `/analytics`): restricted to admin and educator roles.
 - **Org settings modification** (`PUT /api/org-settings`): restricted to admin role.
 - **Session deletion** (`DELETE /api/sessions/:id/delete`): restricted to the session's `trainee_id` (owner only).
 - **Scenario deletion** (`DELETE /api/scenarios/:id`): restricted to the scenario's `created_by` (owner only).
@@ -391,12 +394,18 @@ Runtime enforcement is mixed:
 
 `user_profiles` stores `display_name` and `email` (added via migration, backfilled from `auth.users`, and kept in sync by the `handle_new_user` trigger). The dashboard displays the user's name as a greeting, session lists show the trainee's full identity as "Display Name (email)", and the scenario edit page shows the creator's name. A lightweight profile API (`GET /api/profile`) returns the current user's profile for client-side identity checks.
 
-## 11. Dashboard
+## 11. Dashboard And Analytics
 
 The dashboard (`src/app/dashboard/page.tsx`) currently has a welcome header plus two main content sections:
 
 - **Scenarios available to you**: a tinted panel (`bg-muted/40`) containing compact fixed-width cards (220px) for published scenarios, each linking directly to the briefing page. Cards show difficulty, title, and setting.
 - **Recent sessions**: the most recent sessions across all users, loaded from `/api/sessions/recent?limit=20` with offset pagination and a `Load older sessions` CTA. Rows show scenario title, trainee identity, session date/time (preferring `started_at`, then `ended_at`, then `created_at`), peak escalation level, exit status, and an owner-only delete button.
+
+### Educator Analytics
+
+The analytics page (`src/app/analytics/page.tsx`) is a separate admin/educator-only surface mounted at `/analytics`. It loads from `GET /api/analytics/educator` with filters for learner, scenario, date range, and attempt view (`all`, `first`, `repeat`).
+
+The current analytics report is built primarily from persisted `review_artifacts`, frozen scenario snapshots, and `session_score_evidence` rows when those rows are available. The UI renders headline cards, a ranked priority table, stage/distribution views, and drill-down summaries for teaching themes. There is no separate analytics precompute job in this repository.
 
 ## 12. Landing Page
 

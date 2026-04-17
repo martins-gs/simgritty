@@ -1,15 +1,16 @@
 # PROLOG
 
-Verified against this repository on 2026-04-12.
+Verified against this repository on 2026-04-17.
 
 PROLOG is a Next.js 16 App Router application for NHS clinical communication training. Trainees run real-time voice simulations with an AI patient or relative, educators author scenarios, and completed sessions can be reviewed with transcript, scoring, reflections, notes, and restart-from-turn forking.
 
 ## Current State
 
 - Real-time voice simulation using the OpenAI Realtime API over WebRTC
-- Scenario authoring with 14 numeric trait dials, a separate bias-category selector, voice settings, escalation rules, milestones, and scoring weights
+- Scenario authoring with 14 numeric trait dials, a bias-category multi-select, voice settings including trainee pause allowance, escalation rules, milestones, and scoring weights
 - AI clinician takeover with its own clinician voice path and HTTP TTS fallback
 - LLM-first review workflow with a saved reflection check-in, persisted `review_artifacts`, GPT-5.4 summary and timeline generation, session-level delivery synthesis from the mixed recording, per-scenario progress review, explicit debug states when review generation fails, retry CTA, a bottom-of-page score block or short-session placeholder, audio playback, and session forking
+- Admin/educator analytics with user, scenario, date, and attempt filters plus teaching-priority summaries
 - Supabase-backed auth, session persistence, transcript/event storage, paginated recent sessions, event-backed transcript recovery for legacy trainee audio delivery, session-level delivery events, and mixed session-audio uploads
 
 ## Documentation Map
@@ -110,7 +111,10 @@ Without that base schema, the repo is not enough on its own to stand up a blank 
 | --- | --- |
 | `/` | Marketing and product overview |
 | `/auth/login` | Magic-link sign-in for `@nhs.scot` addresses |
+| `/auth/signup` | Redirects to `/auth/login` |
+| `/auth/confirm` | Client-side confirmation page that completes magic-link sign-in |
 | `/dashboard` | Published scenarios and paginated recent sessions |
+| `/analytics` | Admin/educator analytics dashboard |
 | `/scenarios` | Scenario list, duplication, archive, edit entry points |
 | `/scenarios/new` | New scenario creation |
 | `/scenarios/[id]` | Scenario editor |
@@ -122,13 +126,17 @@ Without that base schema, the repo is not enough on its own to stand up a blank 
 ### API Groups
 
 - Realtime and voice: `/api/realtime/session`, `/api/classify`, `/api/deescalate`, `/api/voice-profile/patient`, `/api/voice-profile/trainee`, `/api/analysis/trainee-delivery`, `/api/tts`
+- Analytics: `/api/analytics/educator`
 - Scenarios: `/api/scenarios`, `/api/scenarios/[id]`, `/api/scenarios/[id]/publish`
 - Sessions: `/api/sessions`, `/api/sessions/recent`, `/api/sessions/[id]`, `/api/sessions/[id]/start`, `/api/sessions/[id]/end`, `/api/sessions/[id]/delete`, `/api/sessions/[id]/fork`, `/api/sessions/[id]/transcript`, `/api/sessions/[id]/events`, `/api/sessions/[id]/educator-notes`, `/api/sessions/[id]/reflection`, `/api/sessions/[id]/review-summary`, `/api/sessions/[id]/timeline-feedback`, `/api/sessions/[id]/scenario-history`, `/api/sessions/[id]/session-delivery`, `/api/sessions/[id]/review-precompute`, `/api/sessions/[id]/audio`
 - Identity and governance: `/api/profile`, `/api/org-settings`
 
 Notes:
 
+- `GET /auth/callback` remains checked in as a server-side code-exchange helper, but the current login flow intentionally sends email links to `/auth/confirm` so background email-client GETs do not consume one-time tokens before the user clicks.
+- `GET /api/analytics/educator` powers `/analytics` and is restricted to admin and educator roles.
 - `POST /api/voice-profile/trainee` and `PATCH /api/sessions/[id]/transcript` are internal app endpoints used by the live simulation flow.
+- `POST /api/analysis/trainee-delivery` is still checked in for clip-level audio analysis, but the current UI does not call it.
 - `GET /api/sessions/recent` supports `limit` and `offset`, and the dashboard now loads recent sessions 20 at a time with a `Load older sessions` CTA.
 - `POST /api/sessions/[id]/session-delivery` is the current full-session delivery-analysis route used after upload of the mixed recording.
 - `POST /api/sessions/[id]/review-precompute` prebuilds summary and timeline artifacts immediately after session end.
@@ -155,6 +163,7 @@ Notes:
 - `allow_discriminatory_content` and `require_consent_gate` are stored in `org_settings`, but they are not yet used to disable discriminatory scenarios or bypass the consent gate. The briefing flow currently always shows the consent gate.
 - Access is limited to `@nhs.scot` email addresses through Supabase magic-link auth.
 - Read access to scenarios, sessions, transcript data, and review data is intentionally broad for authenticated users in the current phase. Full RBAC is not yet implemented.
+- `/analytics` is visible in navigation only for admin and educator roles.
 
 ## Project Layout
 

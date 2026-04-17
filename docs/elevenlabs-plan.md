@@ -1,6 +1,6 @@
 # ElevenLabs TTS Integration — Feasibility & Implementation Plan
 
-> Status: proposal only. As of 2026-04-12, the current codebase does not use ElevenLabs in the runtime, settings UI, or environment configuration.
+> Status: proposal only. As of 2026-04-17, the current codebase does not use ElevenLabs in the runtime, settings UI, scenario authoring UI, or environment configuration.
 >
 > Treat this as a design note, not a description of shipped functionality. Re-check ElevenLabs' current docs, pricing, latency, and model capabilities before implementation.
 
@@ -8,7 +8,7 @@
 
 This document describes a **feasibility assessment and implementation proposal** for adding ElevenLabs to the clinician voice pipeline. It is not active product behaviour.
 
-At the time of writing, the patient voice pipeline remains on OpenAI Realtime, clinician voice remains OpenAI Realtime plus OpenAI TTS fallback, and structured output generation stays on OpenAI.
+At the time of writing, the patient voice pipeline remains on OpenAI Realtime, clinician voice remains OpenAI Realtime plus OpenAI TTS fallback, structured output generation stays on OpenAI, and the scenario editor still exposes only the fixed OpenAI voice list from `VoiceConfigPanel.tsx`.
 
 ---
 

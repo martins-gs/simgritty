@@ -1,5 +1,7 @@
 # Prompt Bundle For External Review
 
+Verified against this repository on 2026-04-17.
+
 This document extracts the main prompt instructions and prompt-input shapes used by the simulation and review system so they can be given to another LLM for critique.
 
 It includes:
@@ -16,7 +18,7 @@ It does not include every helper function or every schema field, but it captures
 - Live patient voice profile: `gpt-5.4-mini` via Responses API with structured outputs
 - Live inferred trainee voice profile: `gpt-5.4-mini` via Responses API with structured outputs (text/context-derived, not live audio)
 - Live clinician turn generation: `gpt-5.4-mini` via Responses API with structured outputs
-- Legacy clip-level trainee audio analysis route: `gpt-audio` via Chat Completions + `gpt-5.4-mini` structuring
+- Unused internal clip-level trainee audio analysis route: `gpt-audio` via Chat Completions + `gpt-5.4-mini` structuring
 - Session-level delivery analysis first pass: `gpt-audio` via Chat Completions
 - Session-level delivery structuring pass: `gpt-5.4` via Responses API with structured outputs
 - Review moment selection: `gpt-5.4` via Responses API with structured outputs
@@ -272,6 +274,8 @@ Use concrete wording that can be dropped directly into a speech model prompt.
 Use British English.
 Keep any discriminatory colouring within the authored bias categories only.
 Do not clean a highly escalated delivery up into polite neutrality.
+Do not rely on angry wording alone. Make the vocal behaviour itself audible through volume, attack, pacing, breath, strain, clippedness, contempt, or emotional leakage when the state justifies it.
+If escalation, anger, or frustration rises, the next-turn profile must sound noticeably different from a calmer turn.
 ```
 
 Dynamic prompt template:
@@ -317,19 +321,20 @@ Base voice config:
 Recent turns:
 {recentTurns}
 
-Latest clinician delivery profile, if the last turn came from the AI clinician:
-{latestClinicianVoiceProfile}
+Latest delivery profile for the most recent speaker turn:
+{latestSpeakerVoiceProfile}
 
 Create a voice profile for the patient's next spoken turn only.
 
 Use all available inputs together:
 - the patient's current numeric state
 - the recent dialogue
-- the latest clinician delivery profile, if provided, because the patient may react differently to the same words when they are delivered more softly, more firmly, or more urgently.
+- the latest speaker delivery profile, if provided, because the patient may react differently to the same words when they are delivered more softly, more firmly, more sarcastically, or more urgently.
 
 Additional delivery guidance:
 - {bias guidance}
 - {escalation-dependent delivery guidance}
+- If the most recent delivery profile suggests the trainee sounded dismissive, sarcastic, cold, or defensive, allow that to harden the next-turn voice profile even if the patient's wording stays brief.
 ```
 
 ### 2. Live Inferred Trainee Voice Profile
